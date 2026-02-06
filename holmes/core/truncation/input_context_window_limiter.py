@@ -57,12 +57,25 @@ def check_compaction_needed(
     return None
 
 
+def _extract_text_from_multimodal_content(content: list) -> str:
+    """Extract text from a multimodal content list, discarding images."""
+    text_parts = []
+    for item in content:
+        if isinstance(item, dict) and item.get("type") == "text":
+            text_parts.append(item.get("text", ""))
+    return "\n".join(text_parts)
+
+
 def _truncate_tool_message(
     msg: dict, allocated_space: int, needed_space: int
 ) -> TruncationMetadata:
     msg_content = msg["content"]
     tool_call_id = msg["tool_call_id"]
     tool_name = msg["name"]
+
+    # For multimodal content (list), strip images and keep only text
+    if isinstance(msg_content, list):
+        msg_content = _extract_text_from_multimodal_content(msg_content)
 
     # Ensure the indicator fits in the allocated space
     if allocated_space > len(TRUNCATION_NOTICE):
