@@ -1,23 +1,27 @@
-user_prompt: "Look at the 'Fulfillment Service Dashboard' in Grafana. Visually render the dashboard or its panels and describe what you see. What panels exist, what does the Service Health panel say, and what is the deployment ID shown?"
+# 12 panels using predictable_csv_wave: 10 show flat/normal data, 2 show dramatic spikes.
+# Panel 7 "GraphQL Resolver Time": values spike from ~10 to ~85-92
+# Panel 10 "Job Scheduler Lag": values spike from ~12 to ~80-90
+# The LLM must visually render and identify which panels have anomalies.
+
+user_prompt: "Look at the 'Platform Services Overview' dashboard in Grafana. It has 12 panels monitoring different services. Visually render the dashboard and its panels, then identify which panels show anomalous spikes or unusual patterns compared to the others."
 
 include_tool_calls: true
 
 expected_output:
-  - "Must call grafana_render_panel or grafana_render_dashboard tool to visually render the dashboard"
-  - "Must mention the 'Service Health' panel"
-  - "Must report the deployment ID: deploy-8x3m9k"
-  - "Must mention 'Order Processing Latency' or 'Inventory Sync Status' panel"
+  - "Must call grafana_render_panel or grafana_render_dashboard tool to visually inspect the panels"
+  - "Must identify 'GraphQL Resolver Time' as one of the panels showing anomalous spikes or unusual behavior"
+  - "Must identify 'Job Scheduler Lag' as one of the panels showing anomalous spikes or unusual behavior"
 
 before_test: |
   set -e
-  kubectl create namespace app-212 --save-config --dry-run=client -o yaml | kubectl apply -f - || true
-  kubectl apply -f ../../shared/grafana-with-renderer.yaml -n app-212
+  kubectl create namespace app-213 --save-config --dry-run=client -o yaml | kubectl apply -f - || true
+  kubectl apply -f ../../shared/grafana-with-renderer.yaml -n app-213
 
   # Wait for Grafana pod to be ready (both containers: grafana + renderer)
   echo "⏳ Waiting for Grafana pod to be ready..."
   POD_READY=false
   for i in {1..90}; do
-    if kubectl wait --for=condition=ready pod -l app=grafana -n app-212 --timeout=5s 2>/dev/null; then
+    if kubectl wait --for=condition=ready pod -l app=grafana -n app-213 --timeout=5s 2>/dev/null; then
       echo "✅ Grafana pod is ready (both containers)!"
       POD_READY=true
       break
@@ -29,8 +33,8 @@ before_test: |
 
   if [ "$POD_READY" = false ]; then
     echo "❌ Grafana pod failed to become ready after 90 seconds"
-    kubectl get pods -n app-212
-    kubectl describe pod -l app=grafana -n app-212
+    kubectl get pods -n app-213
+    kubectl describe pod -l app=grafana -n app-213
     exit 1
   fi
 
@@ -38,7 +42,7 @@ before_test: |
   echo "⏳ Verifying Grafana API..."
   API_READY=false
   for i in {1..30}; do
-    if kubectl exec -n app-212 deployment/grafana -c grafana -- wget -q -O- http://localhost:3000/api/health 2>/dev/null | grep -q "ok"; then
+    if kubectl exec -n app-213 deployment/grafana -c grafana -- wget -q -O- http://localhost:3000/api/health 2>/dev/null | grep -q "ok"; then
       echo "✅ Grafana API is working!"
       API_READY=true
       break
@@ -50,7 +54,7 @@ before_test: |
 
   if [ "$API_READY" = false ]; then
     echo "❌ Grafana API failed verification"
-    kubectl logs -l app=grafana -n app-212 -c grafana --tail=20
+    kubectl logs -l app=grafana -n app-213 -c grafana --tail=20
     exit 1
   fi
 
@@ -58,7 +62,7 @@ before_test: |
   echo "⏳ Verifying Grafana Image Renderer..."
   RENDERER_READY=false
   for i in {1..30}; do
-    RENDER_RESP=$(kubectl exec -n app-212 deployment/grafana -c grafana -- wget -q -O- http://localhost:3000/api/rendering/version 2>/dev/null || true)
+    RENDER_RESP=$(kubectl exec -n app-213 deployment/grafana -c grafana -- wget -q -O- http://localhost:3000/api/rendering/version 2>/dev/null || true)
     if echo "$RENDER_RESP" | grep -q "version"; then
       echo "✅ Grafana Image Renderer is available: $RENDER_RESP"
       RENDERER_READY=true
@@ -71,7 +75,7 @@ before_test: |
 
   if [ "$RENDERER_READY" = false ]; then
     echo "❌ Grafana Image Renderer not available after 60 seconds"
-    kubectl logs -l app=grafana -n app-212 -c renderer --tail=20
+    kubectl logs -l app=grafana -n app-213 -c renderer --tail=20
     exit 1
   fi
 
@@ -79,7 +83,7 @@ before_test: |
   echo "⏳ Adding TestData datasource..."
   DS_CREATED=false
   for i in {1..10}; do
-    DS_RESULT=$(kubectl exec -n app-212 deployment/grafana -c grafana -- \
+    DS_RESULT=$(kubectl exec -n app-213 deployment/grafana -c grafana -- \
       wget -q -O- --post-data='{"name":"TestData","type":"testdata","uid":"testdata-ds","access":"proxy"}' \
       --header="Content-Type: application/json" \
       http://localhost:3000/api/datasources 2>/dev/null || true)
@@ -102,11 +106,11 @@ before_test: |
     exit 1
   fi
 
-  # Create the dashboard
-  echo "⏳ Creating Fulfillment Service Dashboard..."
+  # Create the dashboard with 12 panels
+  echo "⏳ Creating Platform Services Overview dashboard (12 panels)..."
   DASHBOARD_CREATED=false
   for i in {1..10}; do
-    if kubectl exec -n app-212 deployment/grafana -c grafana -- \
+    if kubectl exec -n app-213 deployment/grafana -c grafana -- \
       wget -q -O- --post-data="$(cat custom-dashboard.json)" \
       --header="Content-Type: application/json" \
       http://localhost:3000/api/dashboards/db 2>/dev/null | grep -q '"id"'; then
@@ -128,8 +132,8 @@ before_test: |
   echo "⏳ Verifying dashboard is searchable..."
   DASHBOARD_FOUND=false
   for i in {1..10}; do
-    if kubectl exec -n app-212 deployment/grafana -c grafana -- \
-      wget -q -O- "http://localhost:3000/api/search?query=Fulfillment" 2>/dev/null | grep -q "Fulfillment Service Dashboard"; then
+    if kubectl exec -n app-213 deployment/grafana -c grafana -- \
+      wget -q -O- "http://localhost:3000/api/search?query=Platform%20Services" 2>/dev/null | grep -q "Platform Services Overview"; then
       echo "✅ Dashboard is searchable!"
       DASHBOARD_FOUND=true
       break
@@ -144,14 +148,14 @@ before_test: |
     exit 1
   fi
 
-  # Quick render smoke test to verify the full pipeline works
-  echo "⏳ Testing render pipeline (smoke test)..."
+  # Render smoke test - verify a panel with spike data renders
+  echo "⏳ Testing render pipeline (smoke test on spike panel 7)..."
   RENDER_OK=false
   for i in {1..5}; do
-    HTTP_CODE=$(kubectl exec -n app-212 deployment/grafana -c grafana -- \
-      wget -q -O /dev/null -S "http://localhost:3000/render/d-solo/fulfill-svc-dash/_?panelId=1&width=400&height=200&from=now-1h&to=now" 2>&1 | grep "HTTP/" | awk '{print $2}' || true)
+    HTTP_CODE=$(kubectl exec -n app-213 deployment/grafana -c grafana -- \
+      wget -q -O /dev/null -S "http://localhost:3000/render/d-solo/platform-svc-overview/_?panelId=7&width=400&height=200&from=now-1h&to=now" 2>&1 | grep "HTTP/" | awk '{print $2}' || true)
     if [ "$HTTP_CODE" = "200" ]; then
-      echo "✅ Render pipeline working - panel rendered successfully!"
+      echo "✅ Render pipeline working - spike panel rendered successfully!"
       RENDER_OK=true
       break
     else
@@ -164,19 +168,19 @@ before_test: |
     echo "⚠️  Render smoke test did not return HTTP 200 - render may still work via Holmes"
   fi
 
-  echo "✅ Test setup completed successfully!"
+  echo "✅ Test setup completed - 12-panel dashboard with 2 spike panels ready!"
 
 after_test: |
-  kubectl delete namespace app-212 || true
+  kubectl delete namespace app-213 || true
 
 port_forwards:
-  - namespace: app-212
+  - namespace: app-213
     service: grafana
-    local_port: 10212
+    local_port: 10213
     remote_port: 3000
 
 tags:
-  - easy
+  - hard
   - grafana-dashboard
   - question-answer
   - kubernetes
