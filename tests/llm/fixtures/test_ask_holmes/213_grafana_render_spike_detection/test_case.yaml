@@ -1,18 +1,17 @@
 setup_timeout: 420  # 7 minutes for image pulls + Chromium cold start in renderer
 
-# 12 panels using predictable_csv_wave: 10 show flat/normal data, 2 show dramatic spikes.
-# Panel 7 "GraphQL Resolver Time": values spike from ~10 to ~85-92
-# Panel 10 "Job Scheduler Lag": values spike from ~12 to ~80-90
-# The LLM must visually render and identify which panels have anomalies.
+# 50 panels using predictable_csv_wave: 49 show flat/steady data, 1 has a massive spike.
+# Panel 37 "Session Replay Processor": baseline ~14ms, spikes to ~950ms (70x increase).
+# All other panels are flat lines with at most ±1 noise from baseline.
+# The LLM must visually render and identify which single panel has the anomaly.
 
-user_prompt: "Look at the 'Platform Services Overview' dashboard in Grafana. It has 12 panels monitoring different services. Visually render the dashboard and its panels, then identify which panels show anomalous spikes or unusual patterns compared to the others."
+user_prompt: "Look at the 'Platform Services Overview' dashboard in Grafana. It has 50 panels monitoring different services. Visually render the dashboard and its panels, then identify which panel shows an anomalous spike."
 
 include_tool_calls: true
 
 expected_output:
   - "Must call grafana_render_panel or grafana_render_dashboard tool to visually inspect the panels"
-  - "Must identify 'GraphQL Resolver Time' as one of the panels showing anomalous spikes or unusual behavior"
-  - "Must identify 'Job Scheduler Lag' as one of the panels showing anomalous spikes or unusual behavior"
+  - "Must identify 'Session Replay Processor' as the panel showing an anomalous spike"
 
 before_test: |
   set -e
@@ -91,8 +90,8 @@ before_test: |
     exit 1
   fi
 
-  # Create the dashboard with 12 panels
-  echo "⏳ Creating Platform Services Overview dashboard (12 panels)..."
+  # Create the dashboard with 50 panels
+  echo "⏳ Creating Platform Services Overview dashboard (50 panels)..."
   DASHBOARD_CREATED=false
   for i in {1..10}; do
     if kubectl exec -n app-213 deployment/grafana -c grafana -- \
@@ -134,13 +133,13 @@ before_test: |
   fi
 
   # Render smoke test - verify the full pipeline works (mandatory)
-  echo "⏳ Testing render pipeline (smoke test on spike panel 7)..."
+  echo "⏳ Testing render pipeline (smoke test on panel 1)..."
   RENDER_OK=false
   for i in {1..15}; do
     HTTP_CODE=$(kubectl exec -n app-213 deployment/grafana -c grafana -- \
-      wget -q -O /dev/null -S "http://localhost:3000/render/d-solo/platform-svc-overview/_?panelId=7&width=400&height=200&from=now-1h&to=now" 2>&1 | grep "HTTP/" | awk '{print $2}' || true)
+      wget -q -O /dev/null -S "http://localhost:3000/render/d-solo/platform-svc-overview/_?panelId=1&width=400&height=200&from=now-1h&to=now" 2>&1 | grep "HTTP/" | awk '{print $2}' || true)
     if [ "$HTTP_CODE" = "200" ]; then
-      echo "✅ Render pipeline working - spike panel rendered successfully!"
+      echo "✅ Render pipeline working - panel rendered successfully!"
       RENDER_OK=true
       break
     else
@@ -157,7 +156,7 @@ before_test: |
     exit 1
   fi
 
-  echo "✅ Test setup completed - 12-panel dashboard with 2 spike panels ready!"
+  echo "✅ Test setup completed - 50-panel dashboard with 1 spike panel ready!"
 
 after_test: |
   kubectl delete namespace app-213 || true
