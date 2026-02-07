@@ -124,25 +124,56 @@ class GrafanaToolset(BaseGrafanaToolset):
                 api_key=config.api_key,
                 additional_headers=config.headers,
             )
-            response = requests.get(
-                f"{base_url}/api/rendering/version",
-                headers=headers,
-                timeout=10,
-                verify=config.verify_ssl,
-            )
-            if response.status_code == 200:
-                version_info = response.json()
-                logger.info(
-                    f"Grafana Image Renderer available (version: {version_info}). "
-                    f"Enabling render tools."
+            renderer_detected = False
+
+            # Try the rendering version API first
+            try:
+                response = requests.get(
+                    f"{base_url}/api/rendering/version",
+                    headers=headers,
+                    timeout=10,
+                    verify=config.verify_ssl,
                 )
+                if response.status_code == 200:
+                    version_info = response.json()
+                    logger.info(
+                        f"Grafana Image Renderer available (version: {version_info}). "
+                        f"Enabling render tools."
+                    )
+                    renderer_detected = True
+            except Exception:
+                pass
+
+            # Fallback: check if GF_RENDERING_SERVER_URL is configured by attempting
+            # a small render request. Some Grafana versions don't expose the version API
+            # but still support rendering.
+            if not renderer_detected:
+                try:
+                    response = requests.get(
+                        f"{base_url}/render/d-solo/nonexistent/_?panelId=1&width=100&height=100",
+                        headers=headers,
+                        timeout=15,
+                        verify=config.verify_ssl,
+                    )
+                    # If renderer is configured, we get a 500 (dashboard not found)
+                    # rather than a 404 (rendering not available)
+                    if response.status_code != 404:
+                        logger.info(
+                            f"Grafana Image Renderer detected via render endpoint "
+                            f"(HTTP {response.status_code}). Enabling render tools."
+                        )
+                        renderer_detected = True
+                except Exception:
+                    pass
+
+            if renderer_detected:
                 self.tools.append(RenderPanel(self))
                 self.tools.append(RenderDashboard(self))
             else:
                 logger.info(
-                    f"Grafana Image Renderer not available (HTTP {response.status_code}). "
-                    f"Render tools will not be registered. "
-                    f"Install grafana-image-renderer plugin to enable visual dashboard analysis."
+                    "Grafana Image Renderer not available. "
+                    "Render tools will not be registered. "
+                    "Install grafana-image-renderer plugin to enable visual dashboard analysis."
                 )
         except Exception as e:
             logger.info(

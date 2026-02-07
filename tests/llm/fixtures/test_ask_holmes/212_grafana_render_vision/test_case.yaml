@@ -1,3 +1,5 @@
+setup_timeout: 420  # 7 minutes for image pulls + Chromium cold start in renderer
+
 user_prompt: "Look at the 'Fulfillment Service Dashboard' in Grafana. Visually render the dashboard or its panels and describe what you see. What panels exist, what does the Service Health panel say, and what is the deployment ID shown?"
 
 include_tool_calls: true
@@ -54,26 +56,9 @@ before_test: |
     exit 1
   fi
 
-  # Verify renderer sidecar is working
-  echo "⏳ Verifying Grafana Image Renderer..."
-  RENDERER_READY=false
-  for i in {1..30}; do
-    RENDER_RESP=$(kubectl exec -n app-212 deployment/grafana -c grafana -- wget -q -O- http://localhost:3000/api/rendering/version 2>/dev/null || true)
-    if echo "$RENDER_RESP" | grep -q "version"; then
-      echo "✅ Grafana Image Renderer is available: $RENDER_RESP"
-      RENDERER_READY=true
-      break
-    else
-      echo "⏳ Attempt $i/30: Renderer not ready yet, waiting 2s..."
-      sleep 2
-    fi
-  done
-
-  if [ "$RENDERER_READY" = false ]; then
-    echo "❌ Grafana Image Renderer not available after 60 seconds"
-    kubectl logs -l app=grafana -n app-212 -c renderer --tail=20
-    exit 1
-  fi
+  # Renderer sidecar readiness is ensured by Kubernetes readiness probe (tcpSocket on 8081).
+  # Pod is only Ready when both grafana and renderer containers pass their probes.
+  # Full render pipeline is verified by the smoke test below after dashboard creation.
 
   # Add TestData datasource
   echo "⏳ Adding TestData datasource..."
@@ -144,10 +129,10 @@ before_test: |
     exit 1
   fi
 
-  # Quick render smoke test to verify the full pipeline works
+  # Render smoke test to verify the full pipeline works (mandatory)
   echo "⏳ Testing render pipeline (smoke test)..."
   RENDER_OK=false
-  for i in {1..5}; do
+  for i in {1..15}; do
     HTTP_CODE=$(kubectl exec -n app-212 deployment/grafana -c grafana -- \
       wget -q -O /dev/null -S "http://localhost:3000/render/d-solo/fulfill-svc-dash/_?panelId=1&width=400&height=200&from=now-1h&to=now" 2>&1 | grep "HTTP/" | awk '{print $2}' || true)
     if [ "$HTTP_CODE" = "200" ]; then
@@ -155,13 +140,17 @@ before_test: |
       RENDER_OK=true
       break
     else
-      echo "⏳ Attempt $i/5: Render returned HTTP $HTTP_CODE, waiting 3s..."
-      sleep 3
+      echo "⏳ Attempt $i/15: Render returned HTTP $HTTP_CODE, waiting 5s..."
+      sleep 5
     fi
   done
 
   if [ "$RENDER_OK" = false ]; then
-    echo "⚠️  Render smoke test did not return HTTP 200 - render may still work via Holmes"
+    echo "❌ Render pipeline verification failed - renderer cannot render panels"
+    kubectl logs -l app=grafana -n app-212 -c renderer --tail=30
+    echo ""
+    kubectl logs -l app=grafana -n app-212 -c grafana --tail=30
+    exit 1
   fi
 
   echo "✅ Test setup completed successfully!"

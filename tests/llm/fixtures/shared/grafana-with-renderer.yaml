@@ -88,6 +88,18 @@ spec:
           limits:
             memory: "1Gi"
             cpu: "500m"
+        readinessProbe:
+          tcpSocket:
+            port: 8081
+          initialDelaySeconds: 5
+          periodSeconds: 5
+          timeoutSeconds: 3
+          failureThreshold: 10
+        startupProbe:
+          tcpSocket:
+            port: 8081
+          periodSeconds: 5
+          failureThreshold: 30
       volumes:
       - name: grafana-data
         emptyDir: {}
