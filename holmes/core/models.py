@@ -86,6 +86,24 @@ def _build_image_embed_hint(tool_call_id: str, url: Optional[str] = None) -> str
     return hint
 
 
+def _build_image_embed_hint(tool_call_id: str, url: Optional[str] = None) -> str:
+    """Build a hint for the LLM explaining how to embed this image in its response.
+
+    The LLM can use ![caption](tool-image://<tool_call_id>) syntax in its analysis.
+    The frontend resolves these references against the tool_calls array, rendering
+    the base64 image as a clickable link to the source URL (e.g. Grafana dashboard).
+    """
+    hint = (
+        f"\n\nTo embed this image in your response, use exactly this markdown syntax:\n"
+        f"![<descriptive caption>](tool-image://{tool_call_id})\n"
+        f"The client will render the image inline in your response"
+    )
+    if url:
+        hint += f" with a link to {url}"
+    hint += "."
+    return hint
+
+
 def format_tool_result_data(
     tool_result: StructuredToolResult,
     tool_call_id: str,

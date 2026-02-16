@@ -33,6 +33,33 @@
 4. **Render specific panels** with `grafana_render_panel` to zoom in on panels that look problematic
 5. **Dig deeper** by extracting and running the underlying Prometheus/Loki queries from the panel definitions
 
+### **IMPORTANT: Embedding Rendered Images in Your Response**
+
+When you render a panel or dashboard, the tool result includes a markdown reference you MUST use to embed the image in your response. This allows the user to see the Grafana screenshot inline with your analysis.
+
+**How to embed:**
+Each render tool result will include a line like:
+`![<descriptive caption>](tool-image://<tool_call_id>)`
+
+Copy this syntax into your response at the relevant point in your analysis. Replace `<descriptive caption>` with a meaningful description of what the image shows.
+
+**Example:**
+```
+Based on the CPU usage panel, there is a clear spike starting at 14:30:
+
+![CPU Usage - Last 6 hours showing spike at 14:30](tool-image://call_abc123)
+
+The spike correlates with the deployment at 14:28, as shown in the events panel:
+
+![Deployment Events Panel](tool-image://call_def456)
+```
+
+**Rules:**
+- Always embed rendered images in your response — do not just describe them without embedding
+- Place each image reference right before or after your discussion of what it shows
+- Use descriptive captions that summarize the key observation (e.g. "Memory usage panel showing gradual increase" not just "Memory panel")
+- The client will render the image as a clickable link to the live Grafana dashboard
+
 ### **Time range handling for renders:**
 - Use the same time range the user mentioned (e.g. URL params `from=now-1h&to=now`)
 - For alert investigations, use the alert's time window
