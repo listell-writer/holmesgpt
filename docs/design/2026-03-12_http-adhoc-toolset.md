@@ -61,12 +61,15 @@ The system checks `suggested_endpoint` against session-approved endpoints. If th
   Methods: GET
 
 Do you want to proceed?
-  1. Yes (one-time)
-  2. Yes, and remember for this session
-  3. No, and tell Holmes what to do differently
+  1. Yes
+  2. No, and tell Holmes what to do differently
 ```
 
-If the user picks option 2, the endpoint is remembered for the session. All subsequent requests matching any of those path patterns on that host with GET are auto-approved.
+**Approve once = approve all matching.** There is no "one-time" vs "remember" distinction. When the user approves, the endpoint (host + paths + methods) is remembered for the rest of the session. All subsequent requests matching any of those path patterns on that host with GET are auto-approved.
+
+This is simpler than the bash toolset's three-option menu (Yes / Yes+remember / No) because the approval unit here is always explicit and structured — the user sees exactly what host, paths, and methods they're approving. There's no ambiguity about scope, so there's no reason to offer a one-time-only option.
+
+This works because the approval decision is **entirely tool-internal**. The `requires_approval(params, context)` method runs before every `_invoke()`. It checks `context.session_approved_endpoints` — if the current request matches, it returns `None` (no approval needed) and the request executes. If not, it returns `ApprovalRequirement`. No changes to the base `Tool.invoke()` flow or the broader approval framework are needed.
 
 ### Incremental Path Discovery
 
@@ -172,44 +175,30 @@ In short: non-bash tools get one-time approval only. There is no session persist
 
 ### Protocol Changes for HTTP Ad-Hoc
 
+Since approval always means "remember for session," the server can handle session persistence automatically without any client involvement. The key insight: when the server executes an approved tool call, it already has access to the original `suggested_endpoint` from the tool call params. It stores this in message metadata, and on future calls, extracts it from conversation history.
+
 **`PendingToolApproval`** — no changes needed. It already carries `tool_name` and `params`, which is tool-agnostic. For `http_adhoc_request`, `params` contains `url`, `method`, `suggested_endpoint`, etc. The client renders the approval UI based on `tool_name`.
 
-**`ToolApprovalDecision`** — extend with a generic field:
+**`ToolApprovalDecision`** — no changes needed. The client sends:
 
-```python
-class ToolApprovalDecision(BaseModel):
-    tool_call_id: str
-    approved: bool
-    save_prefixes: Optional[List[str]] = None          # existing, bash (backwards compat)
-    save_session_data: Optional[Dict[str, Any]] = None  # NEW, generic
-```
-
-For HTTP ad-hoc, the client sends:
 ```json
 {
   "tool_call_id": "call_xyz",
-  "approved": true,
-  "save_session_data": {
-    "http_endpoints": [{
-      "host": "api.pagerduty.com",
-      "path_patterns": ["/incidents/*", "/services/*"],
-      "methods": ["GET"]
-    }]
-  }
+  "approved": true
 }
 ```
 
-Alternatively, the server can derive what to save from the tool's `ApprovalRequirement` when the user simply sends `approved: true` with a `remember: true` flag. This avoids requiring the client to echo back structured data it doesn't understand:
+That's it. The server derives what to save from the tool call's params (`suggested_endpoint`). No `save_prefixes`, no `remember` flag, no `save_session_data`. The approval itself is the signal to remember.
 
-```python
-class ToolApprovalDecision(BaseModel):
-    tool_call_id: str
-    approved: bool
-    remember: bool = False                        # NEW: "don't ask again for similar"
-    save_prefixes: Optional[List[str]] = None     # existing, backwards compat
+**Session persistence (server path):** When `process_tool_decisions()` executes an approved HTTP ad-hoc tool call, it stores the `suggested_endpoint` in tool result message metadata:
+
+```
+tool_call_metadata={"http_session_approved_endpoints": [{"host": "...", "path_patterns": [...], "methods": [...]}]}
 ```
 
-With `remember: true`, the server re-calls `tool.requires_approval()` to get `ApprovalRequirement`, extracts the save data (prefixes for bash, endpoints for HTTP), and stores it in message metadata. The client just sends yes/no/remember — it doesn't need to know the save format per tool type.
+On future calls, `extract_http_session_endpoints(messages)` scans conversation history for this metadata → populates `context.session_approved_endpoints`. Same pattern as bash's `extract_bash_session_prefixes` / `bash_session_approved_prefixes`.
+
+**How the server knows to save endpoints vs prefixes:** The server checks the tool name. If the approved tool is `http_adhoc_request`, it extracts `suggested_endpoint` from params and saves as `http_session_approved_endpoints`. If the tool is `bash` and `save_prefixes` is provided, it saves as `bash_session_approved_prefixes`. This keeps the two mechanisms independent.
 
 **`ToolInvokeContext`** — extend:
 
@@ -229,11 +218,11 @@ class ApprovalRequirement(BaseModel):
     endpoints_to_save: Optional[List[Dict]] = None         # NEW (http)
 ```
 
-**Session metadata** — add `extract_http_session_endpoints(messages)` alongside existing `extract_bash_session_prefixes(messages)`. Both scan tool result messages for their respective metadata keys.
-
 ### Existing Client Compatibility
 
-A client that only knows about bash approval (sends `save_prefixes`) continues to work unchanged. The new `remember` and `save_session_data` fields are optional with defaults. Server-side extraction via `remember: true` means even a minimal client that just sends `approved: true, remember: true` gets full session memory without understanding tool-specific save formats.
+**No client changes required.** Existing clients already send `{"tool_call_id": "...", "approved": true}` for approval decisions. The server handles session persistence for HTTP ad-hoc endpoints automatically. The bash flow continues to work with `save_prefixes` for backwards compatibility.
+
+The only UI consideration: clients may want to render the approval prompt differently for `http_adhoc_request` vs `bash` (showing host/paths/methods instead of a bash command). But this is a presentation concern — the client can inspect `tool_name` and `params` in `PendingToolApproval` to decide how to render. No protocol change needed.
 
 ## Alternatives Considered
 
@@ -273,11 +262,11 @@ A client that only knows about bash approval (sends `save_prefixes`) continues t
 
 **Why not:** The tool isn't just for exploration. It's for any ad-hoc HTTP access — runtime queries, one-off API calls, testing. "Explore" undersells the capability. "Ad-hoc" accurately describes the approval model: on-demand, not pre-configured.
 
-### 7. Generic `save_data` replacing `save_prefixes`
+### 7. "Yes (one-time)" vs "Yes, and remember" distinction
 
-**Idea:** Replace `save_prefixes` with a fully generic `save_data: Dict[str, Any]` that all tools use.
+**Idea:** Like the bash toolset, offer both a one-time approval and a persistent approval option.
 
-**Why not for phase 1:** Breaking change for existing clients that send `save_prefixes`. Adding `remember: bool` alongside `save_prefixes` (kept for backwards compat) is non-breaking and achieves the same goal. Full generalization can happen later.
+**Why not:** The bash toolset needs this because the approval granularity is ambiguous — a prefix like `kubectl get` covers many commands, and users may want to approve one specific command without blanket-approving the prefix. For HTTP ad-hoc, the user sees the exact host, path patterns, and methods they're approving. The scope is explicit and structured, so there's no ambiguity. A simpler approve/deny is sufficient, and the approval always persists for the session. This also avoids needing to extend `ToolApprovalDecision` with a `remember` flag or change the client.
 
 ## Implementation Plan
 
@@ -306,12 +295,12 @@ A client that only knows about bash approval (sends `save_prefixes`) continues t
    - `ApprovalRequirement`: add `endpoints_to_save: Optional[List[Dict]] = None`
 
 5. **`holmes/core/models.py`**
-   - `ToolApprovalDecision`: add `remember: bool = False`
+   - No changes needed to `ToolApprovalDecision`
 
 6. **`holmes/core/tool_calling_llm.py`**
    - Add `extract_http_session_endpoints(messages)` — same pattern as `extract_bash_session_prefixes`
    - Wire `session_approved_endpoints` through `_invoke_llm_tool_call` → `ToolInvokeContext`
-   - In `process_tool_decisions`: when `remember=True` and tool has `endpoints_to_save`, store in metadata as `http_session_approved_endpoints`
+   - In `process_tool_decisions`: when an approved tool is `http_adhoc_request`, extract `suggested_endpoint` from the tool call params and store in metadata as `http_session_approved_endpoints`
 
 7. **`holmes/interactive.py`**
    - Extend `handle_tool_approval()` to handle non-bash tools:
