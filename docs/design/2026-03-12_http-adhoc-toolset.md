@@ -69,7 +69,7 @@ Do you want to proceed?
 
 This is simpler than the bash toolset's three-option menu (Yes / Yes+remember / No) because the approval unit here is always explicit and structured — the user sees exactly what host, paths, and methods they're approving. There's no ambiguity about scope, so there's no reason to offer a one-time-only option.
 
-This works because the approval decision is **entirely tool-internal**. The `requires_approval(params, context)` method runs before every `_invoke()`. It checks `context.session_approved_endpoints` — if the current request matches, it returns `None` (no approval needed) and the request executes. If not, it returns `ApprovalRequirement`. No changes to the base `Tool.invoke()` flow or the broader approval framework are needed.
+This works because the approval decision is **entirely tool-internal**. The `requires_approval(params, context)` method runs before every `_invoke()`. It extracts session-approved endpoints from the conversation history in `context.messages`, checks whether the current request matches, and returns `None` (no approval needed) or `ApprovalRequirement`. No changes to the base `Tool.invoke()` flow or the broader approval framework are needed.
 
 ### Incremental Path Discovery
 
@@ -100,7 +100,7 @@ The LLM instructions tell it to ask the user for credentials if not already prov
 
 The session-approved unit is: **host + method + path pattern**.
 
-When the user approves with "remember for this session," the `suggested_endpoint` is stored. Future requests are checked with:
+When the user approves, the `suggested_endpoint` is stored in the tool result message metadata. Future requests are checked with:
 
 1. Does the URL's hostname match an approved endpoint's `host`?
 2. Does the URL's path match any of the approved endpoint's `path_patterns` (via `fnmatch`)?
@@ -175,54 +175,99 @@ In short: non-bash tools get one-time approval only. There is no session persist
 
 ### Protocol Changes for HTTP Ad-Hoc
 
-Since approval always means "remember for session," the server can handle session persistence automatically without any client involvement. The key insight: when the server executes an approved tool call, it already has access to the original `suggested_endpoint` from the tool call params. It stores this in message metadata, and on future calls, extracts it from conversation history.
+**No changes to the approval protocol.** The tool handles everything internally.
 
-**`PendingToolApproval`** — no changes needed. It already carries `tool_name` and `params`, which is tool-agnostic. For `http_adhoc_request`, `params` contains `url`, `method`, `suggested_endpoint`, etc. The client renders the approval UI based on `tool_name`.
+**`PendingToolApproval`** — no changes. It already carries `tool_name` and `params`, which is tool-agnostic. For `http_adhoc_request`, `params` contains `url`, `method`, `suggested_endpoint`, etc. The client renders the approval UI based on `tool_name`.
 
-**`ToolApprovalDecision`** — no changes needed. The client sends:
+**`ToolApprovalDecision`** — no changes. The client sends `{"tool_call_id": "...", "approved": true}`.
 
-```json
-{
-  "tool_call_id": "call_xyz",
-  "approved": true
-}
-```
+**`ApprovalRequirement`** — no changes. Stays as `needs_approval: bool` + `reason: str`. Tool-specific save data (prefixes, endpoints) is **not** on this model — each tool manages its own session persistence.
 
-That's it. The server derives what to save from the tool call's params (`suggested_endpoint`). No `save_prefixes`, no `remember` flag, no `save_session_data`. The approval itself is the signal to remember.
+### Decoupling Session State from the Framework
 
-**Session persistence (server path):** When `process_tool_decisions()` executes an approved HTTP ad-hoc tool call, it stores the `suggested_endpoint` in tool result message metadata:
+**Problem with the current design:** Today, the framework (`tool_calling_llm.py`) is bash-aware in two places:
 
-```
-tool_call_metadata={"http_session_approved_endpoints": [{"host": "...", "path_patterns": [...], "methods": [...]}]}
-```
+1. **Extraction:** `extract_bash_session_prefixes(messages)` runs at the start of each iteration, extracts bash-specific metadata from conversation history, and threads it through 4-5 function call layers to put it on `ToolInvokeContext.session_approved_prefixes`.
 
-On future calls, `extract_http_session_endpoints(messages)` scans conversation history for this metadata → populates `context.session_approved_endpoints`. Same pattern as bash's `extract_bash_session_prefixes` / `bash_session_approved_prefixes`.
+2. **Storage:** `process_tool_decisions()` checks `decision.save_prefixes` (from the client) and stores `bash_session_approved_prefixes` in tool result message metadata.
 
-**How the server knows to save endpoints vs prefixes:** The server checks the tool name. If the approved tool is `http_adhoc_request`, it extracts `suggested_endpoint` from params and saves as `http_session_approved_endpoints`. If the tool is `bash` and `save_prefixes` is provided, it saves as `bash_session_approved_prefixes`. This keeps the two mechanisms independent.
+Adding HTTP ad-hoc would mean duplicating both: `extract_http_session_endpoints`, `session_approved_endpoints` on the context, tool-name checks in `process_tool_decisions`, etc. Every new approval-aware tool would require more framework changes.
 
-**`ToolInvokeContext`** — extend:
+**Solution: give tools access to conversation history and let them manage their own session state.**
+
+**`ToolInvokeContext`** — replace tool-specific fields with the conversation messages:
 
 ```python
 class ToolInvokeContext(BaseModel):
-    session_approved_prefixes: List[str] = []                # existing (bash)
-    session_approved_endpoints: List[Dict[str, Any]] = []    # NEW (http)
+    # ...existing fields...
+    messages: List[Dict[str, Any]] = []  # NEW: full conversation history
+    # session_approved_prefixes removed — bash tool extracts from messages itself
 ```
 
-**`ApprovalRequirement`** — extend:
+Each tool extracts its own session data from `context.messages`:
+- Bash tool calls `extract_bash_session_prefixes(context.messages)` internally
+- HTTP ad-hoc tool calls its own `extract_http_session_endpoints(context.messages)` internally
+- Future approval-aware tools do the same — zero framework changes needed
+
+**`StructuredToolResult`** — add an opaque metadata field for tools to pass session data back:
+
+```python
+class StructuredToolResult(BaseModel):
+    # ...existing fields...
+    session_metadata: Optional[Dict[str, Any]] = None  # NEW: tool-controlled session data
+```
+
+When the HTTP ad-hoc tool executes after approval, it sets:
+```python
+result.session_metadata = {
+    "http_session_approved_endpoints": [{"host": "...", "path_patterns": [...], "methods": [...]}]
+}
+```
+
+The framework stores this in message metadata **without understanding it** — just passes it through to `tool_call_metadata` in `format_tool_result_data()`. On future calls, the tool reads it back from `context.messages`.
+
+This makes the framework fully tool-agnostic. The bash tool can be refactored to use `session_metadata` too (returning `{"bash_session_approved_prefixes": [...]}`) instead of relying on the client to send `save_prefixes`. But this refactor is optional — the existing bash flow continues to work alongside the new pattern.
+
+**`ApprovalRequirement`** — remove `prefixes_to_save`. The bash tool can handle the `suggested_prefixes` param rewriting in its own `requires_approval()` method instead of relying on the base class `invoke()` to do it. `ApprovalRequirement` becomes:
 
 ```python
 class ApprovalRequirement(BaseModel):
     needs_approval: bool
     reason: str = ""
-    prefixes_to_save: Optional[List[str]] = None          # existing (bash)
-    endpoints_to_save: Optional[List[Dict]] = None         # NEW (http)
 ```
+
+Clean, tool-agnostic.
+
+### How Session State Flows (Server Path)
+
+```
+1. LLM calls http_adhoc_request(url=..., suggested_endpoint=...)
+
+2. Tool.invoke() calls requires_approval(params, context)
+   → Tool scans context.messages for http_session_approved_endpoints
+   → Not found → returns ApprovalRequirement(needs_approval=True)
+
+3. Framework returns APPROVAL_REQUIRED to client (no tool-specific logic)
+
+4. Client approves → framework calls _invoke() with user_approved=True
+
+5. Tool executes HTTP request, returns StructuredToolResult with:
+   session_metadata={"http_session_approved_endpoints": [{...}]}
+
+6. Framework stores session_metadata in tool_call_metadata (opaque pass-through)
+
+7. Next tool call: Tool scans context.messages, finds its own metadata → auto-approves
+```
+
+### How Session State Flows (CLI Path)
+
+Same as server, but additionally the tool can persist to a file (`~/.holmes/http_approved_endpoints.yaml`) for cross-session memory. This is done inside the tool — the framework doesn't know about it. Same pattern as bash's `cli_prefixes.py`.
 
 ### Existing Client Compatibility
 
-**No client changes required.** Existing clients already send `{"tool_call_id": "...", "approved": true}` for approval decisions. The server handles session persistence for HTTP ad-hoc endpoints automatically. The bash flow continues to work with `save_prefixes` for backwards compatibility.
+**No client changes required.** The protocol is unchanged. The only difference is internal: session state management moves from the framework into the tools.
 
-The only UI consideration: clients may want to render the approval prompt differently for `http_adhoc_request` vs `bash` (showing host/paths/methods instead of a bash command). But this is a presentation concern — the client can inspect `tool_name` and `params` in `PendingToolApproval` to decide how to render. No protocol change needed.
+The client can optionally render the approval prompt differently for `http_adhoc_request` vs `bash` by inspecting `tool_name` and `params` in `PendingToolApproval`. But this is a presentation concern, not a protocol change.
 
 ## Alternatives Considered
 
@@ -262,7 +307,15 @@ The only UI consideration: clients may want to render the approval prompt differ
 
 **Why not:** The tool isn't just for exploration. It's for any ad-hoc HTTP access — runtime queries, one-off API calls, testing. "Explore" undersells the capability. "Ad-hoc" accurately describes the approval model: on-demand, not pre-configured.
 
-### 7. "Yes (one-time)" vs "Yes, and remember" distinction
+### 7. Tool-specific fields on ToolInvokeContext and ApprovalRequirement
+
+**Idea:** Add `session_approved_endpoints` to `ToolInvokeContext` and `endpoints_to_save` to `ApprovalRequirement`, mirroring how bash uses `session_approved_prefixes` and `prefixes_to_save`.
+
+**Why not:** This makes the framework aware of every approval-aware tool's session format. The framework currently has bash-specific extraction (`extract_bash_session_prefixes`), threading (`session_approved_prefixes` parameter through 4-5 call layers), and storage (`save_prefixes` → `bash_session_approved_prefixes` in metadata) — all in `tool_calling_llm.py`. Adding HTTP ad-hoc would duplicate all of this. Every future approval-aware tool would need more framework changes.
+
+Instead, pass the conversation `messages` on `ToolInvokeContext` and let each tool extract its own session data. Add `session_metadata` on `StructuredToolResult` for tools to pass opaque session data back. The framework passes it through without understanding it. This is a small refactor of the bash tool but eliminates all tool-specific code from the framework.
+
+### 8. "Yes (one-time)" vs "Yes, and remember" distinction
 
 **Idea:** Like the bash toolset, offer both a one-time approval and a persistent approval option.
 
@@ -275,8 +328,9 @@ The only UI consideration: clients may want to render the approval prompt differ
 1. **`holmes/plugins/toolsets/http/http_adhoc_toolset.py`**
    - `HttpAdhocToolset(Toolset)` — always enabled, no prerequisites needed
    - `HttpAdhocRequest(Tool, JsonFilterMixin)` — tool name `http_adhoc_request`
-   - `requires_approval()` checks `suggested_endpoint` against session-approved endpoints
-   - `_invoke()` makes the request (reuses `requests` library, same as `HttpRequest`)
+   - `requires_approval()` extracts session-approved endpoints from `context.messages`, checks current request against them
+   - `_invoke()` makes the request (reuses `requests` library, same as `HttpRequest`), sets `session_metadata` on result
+   - `extract_http_session_endpoints(messages)` — tool-internal helper, same pattern as bash's `extract_bash_session_prefixes`
    - Endpoint matching: same `fnmatch` logic as `HttpToolset._match_path()`
 
 2. **`holmes/plugins/toolsets/http/adhoc_instructions.jinja2`**
@@ -287,41 +341,50 @@ The only UI consideration: clients may want to render the approval prompt differ
 3. **`holmes/plugins/toolsets/http/cli_approved_endpoints.py`**
    - CLI-mode persistence: load/save `~/.holmes/http_approved_endpoints.yaml`
    - Same pattern as `bash/common/cli_prefixes.py`
+   - Called from within the tool, not from the framework
 
-### Modified Files
+### Modified Files (Framework — Tool-Agnostic Changes Only)
 
 4. **`holmes/core/tools.py`**
-   - `ToolInvokeContext`: add `session_approved_endpoints: List[Dict[str, Any]] = []`
-   - `ApprovalRequirement`: add `endpoints_to_save: Optional[List[Dict]] = None`
+   - `ToolInvokeContext`: add `messages: List[Dict[str, Any]] = []` (conversation history)
+   - `ApprovalRequirement`: remove `prefixes_to_save` (tool handles param rewriting internally)
+   - `StructuredToolResult`: add `session_metadata: Optional[Dict[str, Any]] = None`
+   - `Tool.invoke()`: remove the `prefixes_to_save` handling (lines 293-295)
 
 5. **`holmes/core/models.py`**
-   - No changes needed to `ToolApprovalDecision`
+   - `format_tool_result_data()`: pass through `session_metadata` from `StructuredToolResult` into `tool_call_metadata`
 
 6. **`holmes/core/tool_calling_llm.py`**
-   - Add `extract_http_session_endpoints(messages)` — same pattern as `extract_bash_session_prefixes`
-   - Wire `session_approved_endpoints` through `_invoke_llm_tool_call` → `ToolInvokeContext`
-   - In `process_tool_decisions`: when an approved tool is `http_adhoc_request`, extract `suggested_endpoint` from the tool call params and store in metadata as `http_session_approved_endpoints`
+   - Pass `messages` to `ToolInvokeContext` (replaces `session_approved_prefixes` threading)
+   - Remove `extract_bash_session_prefixes` call from framework — bash tool does it internally
+   - Remove bash-specific `save_prefixes` handling in `process_tool_decisions` — tool returns `session_metadata` which framework passes through opaquely
 
-7. **`holmes/interactive.py`**
+7. **`holmes/plugins/toolsets/bash/bash_toolset.py`**
+   - `requires_approval()`: extract session prefixes from `context.messages` instead of `context.session_approved_prefixes`
+   - `requires_approval()`: handle `suggested_prefixes` param rewriting internally (moved from base `Tool.invoke()`)
+   - `_invoke()`: on successful execution after approval, set `result.session_metadata = {"bash_session_approved_prefixes": [...]}`
+
+8. **`holmes/interactive.py`**
    - Extend `handle_tool_approval()` to handle non-bash tools:
      - Show tool name (not "Bash command") based on `tool_name`
      - For `http_adhoc_request`: show host, paths, methods from `suggested_endpoint`
-     - "Remember" option saves endpoints (CLI path) or returns appropriate data
-   - Add `_save_approved_endpoints()` for CLI persistence
 
-8. **`holmes/plugins/toolsets/__init__.py`**
+9. **`holmes/plugins/toolsets/__init__.py`**
    - Register `HttpAdhocToolset` in the built-in toolset list
 
 ### Tests
 
-9. **`tests/test_http_adhoc_session_flow.py`**
-   - Mirror of `test_bash_session_prefix_flow.py` for HTTP ad-hoc
-   - Test: first request → approval → execute → second request same host/path → auto-approved
-   - Test: new path pattern → needs new approval
-   - Test: new method on same host → needs new approval
-   - Test: cross-conversation isolation
+10. **`tests/test_http_adhoc_session_flow.py`**
+    - Mirror of `test_bash_session_prefix_flow.py` for HTTP ad-hoc
+    - Test: first request → approval → execute → second request same host/path → auto-approved
+    - Test: new path pattern → needs new approval
+    - Test: new method on same host → needs new approval
+    - Test: cross-conversation isolation
 
-10. **Unit tests for endpoint matching**
+11. **Unit tests for endpoint matching**
     - Path glob matching with `fnmatch`
     - Host exact matching
     - Method matching
+
+12. **Update `tests/test_bash_session_prefix_flow.py`**
+    - Adapt to the refactored bash tool (reads from `context.messages` instead of `context.session_approved_prefixes`)
