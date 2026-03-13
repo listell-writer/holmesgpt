@@ -6,3 +6,23 @@ toolsets:
       connection_url: "sqlite:////tmp/holmesgpt_eval_233.db"
       read_only: true
     llm_instructions: "This is our sales data warehouse containing product catalog, order transactions, and various cost tables."
+
+  # Disable default toolsets that require cluster access
+  kubernetes/core:
+    enabled: false
+  kubernetes/logs:
+    enabled: false
+  helm/core:
+    enabled: false
+  robusta:
+    enabled: false
+  bash:
+    enabled: false
+  connectivity_check:
+    enabled: false
+  core_investigation:
+    enabled: false
+  internet:
+    enabled: false
+  runbook:
+    enabled: false
