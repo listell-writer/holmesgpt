@@ -249,6 +249,37 @@ From a product perspective, each conversation turn should show total cost includ
 
 Each `call_stream()` invocation resets `i = 0`. This is slightly more permissive than today's single-loop behavior. **Accept it** — approval rarely happens, extra headroom is harmless.
 
+## Test Coverage Assessment
+
+### Existing test coverage
+
+| Test file | What it covers | Method tested | Mocking level |
+|---|---|---|---|
+| `tests/llm/test_ask_holmes.py` | 100+ real scenarios with real LLM + real infra | `call()` via `messages_call()` | None — real LLM, real tools. Best regression safety net but slow (marked `@pytest.mark.llm`). |
+| `tests/test_approval_workflow.py` | Streaming approval: APPROVAL_REQUIRED events, approve/reject/execute flows | `call_stream()` via server endpoint | Mocks LLM responses and `process_tool_decisions()`. Does NOT test actual tool re-execution after approval. |
+| `tests/test_bash_session_prefix_flow.py` | Bash session prefix memory and approval workflow | `call_stream()` via server endpoint | Real `ToolCallingLLM` with mocked LLM and bash tool. |
+| `tests/test_cache.py` | Token caching across multiple LLM calls | `call()` via `messages_call()` | Real LLM calls (marked `@pytest.mark.llm`). |
+| `tests/test_server_endpoints.py` | Server API: non-streaming chat, images | `call()` via `messages_call()` | Mocks entire LLM response. |
+| `tests/checks/test_checks_cli.py` | CLI checks in monitor/inline mode | `call()` | Mocks LLMResult return value. |
+| `tests/checks/test_checks_api.py` | Health check execution via API | `call()` | Mocks LLMResult return value. |
+| `tests/test_interactive.py` | Interactive slash commands and feedback | `call()` | Mocks entire `ToolCallingLLM` with `Mock(spec=ToolCallingLLM)`. |
+| `tests/core/test_safeguards.py` | Repeated tool call prevention | `prevent_overly_repeated_tool_call()` only | Unit test of helper function in isolation. |
+
+### Critical gaps — no tests exist for:
+
+| Area | Risk if broken by refactor |
+|---|---|
+| Direct unit tests for `call()` loop logic | HIGH — no baseline to detect behavioral changes |
+| Direct unit tests for `call_stream()` loop logic | HIGH — no baseline to detect behavioral changes |
+| Approval callback flow in `call()` (`_handle_tool_call_approval`) | HIGH — completely untested, refactor replaces it entirely |
+| Cancellation (`cancel_event` + `LLMInterruptedError`) | MEDIUM — only used by interactive mode |
+| Context window compaction integration | MEDIUM — compaction logic runs but output never verified |
+| Cost/metadata accumulation accuracy across iterations | MEDIUM — `main.py` serializes via `model_dump()`, costs must be correct |
+| Tool number offset tracking across turns | LOW — cosmetic (temp file numbering) |
+| Side-by-side `call()` vs `call_stream()` equivalence | CRITICAL — the entire point of this refactor |
+
+**Bottom line:** The LLM eval tests cover the happy path well but are slow and can't run without API keys. There are zero fast unit tests for the core loop mechanics — approval, cancellation, compaction, tool numbering, cost tracking. We must write targeted unit tests before refactoring to establish a baseline.
+
 ## Test Plan
 
 ### Baseline tests (Step 0 — before any refactoring)
