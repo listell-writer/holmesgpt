@@ -32,7 +32,7 @@ Neither method actually uses `llm.completion(stream=True)`. Both call `llm.compl
 
 Server streaming wraps the generator with `stream_chat_formatter()` (`holmes/utils/stream.py:66`) which converts `StreamMessage` objects to SSE text events. It expects `ANSWER_END` or `APPROVAL_REQUIRED` as terminal events.
 
-**Neither caller uses `system_prompt` or `user_prompt` parameters of `call_stream()`.** Both pass pre-built messages via `msgs=`. These params can be removed.
+No caller uses `system_prompt` or `user_prompt` parameters of `call_stream()`. Both pass pre-built messages via `msgs=`.
 
 ### LLMResult field usage across callers
 
@@ -56,11 +56,11 @@ Server streaming wraps the generator with `stream_chat_formatter()` (`holmes/uti
 - `as_tool_result_response()` → dict with keys `tool_call_id`, **`tool_name`**, `description`, `role`, `result`. This is what `call()` accumulates into `LLMResult.tool_calls`.
 - `as_streaming_tool_result_response()` → dict with keys `tool_call_id`, **`name`** (not `tool_name`!), `description`, `role`, `result`. This is what `call_stream()` puts in `TOOL_RESULT` event data.
 
-**Format mismatch:** `as_tool_result_response()` uses key `tool_name`. `as_streaming_tool_result_response()` uses key `name`. The wrapper cannot collect `TOOL_RESULT` event data directly as `LLMResult.tool_calls`.
+**Format mismatch:** `as_tool_result_response()` uses key `tool_name`. `as_streaming_tool_result_response()` uses key `name`. The wrapper cannot collect `TOOL_RESULT` event data directly as `LLMResult.tool_calls`. Instead, `call_stream()` accumulates an internal `all_tool_calls` list using `as_tool_result_response()` format and includes it in `ANSWER_END`.
 
 **`StructuredToolResult`** (`holmes/core/tools.py:86-95`): Has fields `status`, `error`, `data`, `invocation`, `params`, etc. The approval callback in interactive mode reads `tool_result.invocation` (the command string) and `tool_result.params.suggested_prefixes` to display the approval prompt.
 
-**`PendingToolApproval`** (`holmes/core/models.py:94-100`): `tool_call_id`, `tool_name`, `description`, `params`. This is what `APPROVAL_REQUIRED` events currently contain — but it's **missing `invocation`**, which the approval callback needs. Must be enriched (see Decision: Approval Event Data).
+**`PendingToolApproval`** (`holmes/core/models.py:94-100`): `tool_call_id`, `tool_name`, `description`, `params`. This is what `APPROVAL_REQUIRED` events currently contain — but it's **missing `invocation`**, which the approval callback needs. The `APPROVAL_REQUIRED` event must be enriched with full `StructuredToolResult` objects.
 
 **`ToolApprovalDecision`** (`holmes/core/models.py:103-108`): `tool_call_id`, `approved`, `save_prefixes`. This is what `call_stream()` accepts via `tool_decisions` parameter to resume after approval.
 
@@ -87,6 +87,23 @@ The callback receives a **full `StructuredToolResult`** object with `invocation`
 
 **In interactive mode**, the callback is wrapped (`interactive.py:1484-1499`) to coordinate terminal state (cbreak mode vs normal mode for prompt_toolkit). The wrapper (`_wrapped_approval`) sets/clears `approval_active` threading event around the actual callback call.
 
+### Bash prefix saving — two parallel mechanisms
+
+CLI and server use different mechanisms to persist approved bash command prefixes:
+
+**CLI path** (current `call()` → `_handle_tool_call_approval()` → `self.approval_callback()`):
+- `interactive.py:handle_tool_approval()` line 770-772: calls `_save_approved_prefixes(prefixes)` directly to `~/.holmes/bash_approved_prefixes.yaml`
+- Returns `(True, None)` — the caller (`_handle_tool_call_approval`) doesn't know about the saved prefixes
+- No session memory in messages — disk file is the persistence mechanism
+- On subsequent tool calls in the same turn, `requires_approval()` re-reads the disk file → finds prefix → approved
+
+**Server path** (current `call_stream()`):
+- Client sends `ToolApprovalDecision.save_prefixes` on re-invocation
+- `process_tool_decisions()` line 348-354: stores in message metadata as `bash_session_approved_prefixes`
+- `extract_bash_session_prefixes()` reads from messages before each tool execution batch
+
+These are parallel and independent mechanisms. Both continue to work in the refactored model (see Decisions section).
+
 ## Differences Between `call()` and `call_stream()`
 
 ### Signature
@@ -94,20 +111,7 @@ The callback receives a **full `StructuredToolResult`** object with `invocation`
 - `call()`: `messages, response_format, user_prompt, trace_span, tool_number_offset, cancel_event, request_context`
 - `call_stream()`: `system_prompt, user_prompt, response_format, msgs, enable_tool_approval, tool_decisions, request_context`
 
-### Message building in `call_stream()`
-
-`call_stream()` lines 960-966 builds its own messages list:
-```python
-messages: list[dict] = []
-if system_prompt:
-    messages.append({"role": "system", "content": system_prompt})
-if user_prompt:
-    messages.append({"role": "user", "content": user_prompt})
-if msgs:
-    messages.extend(msgs)
-```
-
-No caller uses `system_prompt` or `user_prompt`. All pass pre-built messages via `msgs=`.
+`user_prompt` on `call()` is dead code — declared but never read by any logic. Will be removed.
 
 ### Return type
 
@@ -162,17 +166,12 @@ Missing vs what `LLMResult` needs:
 - `tool_calls` (list of tool call dicts in `as_tool_result_response()` format)
 - Individual cost fields as top-level keys (only has `metadata["costs"]` as nested dict)
 
-### Session prefix extraction
-
-- `call()` extracts bash session prefixes only inside `_handle_tool_call_approval` (line 310 via `process_tool_decisions`).
-- `call_stream()` extracts before each tool execution batch (line 1100).
-
 ### Console logging in `call()`
 
 `call()` logs these during execution:
 - Reasoning content: `logging.info(f"[italic dim]AI reasoning:\n\n{...}[/italic dim]\n")` (line 529-531)
 - AI intermediate text: `logging.info(f"[bold {AI_COLOR}]AI:[/bold {AI_COLOR}] {text_response}")` (line 555)
-- Tool call count: `logging.info(f"The AI requested [bold]{len(tools_to_call)}[/bold] tool call(s).")` (line 556-557)
+- Tool call count: `logging.info(f"The AI requested [bold]{len(tools_to_call)}[/bold] tool call(s).")` (line 556-557) — logged BEFORE tool execution
 - Blank line after tool batch: `logging.info("")` (line 629)
 - Tool execution logging happens inside `_invoke_llm_tool_call` — shared by both paths, no change needed.
 
@@ -184,11 +183,11 @@ Both methods track tool calls for repeated-call prevention:
 - `call()` line 425-427: `tool_calls: list[dict] = []` (for safeguards) + `all_tool_calls = []` (for LLMResult)
 - `call_stream()` line 967: `tool_calls: list[dict] = []` (for safeguards only — no `all_tool_calls` equivalent)
 
-`call_stream()` does NOT accumulate an `all_tool_calls` list. It only tracks `tool_calls` for the repeated-call safeguard.
+`call_stream()` does NOT accumulate an `all_tool_calls` list. It only tracks `tool_calls` for the repeated-call safeguard. This must be added.
 
 ## Decisions
 
-### Approval Mechanism: Option 4 — Always yield + wrapper re-invokes
+### Approval Mechanism: Always yield + wrapper re-invokes
 
 The unified `call_stream()` always yields `APPROVAL_REQUIRED` and returns when tools need approval. The `call()` wrapper:
 1. Drains the stream
@@ -201,14 +200,21 @@ This matches how the server already handles approval resumption today.
 **Trade-offs accepted:**
 - Each approval round creates a new generator and re-enters the loop (context window limiting, tool re-fetch run again) — slight inefficiency but keeps the code simple.
 - `call()` wrapper needs a while loop to handle multiple approval rounds in one conversation turn.
+- Current `_handle_tool_call_approval()` has a "re-check" optimization at line 891: if another tool in the same batch already approved the prefix, skip the callback. In the refactored model, `call_stream()` yields APPROVAL_REQUIRED for ALL pending tools at once — the wrapper calls the callback for each. The user might be asked twice for the same prefix if two tools in the same batch need it. Acceptable — rare scenario, and the second approval is a no-op (prefix already saved to disk by the first callback).
 
 ### Approval Event Data: Enrich with full StructuredToolResult
 
-The `APPROVAL_REQUIRED` event currently carries `PendingToolApproval` dicts which have `tool_call_id`, `tool_name`, `description`, `params`. But the approval callback in interactive mode needs `StructuredToolResult.invocation` (the command string) and `StructuredToolResult.params.suggested_prefixes`.
+The `APPROVAL_REQUIRED` event must carry full `StructuredToolResult` objects alongside the existing `pending_approvals`. This provides `invocation` and `params.suggested_prefixes` that the interactive callback needs.
 
-**Solution:** Include the full `StructuredToolResult` objects in the `APPROVAL_REQUIRED` event data alongside the existing `pending_approvals`. This way the `call()` wrapper can pass them directly to the callback without reconstruction.
+Add `tool_results: dict[str, StructuredToolResult]` (keyed by `tool_call_id`) to the event data. No SSE wire format change — `stream_chat_formatter` only reads `pending_approvals`, `content`, and `messages` from this event.
 
-Add `tool_results: list[StructuredToolResult]` (keyed by `tool_call_id`) to the event data. No SSE wire format change — `stream_chat_formatter` only reads `pending_approvals`, `content`, and `messages` from this event.
+### Bash prefix saving in refactored model
+
+Both CLI and server mechanisms continue to work unchanged:
+- **CLI:** `_build_approval_decisions()` calls the callback → callback saves to disk. `ToolApprovalDecision.save_prefixes` is set to None (callback returns `(approved, feedback)`, not prefixes). `process_tool_decisions()` gets `save_prefixes=None` → no session memory update. Correct — disk file is the CLI persistence mechanism. Subsequent tools in the same turn re-read the disk file.
+- **Server:** No change — `call_stream()` receives `tool_decisions` from the client with `save_prefixes` populated.
+
+The callback signature doesn't need to change.
 
 ### Console Logging: All in `call()` wrapper
 
@@ -216,38 +222,44 @@ Add `tool_results: list[StructuredToolResult]` (keyed by `tool_call_id`) to the 
 
 The `call()` wrapper intercepts stream events and logs to console:
 - `AI_MESSAGE` → `logging.info` for reasoning and/or text content
-- `START_TOOL` → count per iteration, then `logging.info(f"The AI requested {count} tool call(s).")`
+- `START_TOOL` → count per batch, log when first `TOOL_RESULT` arrives: `logging.info(f"The AI requested {count} tool call(s).")`. This matches current timing — `START_TOOL` events are yielded before execution, `TOOL_RESULT` after. Logging on first TOOL_RESULT means all START_TOOLs for the batch are already counted.
 - After all `TOOL_RESULT` events in a batch → `logging.info("")` (blank line)
 - `ANSWER_END` → no logging (caller handles display)
 
-### Remove `system_prompt`/`user_prompt` from `call_stream()`
+### Remove dead parameters
 
-No caller uses these. All pass pre-built messages via `msgs=`. Remove them to simplify `call_stream()`. The message building becomes:
-```python
-messages: list[dict] = list(msgs) if msgs else []
-```
+- Remove `system_prompt` and `user_prompt` from `call_stream()`. No caller uses these. Message building becomes: `messages: list[dict] = list(msgs) if msgs else []`
+- Remove `user_prompt` from `call()`. Dead code — declared but never read. Update `prompt_call()` to stop passing it.
+- Remove `messages_call()`. Pass-through to `call()` with no logic. Update its 3 callers (`server.py:401`, `tests/test_cache.py`, `tests/test_server_endpoints.py`) to call `call()` directly.
 
-### Add `tool_number_offset` to `call_stream()`
+### Add parameters to `call_stream()`
 
-Add `tool_number_offset: int = 0` to the signature. Changes one local variable's initial value. Non-breaking (default 0 preserves existing callers).
-
-**What tool numbers are:** Sequential labels (1, 2, 3...) passed to `ToolInvokeContext`. The bash toolset uses them to create numbered temp files (`tool_result_1.txt`, etc.) so the LLM can reference saved outputs.
-
-**Why:** In interactive mode, `call()` is invoked once per conversation turn. If turn 1 executed tools 1-5, turn 2 starts at 6. `interactive.py` passes `tool_number_offset=len(all_tool_calls_history)`. The wrapper passes this through. On approval re-invocation, the wrapper updates the offset to account for tools already executed.
+- `trace_span` (default `DummySpan()`) — pass through to `_invoke_llm_tool_call` (replacing hardcoded `DummySpan()` at line 1111)
+- `cancel_event: Optional[threading.Event]` (default `None`) — check before LLM calls and between tool futures, raise `LLMInterruptedError` (3 check points, matching `call()`)
+- `tool_number_offset: int` (default `0`) — initialize local variable from parameter instead of hardcoded 0 at line 973
 
 ### Add `all_tool_calls` to `call_stream()` and ANSWER_END
 
 Add a parallel `all_tool_calls: list[dict] = []` list using `as_tool_result_response()` format. Include it in `ANSWER_END` data as `tool_calls`. The wrapper uses this for `LLMResult.tool_calls`.
 
+When `process_tool_decisions()` returns events at the top of `call_stream()` (re-invocation with `tool_decisions`), those TOOL_RESULT events contain tool call data for approved/denied tools. `call_stream()` must extract tool call info from these events and append to `all_tool_calls` before entering the main loop. This ensures approved tools appear in the final `LLMResult.tool_calls`.
+
+The `call()` wrapper accumulates `tool_calls` across approval rounds: `all_tool_calls.extend(answer_data.get("tool_calls", []))` on each round's ANSWER_END.
+
 `TOOL_RESULT` events continue using `as_streaming_tool_result_response()` format — no wire format change.
 
 ### Cost handling across approval rounds
 
-From a product perspective, each conversation turn should show total cost including all approval re-invocations. The `call()` wrapper sums costs from each round's `ANSWER_END`. Even though interactive mode doesn't display costs today, the data should be correct for when it does.
+Each conversation turn should show total cost including all approval re-invocations. The `call()` wrapper sums costs from each round's ANSWER_END. Even though interactive mode doesn't display costs today, the data should be correct for when it does.
+
+**`LLMCosts` field aggregation semantics** (matching `_process_cost_info()` at lines 175-188):
+- **Sum fields:** `total_cost`, `total_tokens`, `prompt_tokens`, `completion_tokens`, `reasoning_tokens`, `num_compactions`
+- **Max fields:** `max_prompt_tokens_per_call`, `max_completion_tokens_per_call`
+- **Optional-sum field:** `cached_tokens` — is `Optional[int]`, needs None-safe handling: `(a or 0) + (b or 0)`, return None only if both inputs are None
 
 ### `max_steps` across approval re-invocations
 
-Each `call_stream()` invocation resets `i = 0`. This is slightly more permissive than today's single-loop behavior. **Accept it** — approval rarely happens, extra headroom is harmless.
+Each `call_stream()` invocation resets `i = 0`. This is slightly more permissive than today's single-loop behavior. Accepted — approval rarely happens, extra headroom is harmless.
 
 ## Test Coverage Assessment
 
@@ -265,7 +277,7 @@ Each `call_stream()` invocation resets `i = 0`. This is slightly more permissive
 | `tests/test_interactive.py` | Interactive slash commands and feedback | `call()` | Mocks entire `ToolCallingLLM` with `Mock(spec=ToolCallingLLM)`. |
 | `tests/core/test_safeguards.py` | Repeated tool call prevention | `prevent_overly_repeated_tool_call()` only | Unit test of helper function in isolation. |
 
-### Critical gaps — no tests exist for:
+### Critical gaps
 
 | Area | Risk if broken by refactor |
 |---|---|
@@ -278,13 +290,11 @@ Each `call_stream()` invocation resets `i = 0`. This is slightly more permissive
 | Tool number offset tracking across turns | LOW — cosmetic (temp file numbering) |
 | Side-by-side `call()` vs `call_stream()` equivalence | CRITICAL — the entire point of this refactor |
 
-**Bottom line:** The LLM eval tests cover the happy path well but are slow and can't run without API keys. There are zero fast unit tests for the core loop mechanics — approval, cancellation, compaction, tool numbering, cost tracking. We must write targeted unit tests before refactoring to establish a baseline.
+No fast unit tests exist for the core loop mechanics. We must write targeted unit tests before refactoring to establish a baseline.
 
 ## Test Plan
 
 ### Baseline tests (Step 0 — before any refactoring)
-
-These establish behavior of the current code, then verify the refactored code matches.
 
 **Test 1: Multi-iteration happy path**
 - Mock LLM to return a tool call on first response, then a text answer on second
@@ -302,13 +312,6 @@ These establish behavior of the current code, then verify the refactored code ma
   - `TOOL_RESULT` event with result data
   - `TOKEN_COUNT` events
   - `ANSWER_END` event with `content`, `messages`, `metadata`
-
-**Test 2: Equivalence test (written after Step 2, not in Step 0)**
-- Same mocked setup as Test 1
-- Run both `call()` and `call_stream()` with identical inputs
-- Verify `call()` result fields match what you'd reconstruct from enriched `call_stream()` ANSWER_END
-- Compare: `result`, `messages` (length and structure), `tool_calls` (count), `num_llm_calls`
-- **Cannot be baseline** — requires Step 2 enrichment of ANSWER_END first
 
 **Test 3: Approval callback flow**
 - Mock LLM to return a tool call
@@ -331,14 +334,6 @@ These establish behavior of the current code, then verify the refactored code ma
 - Mock tool executor's `side_effect` to set `cancel_event` synchronously when invoked (no sleep/timer — deterministic)
 - Verify `LLMInterruptedError` is raised
 
-**Test 6 (post-refactor only): Approval via re-invocation**
-- Mock LLM to return a tool call
-- Mock tool to return `APPROVAL_REQUIRED`
-- Set `approval_callback` that approves
-- Call refactored `call()` (which internally uses `call_stream()` + re-invocation)
-- Verify the full flow: stream yields `APPROVAL_REQUIRED`, wrapper calls callback, re-invokes with `tool_decisions`, gets `ANSWER_END`
-- Verify `LLMResult` has correct `tool_calls` (including the approved tool!), `messages`, costs
-
 **Test 7: Tool returning ERROR status**
 - Mock LLM to call a tool on iteration 1, mock tool to return ERROR status, mock LLM to give text answer on iteration 2
 - Verify `call()` continues the loop — LLM receives the error and responds
@@ -354,13 +349,30 @@ These establish behavior of the current code, then verify the refactored code ma
 - Mock LLM, call with `response_format={"type": "json_object"}`
 - Verify the format is passed through to `litellm.completion()` call args
 
+### Post-enrichment test (after Step 2)
+
+**Test 2: Equivalence**
+- Same mocked setup as Test 1
+- Run both `call()` and enriched `call_stream()` with identical inputs
+- Verify `call()` result fields match what you'd reconstruct from `call_stream()` ANSWER_END
+- Compare: `result`, `messages` (length and structure), `tool_calls` (count), `num_llm_calls`
+- Requires Step 2 enrichment of ANSWER_END
+
+### Post-refactor test (after Step 3)
+
+**Test 6: Approval via re-invocation**
+- Mock LLM to return a tool call
+- Mock tool to return `APPROVAL_REQUIRED`
+- Set `approval_callback` that approves
+- Call refactored `call()` (which internally uses `call_stream()` + re-invocation)
+- Verify the full flow: stream yields `APPROVAL_REQUIRED`, wrapper calls callback, re-invokes with `tool_decisions`, gets `ANSWER_END`
+- Verify `LLMResult` has correct `tool_calls` (including the approved tool), `messages`, costs
+
 ## Implementation Plan
 
 ### Step 0: Write baseline tests
 
-Write Tests 1, 3, 4, 5, 7, 8, 9 above. Run them green against current code. These become our regression safety net.
-
-Test 2 (Equivalence) is written after Step 2 (requires enriched ANSWER_END). Test 6 is post-refactor only.
+Write Tests 1, 3, 4, 5, 7, 8, 9. Run green against current code.
 
 ### Step 1: Simplify `call_stream()` signature
 
@@ -376,7 +388,7 @@ Add new parameters:
 
 ### Step 2: Enrich `call_stream()` internals and ANSWER_END
 
-1. Add `all_tool_calls: list[dict] = []` accumulation using `as_tool_result_response()` format. **Important (Issue 1):** When `process_tool_decisions()` returns events at the top of `call_stream()` (re-invocation with `tool_decisions`), those TOOL_RESULT events contain tool call data for approved/denied tools. Extract tool call info from these events and append to `all_tool_calls` before entering the main loop. This ensures approved tools from the previous round appear in `LLMResult.tool_calls`.
+1. Add `all_tool_calls: list[dict] = []` accumulation using `as_tool_result_response()` format. When `process_tool_decisions()` returns events at the top of `call_stream()` (re-invocation with `tool_decisions`), extract tool call info from those TOOL_RESULT events and append to `all_tool_calls` before entering the main loop. This ensures approved tools from the previous round appear in `LLMResult.tool_calls`.
 
 2. Enrich ANSWER_END (line 1073-1080):
 ```python
@@ -397,6 +409,10 @@ yield StreamMessage(
 3. Enrich APPROVAL_REQUIRED event data to include `tool_results` dict mapping `tool_call_id` → `StructuredToolResult` (the full objects, for the approval callback).
 
 **No wire format change** — `stream_chat_formatter` only reads `pending_approvals`, `content`, `messages` from `APPROVAL_REQUIRED` events, and only reads `content`, `messages`, `metadata` from `ANSWER_END`. Extra fields are ignored.
+
+### Step 2b: Write Test 2 (Equivalence)
+
+Now that ANSWER_END is enriched, write Test 2 to verify `call()` result matches enriched `call_stream()` ANSWER_END. Run green.
 
 ### Step 3: Rewrite `call()` as a thin wrapper
 
@@ -435,11 +451,10 @@ def call(self, messages, response_format=None,
             elif event.event == StreamEvents.TOOL_RESULT:
                 tool_number_offset += 1
                 if start_tool_count > 0:
-                    # Log tool count once when first result arrives
                     logging.info(
                         f"The AI requested [bold]{start_tool_count}[/bold] tool call(s)."
                     )
-                    start_tool_count = 0  # reset so we don't log again for this batch
+                    start_tool_count = 0
             elif event.event == StreamEvents.AI_MESSAGE:
                 reasoning = event.data.get("reasoning")
                 content = event.data.get("content")
@@ -454,7 +469,7 @@ def call(self, messages, response_format=None,
             elif event.event == StreamEvents.APPROVAL_REQUIRED:
                 messages = event.data["messages"]
                 pending = event.data["pending_approvals"]
-                tool_results = event.data["tool_results"]  # full StructuredToolResult objects
+                tool_results = event.data["tool_results"]
                 tool_decisions = self._build_approval_decisions(pending, tool_results)
                 break
             elif event.event == StreamEvents.ANSWER_END:
@@ -480,17 +495,14 @@ def call(self, messages, response_format=None,
             raise Exception("Stream ended without ANSWER_END or APPROVAL_REQUIRED")
 ```
 
-### Step 2b: Write Test 2 (Equivalence)
-
-Now that ANSWER_END is enriched, write Test 2 to verify `call()` result matches enriched `call_stream()` ANSWER_END. Run green.
-
 ### Step 3b: Helper methods
 
-**`_build_approval_decisions()`**: For each pending approval, calls `self.approval_callback(tool_result)` with the full `StructuredToolResult` from the event data. Returns list of `ToolApprovalDecision`. Does NOT populate `save_prefixes` (CLI saves to disk via callback; server gets `save_prefixes` from client — see Issue 8).
+**`_build_approval_decisions()`**: For each pending approval, calls `self.approval_callback(tool_result)` with the full `StructuredToolResult` from the event data. Returns list of `ToolApprovalDecision`. Does NOT populate `save_prefixes` — CLI saves to disk via callback; server gets `save_prefixes` from client directly.
 
-**`_sum_costs()`**: Module-level function. Precise semantics (see Issue 2):
+**`_sum_costs()`**: Module-level function.
 ```python
 def _sum_costs(a: dict, b: dict) -> dict:
+    """Sum two cost dicts across approval rounds."""
     SUM_FIELDS = ["total_cost", "total_tokens", "prompt_tokens", "completion_tokens", "reasoning_tokens", "num_compactions"]
     MAX_FIELDS = ["max_prompt_tokens_per_call", "max_completion_tokens_per_call"]
     result = {}
@@ -503,48 +515,42 @@ def _sum_costs(a: dict, b: dict) -> dict:
     return result
 ```
 
-**Cost dict → LLMResult safety (Issue 4):** Filter to known fields before unpacking:
+**Cost dict safety:** Filter to known fields before unpacking into `LLMResult`:
 ```python
 cost_fields = {k: v for k, v in accumulated_costs.items() if k in LLMCosts.model_fields}
-return LLMResult(result=..., ..., **cost_fields)
 ```
 
-### Step 4: Remove `messages_call()`, verify `prompt_call()`
+### Step 4: Remove `messages_call()`, update callers
 
-Delete `messages_call()` — it's a pass-through to `call()` with no logic. Update its 3 callers to call `call()` directly:
+Delete `messages_call()`. Update its 3 callers to call `call()` directly:
 - `server.py:401` → `ai.call(messages=messages, ...)`
 - `tests/test_cache.py` → update call site
 - `tests/test_server_endpoints.py` → update call site
 
-`prompt_call()` builds messages and calls `call()` — no changes needed (other than removing the dead `user_prompt=user_prompt` kwarg in Step 5).
-
 ### Step 5: Delete dead code
 
-Remove the old `call()` loop body (~220 lines). The method stays but becomes ~60 lines.
+- Remove old `call()` loop body (~220 lines). The method stays but becomes ~60 lines.
+- Remove `_handle_tool_call_approval()` — no longer called.
+- Remove `messages_call()` — callers updated in Step 4.
+- Remove `user_prompt` parameter from `call()`. Update `prompt_call()` to stop passing it.
+- `process_tool_decisions()` stays — still called by `call_stream()` on re-invocation.
 
-Remove `_handle_tool_call_approval()` — no longer called by anything.
+### Step 5b: Write Test 6 (post-refactor approval)
 
-Remove `messages_call()` — pass-through with no logic. Callers updated in Step 4.
+Write Test 6. Run green.
 
-Remove `user_prompt` parameter from `call()` (dead code — declared but never read). Update `prompt_call()` to stop passing it.
-
-Check if `process_tool_decisions()` is still needed (yes — it's called by `call_stream()` on re-invocation with `tool_decisions`).
-
-### Step 6: Run tests
+### Step 6: Run all tests
 
 ```bash
 poetry run pytest tests -m "not llm" --no-cov
 ```
 
-Run baseline tests from Step 0 + Test 6 (post-refactor approval flow).
-
 ## Files to Modify
 
 | File | Change |
 |---|---|
-| `holmes/core/tool_calling_llm.py` | Main refactor: simplify `call_stream()` signature, add params, enrich ANSWER_END + APPROVAL_REQUIRED, `call()` becomes wrapper, add `_build_approval_decisions()` + `_sum_costs()`, delete old loop |
-| `tests/test_tool_calling_llm_baseline.py` (NEW) | Baseline + regression tests (Tests 1-6) |
-
+| `holmes/core/tool_calling_llm.py` | Main refactor: simplify `call_stream()` signature, add params, enrich ANSWER_END + APPROVAL_REQUIRED, `call()` becomes wrapper, add `_build_approval_decisions()` + `_sum_costs()`, delete old loop + `_handle_tool_call_approval()` + `messages_call()`, remove dead `user_prompt` param |
+| `tests/test_tool_calling_llm_baseline.py` (NEW) | All tests (1-9) |
 | `server.py` | Replace `ai.messages_call(...)` with `ai.call(...)` |
 | `tests/test_cache.py` | Replace `messages_call()` with `call()` |
 | `tests/test_server_endpoints.py` | Replace `messages_call()` with `call()` |
@@ -553,129 +559,14 @@ No changes needed to: `main.py`, `interactive.py`, `checks.py`, `experimental/ag
 
 Note: `prompt_call()` is inside `tool_calling_llm.py` — its `user_prompt=user_prompt` kwarg is removed as part of the main file change.
 
-## Critique Findings (Issues to Address)
-
-### Issue 1: Approved tools missing from `tool_calls` across approval rounds (Data Loss Bug)
-
-When the `call()` wrapper encounters APPROVAL_REQUIRED and re-invokes `call_stream()` with `tool_decisions`, `process_tool_decisions()` executes the approved tools and yields TOOL_RESULT events. These tool calls happen BEFORE the new `call_stream()` generator enters its main loop. The `all_tool_calls` list inside `call_stream()` starts empty on each invocation.
-
-**Fix:** The `call()` wrapper must collect `tool_calls` from EACH round's ANSWER_END and accumulate them across rounds. The wrapper pseudocode already does `all_tool_calls.extend(answer_data.get("tool_calls", []))` — but `call_stream()` must also include tools executed by `process_tool_decisions()` in its `all_tool_calls`. When `process_tool_decisions()` returns events, those TOOL_RESULT events contain tool call data. `call_stream()` must append these to its `all_tool_calls` list (using `as_tool_result_response()` format) before the main loop begins.
-
-### Issue 2: `_sum_costs()` must be precisely defined
-
-The `LLMCosts` fields have different aggregation semantics (from `_process_cost_info()` at lines 175-188):
-- **Sum fields:** `total_cost`, `total_tokens`, `prompt_tokens`, `completion_tokens`, `reasoning_tokens`, `num_compactions`
-- **Max fields:** `max_prompt_tokens_per_call`, `max_completion_tokens_per_call`
-- **Optional-sum field:** `cached_tokens` — is `Optional[int]`, must handle None: `(a or 0) + (b or 0)`, return None if both are None
-
-```python
-def _sum_costs(a: dict, b: dict) -> dict:
-    """Sum two cost dicts across approval rounds."""
-    SUM_FIELDS = ["total_cost", "total_tokens", "prompt_tokens", "completion_tokens", "reasoning_tokens", "num_compactions"]
-    MAX_FIELDS = ["max_prompt_tokens_per_call", "max_completion_tokens_per_call"]
-    result = {}
-    for field in SUM_FIELDS:
-        result[field] = a.get(field, 0) + b.get(field, 0)
-    for field in MAX_FIELDS:
-        result[field] = max(a.get(field, 0), b.get(field, 0))
-    # cached_tokens: Optional[int] — None if neither had it
-    a_cached, b_cached = a.get("cached_tokens"), b.get("cached_tokens")
-    if a_cached is not None or b_cached is not None:
-        result["cached_tokens"] = (a_cached or 0) + (b_cached or 0)
-    else:
-        result["cached_tokens"] = None
-    return result
-```
-
-### Issue 3: Tool count logging should fire on START_TOOL batch, not TOOL_RESULT
-
-Current `call()` logs `"The AI requested N tool call(s)."` at line 556-557, BEFORE tool execution. `START_TOOL` events are yielded BEFORE execution starts (that's the point — they notify the client that execution is about to begin). `TOOL_RESULT` events come AFTER execution.
-
-**Fix:** Log tool count when we've collected all START_TOOL events for a batch and the first non-START_TOOL event arrives (or the batch is complete). The simplest approach: count START_TOOL events, log the count when we see the first TOOL_RESULT, then reset. This matches the current timing (log before execution, since START_TOOL and TOOL_RESULT alternate per batch in the stream — START_TOOL events for the whole batch come first, then TOOL_RESULT events).
-
-Updated wrapper pseudocode (already correct in the plan — the logging fires on the first TOOL_RESULT which is the right time to log, since all START_TOOLs for the batch have already been counted).
-
-### Issue 4: Cost dict unpacking into LLMResult may fail Pydantic validation
-
-`LLMResult(**accumulated_costs)` could fail if `accumulated_costs` contains unexpected keys. Since `_sum_costs()` is fully controlled and only produces known fields, this is safe. But as defense-in-depth, use `model_validate`:
-
-```python
-# Instead of: LLMResult(result=..., **accumulated_costs)
-# Use:
-cost_fields = {k: v for k, v in accumulated_costs.items() if k in LLMCosts.model_fields}
-return LLMResult(result=answer_data["content"], ..., **cost_fields)
-```
-
-### Issue 5: Test 2 (Equivalence) cannot be a Step 0 baseline test
-
-Test 2 verifies that `call()` result matches what you'd reconstruct from `call_stream()` ANSWER_END. But ANSWER_END doesn't contain `tool_calls`, `num_llm_calls`, or `prompt` until Step 2 enriches it.
-
-**Fix:** Move Test 2 to Step 2 validation (write it after enriching ANSWER_END, before rewriting `call()`). It verifies the enrichment is correct by comparing against current `call()` output.
-
-### Issue 6: Test 5 (Cancellation) has a race condition
-
-Using `threading.Timer` to set `cancel_event` after a delay is timing-dependent and flaky.
-
-**Fix:** Use a synchronous `side_effect` on the mocked tool executor that sets `cancel_event` deterministically when the tool is "invoked":
-
-```python
-def set_cancel_on_tool_call(*args, **kwargs):
-    cancel_event.set()
-    return mock_tool_result  # return normally; cancel is checked after tool execution
-
-mock_tool_executor.invoke_tool.side_effect = set_cancel_on_tool_call
-```
-
-### Issue 7: Missing test scenarios
-
-Add these additional tests:
-
-**Test 7: Tool returning ERROR status**
-- Mock LLM to call a tool, mock tool to return ERROR status
-- Verify `call()` continues the loop (LLM gets the error and can respond)
-- Verify `call_stream()` yields TOOL_RESULT with error data
-
-**Test 8: `max_steps` boundary**
-- Set `max_steps=2` on the LLM
-- Mock LLM to always return tool calls (never a text answer)
-- Verify the loop terminates after 2 iterations
-- Verify the result contains whatever the LLM said in the last iteration
-
-**Test 9: `response_format` passthrough**
-- Mock LLM and call with `response_format={"type": "json_object"}`
-- Verify the format is passed through to `litellm.completion()` call
-
-### Issue 8: CLI prefix saving — two parallel mechanisms (not server-only)
-
-The initial assessment said "save_prefixes is server-only." This is WRONG. The CLI saves approved prefixes to disk:
-
-**CLI path** (current `call()` → `_handle_tool_call_approval()` → `self.approval_callback()`):
-- `interactive.py:handle_tool_approval()` line 770-772: calls `_save_approved_prefixes(prefixes)` directly to `~/.holmes/bash_approved_prefixes.yaml`
-- Returns `(True, None)` — the caller (`_handle_tool_call_approval`) doesn't know about the prefixes
-- No session memory in messages — disk file is the persistence mechanism
-- On subsequent tool calls in the same turn, `requires_approval()` re-reads the disk file → finds prefix → approved
-
-**Server path** (current `call_stream()`):
-- Client sends `ToolApprovalDecision.save_prefixes` on re-invocation
-- `process_tool_decisions()` line 348-354: stores in message metadata as `bash_session_approved_prefixes`
-- `extract_bash_session_prefixes()` reads from messages before each tool execution batch
-
-**In the refactored model**, both mechanisms work correctly:
-- **CLI:** `_build_approval_decisions()` calls the callback → callback saves to disk. `ToolApprovalDecision.save_prefixes` is None (callback doesn't return prefixes). `process_tool_decisions()` gets `save_prefixes=None` → no session memory update. Fine — disk file is the CLI mechanism. Subsequent tools in the same turn re-read the disk file.
-- **Server:** No change — `call_stream()` receives `tool_decisions` from the client with `save_prefixes` populated.
-
-**The callback signature doesn't need to change.** The two mechanisms are parallel and independent.
-
-**Lost optimization:** Current `_handle_tool_call_approval()` has a "re-check" at line 891: if another tool in the same batch already approved the prefix, skip the callback. In the refactored model, `call_stream()` yields APPROVAL_REQUIRED for ALL pending tools at once — the wrapper calls the callback for each. This means the user might be asked twice for the same prefix if two tools in the same batch need it. Acceptable trade-off — rare scenario, and the second approval is a no-op (prefix already saved to disk by the first callback).
-
 ## Risks
 
 1. **Approval round-trip overhead**: Each approval creates a new generator. Context window limiting and tool re-fetch run again. Acceptable — approval is rare and these are cheap vs LLM calls.
 
-2. **`max_steps` across approval re-invocations**: Each invocation resets `i = 0`. Slightly more permissive than today. Accepted — approval is rare, extra headroom is harmless.
+2. **`max_steps` across approval re-invocations**: Each `call_stream()` invocation resets `i = 0`. Slightly more permissive than today's single-loop behavior. Accepted — approval is rare, extra headroom is harmless.
 
 3. **`_build_approval_decisions()` must pass correct data to callback**: The interactive callback reads `tool_result.invocation` and `tool_result.params.suggested_prefixes`. The enriched `APPROVAL_REQUIRED` event must carry the full `StructuredToolResult` with these fields populated. This data is available inside `call_stream()` at the point where `APPROVAL_REQUIRED` status is detected — it's the `tool_call_result.result` object.
 
 4. **`_runbook_in_use` thread safety** (pre-existing): `CheckRunner` shares one `ToolCallingLLM` across threads. The `_runbook_in_use` flag is a latent race condition. Not introduced by this refactor, not triggered today (checks don't use runbooks).
 
-5. **Logging parity edge case**: Current `call()` logs tool count BEFORE tools execute (line 556-557). The wrapper logs it when it sees `START_TOOL` events which are yielded BEFORE tool execution starts. Timing should match. But the exact log output format must be verified against current behavior.
+5. **Duplicate approval prompts for same prefix**: If two tools in the same batch need the same prefix, both get APPROVAL_REQUIRED. The wrapper calls the callback for each — user sees two prompts. The second is a no-op (prefix already saved by first). Acceptable — rare scenario.
