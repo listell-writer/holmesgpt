@@ -200,7 +200,8 @@ This matches how the server already handles approval resumption today.
 **Trade-offs accepted:**
 - Each approval round creates a new generator and re-enters the loop (context window limiting, tool re-fetch run again) — slight inefficiency but keeps the code simple.
 - `call()` wrapper needs a while loop to handle multiple approval rounds in one conversation turn.
-- Current `_handle_tool_call_approval()` has a "re-check" optimization at line 891: if another tool in the same batch already approved the prefix, skip the callback. In the refactored model, `call_stream()` yields APPROVAL_REQUIRED for ALL pending tools at once — the wrapper calls the callback for each. The user might be asked twice for the same prefix if two tools in the same batch need it. Acceptable — rare scenario, and the second approval is a no-op (prefix already saved to disk by the first callback).
+
+**Duplicate approval prevention:** `call_stream()` yields APPROVAL_REQUIRED for ALL pending tools at once. `_build_approval_decisions()` iterates through them and calls the callback for each. Before calling the callback, it re-checks whether approval is still needed (using `_is_tool_call_already_approved`, same logic as current line 891). If a previous tool in the same batch already saved the prefix to disk, the re-check finds it approved and auto-approves without prompting. This preserves the current UX exactly.
 
 ### Approval Event Data: Enrich with full StructuredToolResult
 
@@ -497,7 +498,10 @@ def call(self, messages, response_format=None,
 
 ### Step 3b: Helper methods
 
-**`_build_approval_decisions()`**: For each pending approval, calls `self.approval_callback(tool_result)` with the full `StructuredToolResult` from the event data. Returns list of `ToolApprovalDecision`. Does NOT populate `save_prefixes` — CLI saves to disk via callback; server gets `save_prefixes` from client directly.
+**`_build_approval_decisions()`**: For each pending approval:
+1. Re-check if approval is still needed via `_is_tool_call_already_approved()` (a previous tool in the same batch may have just saved the prefix to disk). If already approved, auto-approve without prompting.
+2. Otherwise, call `self.approval_callback(tool_result)` with the full `StructuredToolResult` from the event data.
+3. Return list of `ToolApprovalDecision`. Does NOT populate `save_prefixes` — CLI saves to disk via callback; server gets `save_prefixes` from client directly.
 
 **`_sum_costs()`**: Module-level function.
 ```python
@@ -569,4 +573,53 @@ Note: `prompt_call()` is inside `tool_calling_llm.py` — its `user_prompt=user_
 
 4. **`_runbook_in_use` thread safety** (pre-existing): `CheckRunner` shares one `ToolCallingLLM` across threads. The `_runbook_in_use` flag is a latent race condition. Not introduced by this refactor, not triggered today (checks don't use runbooks).
 
-5. **Duplicate approval prompts for same prefix**: If two tools in the same batch need the same prefix, both get APPROVAL_REQUIRED. The wrapper calls the callback for each — user sees two prompts. The second is a no-op (prefix already saved by first). Acceptable — rare scenario.
+5. **`_is_tool_call_already_approved` must work inside `_build_approval_decisions()`**: The re-check reads the bash toolset's current allow list. For CLI, this means re-reading the disk file. For this to catch a prefix saved by a callback earlier in the same batch, the disk write must be flushed before the re-check reads. This is the case — `save_cli_bash_tools_approved_prefixes()` uses `open()/write()/close()` synchronously.
+
+## Follow-up Refactoring (Out of Scope)
+
+### Unify `as_tool_result_response()` and `as_streaming_tool_result_response()`
+
+`ToolCallResult` (`holmes/core/models.py:22-64`) has two nearly identical serialization methods:
+
+```python
+# as_tool_result_response() — used for LLMResult.tool_calls (non-streaming)
+{"tool_call_id": ..., "tool_name": ..., "description": ..., "role": "tool", "result": ...}
+
+# as_streaming_tool_result_response() — used for TOOL_RESULT SSE events (streaming)
+{"tool_call_id": ..., "name": ..., "description": ..., "role": "tool", "result": ...}
+```
+
+The only difference is the key for the tool name: `tool_name` vs `name`. This appears to be an accidental divergence, not intentional.
+
+**Current usage:**
+- `as_tool_result_response()`: Accumulated into `LLMResult.tool_calls` → returned to callers via `ChatResponse.tool_calls` → consumed by frontend. Also used for the repeated-call safeguard list and in `test_safeguards.py` (14 times).
+- `as_streaming_tool_result_response()`: Put into `TOOL_RESULT` SSE event data → consumed by frontend via `stream_chat_formatter()`. Also used in `process_tool_decisions()`.
+
+**Why out of scope:** Changing either format is a wire format change that could break frontend clients. Needs coordinated investigation of client repositories.
+
+**Investigation prompt for client repositories:**
+```
+Search this codebase for how it handles tool call results from the HolmesGPT API.
+Specifically:
+
+1. Find code that parses the `tool_calls` array from non-streaming ChatResponse
+   (the /api/chat endpoint). Look for access to the key "tool_name" on each tool
+   call result object.
+
+2. Find code that parses SSE TOOL_RESULT events from the streaming /api/chat
+   endpoint. Look for access to the key "name" on the event data.
+
+3. List every place these keys are read, with file paths and line numbers.
+
+4. Are both "tool_name" and "name" used, or only one? Could they be unified to
+   a single key without breaking anything?
+
+Context: HolmesGPT has two serialization methods for ToolCallResult that produce
+nearly identical dicts but use different keys ("tool_name" vs "name"). We want to
+unify them but need to know which key(s) clients actually depend on.
+```
+
+**Resolution options (for later):**
+- If clients only use one key: delete the other method, use the surviving one everywhere
+- If clients use both: pick one, update all clients, then delete the other method
+- If both keys must stay for backwards compatibility: add an alias (include both keys in a single method)
