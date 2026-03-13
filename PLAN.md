@@ -509,15 +509,22 @@ cost_fields = {k: v for k, v in accumulated_costs.items() if k in LLMCosts.model
 return LLMResult(result=..., ..., **cost_fields)
 ```
 
-### Step 4: Verify `prompt_call()` and `messages_call()`
+### Step 4: Remove `messages_call()`, verify `prompt_call()`
 
-These already delegate to `call()` — no changes needed. `prompt_call()` builds messages and calls `call()`. `messages_call()` calls `call()` directly. Both keep working.
+Delete `messages_call()` — it's a pass-through to `call()` with no logic. Update its 3 callers to call `call()` directly:
+- `server.py:401` → `ai.call(messages=messages, ...)`
+- `tests/test_cache.py` → update call site
+- `tests/test_server_endpoints.py` → update call site
+
+`prompt_call()` builds messages and calls `call()` — no changes needed (other than removing the dead `user_prompt=user_prompt` kwarg in Step 5).
 
 ### Step 5: Delete dead code
 
 Remove the old `call()` loop body (~220 lines). The method stays but becomes ~60 lines.
 
 Remove `_handle_tool_call_approval()` — no longer called by anything.
+
+Remove `messages_call()` — pass-through with no logic. Callers updated in Step 4.
 
 Remove `user_prompt` parameter from `call()` (dead code — declared but never read). Update `prompt_call()` to stop passing it.
 
@@ -538,7 +545,11 @@ Run baseline tests from Step 0 + Test 6 (post-refactor approval flow).
 | `holmes/core/tool_calling_llm.py` | Main refactor: simplify `call_stream()` signature, add params, enrich ANSWER_END + APPROVAL_REQUIRED, `call()` becomes wrapper, add `_build_approval_decisions()` + `_sum_costs()`, delete old loop |
 | `tests/test_tool_calling_llm_baseline.py` (NEW) | Baseline + regression tests (Tests 1-6) |
 
-No changes needed to: `main.py`, `interactive.py`, `checks.py`, `server.py`, `experimental/ag-ui/server-agui.py`, `holmes/utils/stream.py`.
+| `server.py` | Replace `ai.messages_call(...)` with `ai.call(...)` |
+| `tests/test_cache.py` | Replace `messages_call()` with `call()` |
+| `tests/test_server_endpoints.py` | Replace `messages_call()` with `call()` |
+
+No changes needed to: `main.py`, `interactive.py`, `checks.py`, `experimental/ag-ui/server-agui.py`, `holmes/utils/stream.py`.
 
 Note: `prompt_call()` is inside `tool_calling_llm.py` — its `user_prompt=user_prompt` kwarg is removed as part of the main file change.
 
