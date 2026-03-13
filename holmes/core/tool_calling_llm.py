@@ -219,6 +219,22 @@ class ToolCallWithDecision(BaseModel):
     decision: Optional[ToolApprovalDecision]
 
 
+def _accumulate_compaction_costs(costs: LLMCosts, compaction) -> None:
+    """Add compaction token usage and cost to the running totals."""
+    if compaction.total_tokens > 0:
+        costs.num_compactions += 1
+        costs.total_tokens += compaction.total_tokens
+        costs.prompt_tokens += compaction.prompt_tokens
+        costs.completion_tokens += compaction.completion_tokens
+        costs.total_cost += compaction.cost
+        costs.max_prompt_tokens_per_call = max(
+            costs.max_prompt_tokens_per_call, compaction.prompt_tokens
+        )
+        costs.max_completion_tokens_per_call = max(
+            costs.max_completion_tokens_per_call, compaction.completion_tokens
+        )
+
+
 class ToolCallingLLM:
     llm: LLM
 
@@ -447,21 +463,7 @@ class ToolCallingLLM:
             messages = limit_result.messages
             metadata = metadata | limit_result.metadata
 
-            # Always accumulate compaction tokens/cost when a compaction LLM call
-            # was attempted, even if it didn't reduce token count
-            compaction = limit_result.compaction_usage
-            if compaction.total_tokens > 0:
-                costs.num_compactions += 1
-                costs.total_tokens += compaction.total_tokens
-                costs.prompt_tokens += compaction.prompt_tokens
-                costs.completion_tokens += compaction.completion_tokens
-                costs.total_cost += compaction.cost
-                costs.max_prompt_tokens_per_call = max(
-                    costs.max_prompt_tokens_per_call, compaction.prompt_tokens
-                )
-                costs.max_completion_tokens_per_call = max(
-                    costs.max_completion_tokens_per_call, compaction.completion_tokens
-                )
+            _accumulate_compaction_costs(costs, limit_result.compaction_usage)
 
             if (
                 limit_result.conversation_history_compacted
@@ -986,24 +988,7 @@ class ToolCallingLLM:
             messages = limit_result.messages
             metadata = metadata | limit_result.metadata
 
-            # Accumulate compaction costs (mirrors call() logic)
-            compaction = limit_result.compaction_usage
-            if compaction.total_tokens > 0:
-                costs.num_compactions += 1
-                costs.total_tokens += compaction.total_tokens
-                costs.prompt_tokens += compaction.prompt_tokens
-                costs.completion_tokens += compaction.completion_tokens
-                costs.total_cost += compaction.cost
-                costs.max_prompt_tokens_per_call = max(
-                    costs.max_prompt_tokens_per_call, compaction.prompt_tokens
-                )
-                costs.max_completion_tokens_per_call = max(
-                    costs.max_completion_tokens_per_call, compaction.completion_tokens
-                )
-                cost_logger.debug(
-                    f"Compaction cost (streaming): ${compaction.cost:.6f} | "
-                    f"Tokens: {compaction.prompt_tokens} prompt + {compaction.completion_tokens} completion = {compaction.total_tokens} total"
-                )
+            _accumulate_compaction_costs(costs, limit_result.compaction_usage)
 
             if (
                 limit_result.conversation_history_compacted
