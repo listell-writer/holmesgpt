@@ -427,6 +427,17 @@ class ToolCallingLLM:
             include_restricted=self._should_include_restricted_tools(),
         )
 
+    def _refresh_tools_if_needed(self, tools: Optional[list]) -> Optional[list]:
+        """Re-fetch tools if a runbook was just activated (enables restricted tools)."""
+        if self._runbook_in_use and tools is not None:
+            new_tools = self._get_tools()
+            if len(new_tools) != len(tools):
+                logging.info(
+                    f"Runbook activated - refreshing tools list ({len(tools)} -> {len(new_tools)} tools)"
+                )
+                return new_tools
+        return tools
+
     @sentry_sdk.trace
     def call(  # type: ignore
         self,
@@ -617,14 +628,7 @@ class ToolCallingLLM:
                 # Update the tool number offset for the next iteration
                 tool_number_offset += len(tools_to_call)
 
-                # Re-fetch tools if runbook was just activated (enables restricted tools)
-                if self._runbook_in_use and tools is not None:
-                    new_tools = self._get_tools()
-                    if len(new_tools) != len(tools):
-                        logging.info(
-                            f"Runbook activated - refreshing tools list ({len(tools)} -> {len(new_tools)} tools)"
-                        )
-                        tools = new_tools
+                tools = self._refresh_tools_if_needed(tools)
 
                 # Add a blank line after all tools in this batch complete
                 if tools_to_call:
@@ -1189,14 +1193,7 @@ class ToolCallingLLM:
                 # Update the tool number offset for the next iteration
                 tool_number_offset += len(tools_to_call)
 
-                # Re-fetch tools if runbook was just activated (enables restricted tools)
-                if self._runbook_in_use and tools is not None:
-                    new_tools = self._get_tools()
-                    if len(new_tools) != len(tools):
-                        logging.info(
-                            f"Runbook activated - refreshing tools list ({len(tools)} -> {len(new_tools)} tools)"
-                        )
-                        tools = new_tools
+                tools = self._refresh_tools_if_needed(tools)
 
         raise Exception(
             f"Too many LLM calls - exceeded max_steps: {i}/{self.max_steps}"
