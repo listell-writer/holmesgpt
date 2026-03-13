@@ -427,6 +427,48 @@ class ToolCallingLLM:
             include_restricted=self._should_include_restricted_tools(),
         )
 
+    def _call_llm_with_error_handling(
+        self,
+        messages: List[Dict[str, Any]],
+        tools: Optional[list],
+        tool_choice: Optional[Union[str, dict]],
+        response_format: Optional[Union[dict, Type[BaseModel]]],
+        costs: LLMCosts,
+        iteration: int,
+    ) -> Any:
+        """Call LLM completion with standardized error handling and cost tracking."""
+        logging.debug(f"sending messages={messages}\n\ntools={tools}")
+        try:
+            full_response = self.llm.completion(
+                messages=parse_messages_tags(messages),
+                tools=tools,
+                tool_choice=tool_choice,
+                temperature=TEMPERATURE,
+                response_format=response_format,
+                drop_params=True,
+            )
+            logging.debug(f"got response {full_response.to_json()}")  # type: ignore
+            _process_cost_info(full_response, costs, "LLM call")
+            return full_response
+        except BadRequestError as e:
+            if "Unrecognized request arguments supplied: tool_choice, tools" in str(e):
+                raise Exception(
+                    "The Azure model you chose is not supported. Model version 1106 and higher required."
+                ) from e
+            else:
+                logging.error(
+                    f"LLM BadRequestError on model={self.llm.model} (iteration {iteration}): {e}",
+                    exc_info=True,
+                )
+                raise
+        except Exception as e:
+            logging.error(
+                f"LLM call failed on model={self.llm.model} (iteration {iteration}): "
+                f"{type(e).__name__}: {e}",
+                exc_info=True,
+            )
+            raise
+
     def _refresh_tools_if_needed(self, tools: Optional[list]) -> Optional[list]:
         """Re-fetch tools if a runbook was just activated (enables restricted tools)."""
         if self._runbook_in_use and tools is not None:
@@ -482,43 +524,14 @@ class ToolCallingLLM:
             ):
                 tool_calls = []
 
-            logging.debug(f"sending messages={messages}\n\ntools={tools}")
-
-            try:
-                full_response = self.llm.completion(
-                    messages=parse_messages_tags(messages),
-                    tools=tools,
-                    tool_choice=tool_choice,
-                    temperature=TEMPERATURE,
-                    response_format=response_format,
-                    drop_params=True,
-                )
-                logging.debug(f"got response {full_response.to_json()}")  # type: ignore
-
-                # Extract and accumulate cost information
-                _process_cost_info(full_response, costs, "LLM call")
-
-            # catch a known error that occurs with Azure and replace the error message with something more obvious to the user
-            except BadRequestError as e:
-                if "Unrecognized request arguments supplied: tool_choice, tools" in str(
-                    e
-                ):
-                    raise Exception(
-                        "The Azure model you chose is not supported. Model version 1106 and higher required."
-                    )
-                else:
-                    logging.error(
-                        f"LLM BadRequestError on model={self.llm.model} (iteration {i}): {e}",
-                        exc_info=True,
-                    )
-                    raise
-            except Exception as e:
-                logging.error(
-                    f"LLM call failed on model={self.llm.model} (iteration {i}): "
-                    f"{type(e).__name__}: {e}",
-                    exc_info=True,
-                )
-                raise
+            full_response = self._call_llm_with_error_handling(
+                messages=messages,
+                tools=tools,
+                tool_choice=tool_choice,
+                response_format=response_format,
+                costs=costs,
+                iteration=i,
+            )
 
             if cancel_event and cancel_event.is_set():
                 raise LLMInterruptedError()
@@ -1000,43 +1013,14 @@ class ToolCallingLLM:
             ):
                 tool_calls = []
 
-            logging.debug(f"sending messages={messages}\n\ntools={tools}")
-
-            try:
-                full_response = self.llm.completion(
-                    messages=parse_messages_tags(messages),  # type: ignore
-                    tools=tools,
-                    tool_choice=tool_choice,
-                    response_format=response_format,
-                    temperature=TEMPERATURE,
-                    stream=False,
-                    drop_params=True,
-                )
-
-                # Accumulate cost information for this iteration
-                _process_cost_info(full_response, costs, log_prefix="LLM iteration")
-
-            # catch a known error that occurs with Azure and replace the error message with something more obvious to the user
-            except BadRequestError as e:
-                if "Unrecognized request arguments supplied: tool_choice, tools" in str(
-                    e
-                ):
-                    raise Exception(
-                        "The Azure model you chose is not supported. Model version 1106 and higher required."
-                    ) from e
-                else:
-                    logging.error(
-                        f"LLM BadRequestError on model={self.llm.model} (streaming iteration {i}): {e}",
-                        exc_info=True,
-                    )
-                    raise
-            except Exception as e:
-                logging.error(
-                    f"LLM call failed on model={self.llm.model} (streaming iteration {i}): "
-                    f"{type(e).__name__}: {e}",
-                    exc_info=True,
-                )
-                raise
+            full_response = self._call_llm_with_error_handling(
+                messages=messages,
+                tools=tools,
+                tool_choice=tool_choice,
+                response_format=response_format,
+                costs=costs,
+                iteration=i,
+            )
 
             response_message = full_response.choices[0].message  # type: ignore
 
