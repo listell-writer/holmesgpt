@@ -1,27 +1,30 @@
-# Test: Data Warehouse - Product Category Profitability (Multi-Table Cost Analysis)
+# Test: Data Warehouse - Product Category Profitability (Multi-Hop Cost Analysis)
 # Tests whether Holmes can determine the most profitable product category by
-# correctly gathering costs from FOUR separate tables and not just using revenue.
+# navigating complex indirect joins to gather costs from multiple tables.
 #
 # Ground truth:
-#   Sensors = most profitable ($117.6K profit, 81.8% margin)
-#   Gadgets = highest REVENUE ($225K) but only $46.8K profit (20.9% margin)
+#   Sensors = most profitable ($97K profit, 83.2% margin)
+#   Gadgets = highest REVENUE ($168K) but only $37.7K profit (22.5% margin)
+#   Electronics = looks profitable but hidden costs ($57.6K profit, 46.0% margin)
 #
-# The trap: Costs are scattered across 4 tables with non-obvious joins:
-#   - supplier_costs: per-product with DATE RANGES (costs changed mid-quarter)
-#   - shipping_costs: per-ORDER (must allocate across line items)
-#   - warehouse_fees: per-CATEGORY per month (joins on category name string)
-#   - returns: reduce net revenue (joins on line_id)
+# The trap: Costs require multi-hop joins that aren't obvious:
+#   - COGS: procurement_orders → procurement_line_items → products (NOT direct supplier_costs)
+#   - Shipping: fulfillment_batches → shipment_charges + batch_orders bridge (NOT per-order)
+#   - Warehouse: facility_rates joined via products.warehouse_id (NOT by category string)
+#   - Returns: order_adjustments with adjustment_type='return' (NOT a dedicated returns table)
 #
-# Red herring: cost_allocations table has corporate overhead numbers that look
-# like product costs but are internal accounting entries, not direct costs.
+# Red herrings:
+#   - financial_summary: pre-computed profits using WRONG outdated 2024 cost basis
+#   - budget_forecast: planning numbers, not actuals
+#   - cost_allocations: corporate overhead, not product costs
 
-user_prompt: "Looking at our Q1 2025 sales data, which product category is the most profitable? Don't just look at revenue - I need actual profitability accounting for all costs including supplier costs, shipping, warehousing, and returns."
+user_prompt: "Which product category generated the most profit in Q1 2025? I need a proper profitability analysis, not just a revenue ranking."
 
 expected_output:
-  - "Must identify Sensors as the most profitable category (highest gross profit), NOT Gadgets which has the highest revenue"
-  - "Must account for supplier/procurement costs (COGS) from the supplier_costs table - Gadgets have very high COGS (~$152K) while Sensors have low COGS (~$22K)"
-  - "Must account for shipping costs from the shipping_costs table and recognize that shipping is per-order and needs allocation across line items"
-  - "Must account for warehouse fees from the warehouse_fees table"
+  - "Must identify Sensors as the most profitable category (highest gross profit ~$97K), NOT Gadgets which has the highest revenue (~$168K) but lower profit (~$38K)"
+  - "Must NOT use the financial_summary table as the answer - those numbers are pre-computed with outdated 2024 cost basis and are wrong (e.g., shows Gadgets at $100K profit when actual is ~$38K)"
+  - "Must derive COGS from procurement_orders/procurement_line_items tables (multi-hop join through PO system), not from any summary table"
+  - "Must account for shipping costs derived from fulfillment_batches, shipment_charges, and batch_orders (three-table join, NOT per-order shipping)"
 
 include_tool_calls: true
 
@@ -41,10 +44,12 @@ before_test: |
   c = conn.cursor()
   c.execute('SELECT COUNT(*) FROM order_lines')
   print(f'Order lines: {c.fetchone()[0]}')
-  c.execute('SELECT COUNT(*) FROM supplier_costs')
-  print(f'Supplier cost rows: {c.fetchone()[0]}')
-  c.execute('SELECT COUNT(*) FROM shipping_costs')
-  print(f'Shipping cost rows: {c.fetchone()[0]}')
+  c.execute('SELECT COUNT(*) FROM procurement_line_items')
+  print(f'Procurement line items: {c.fetchone()[0]}')
+  c.execute('SELECT COUNT(*) FROM shipment_charges')
+  print(f'Shipment charges: {c.fetchone()[0]}')
+  c.execute('SELECT COUNT(*) FROM batch_orders')
+  print(f'Batch-order links: {c.fetchone()[0]}')
   conn.close()
   "
   echo "Setup complete"
