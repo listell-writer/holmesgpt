@@ -1,0 +1,8 @@
+toolsets:
+  ecommerce-warehouse:
+    type: database
+    enabled: true
+    config:
+      connection_url: "sqlite:////tmp/holmesgpt_eval_232.db"
+      read_only: true
+    llm_instructions: "This is our e-commerce data warehouse. It contains sales transactions, product catalog, customer data, and related operational tables."

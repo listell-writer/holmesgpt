@@ -1,0 +1,53 @@
+# Test: Data Warehouse - Product Category Profitability (Multi-Table Cost Analysis)
+# Tests whether Holmes can determine the most profitable product category by
+# correctly gathering costs from FOUR separate tables and not just using revenue.
+#
+# Ground truth:
+#   Sensors = most profitable ($117.6K profit, 81.8% margin)
+#   Gadgets = highest REVENUE ($225K) but only $46.8K profit (20.9% margin)
+#
+# The trap: Costs are scattered across 4 tables with non-obvious joins:
+#   - supplier_costs: per-product with DATE RANGES (costs changed mid-quarter)
+#   - shipping_costs: per-ORDER (must allocate across line items)
+#   - warehouse_fees: per-CATEGORY per month (joins on category name string)
+#   - returns: reduce net revenue (joins on line_id)
+#
+# Red herring: cost_allocations table has corporate overhead numbers that look
+# like product costs but are internal accounting entries, not direct costs.
+
+user_prompt: "Looking at our Q1 2025 sales data, which product category is the most profitable? Don't just look at revenue - I need actual profitability accounting for all costs including supplier costs, shipping, warehousing, and returns."
+
+expected_output:
+  - "Must identify Sensors as the most profitable category (highest gross profit), NOT Gadgets which has the highest revenue"
+  - "Must account for supplier/procurement costs (COGS) from the supplier_costs table - Gadgets have very high COGS (~$152K) while Sensors have low COGS (~$22K)"
+  - "Must account for shipping costs from the shipping_costs table and recognize that shipping is per-order and needs allocation across line items"
+  - "Must account for warehouse fees from the warehouse_fees table"
+
+include_tool_calls: true
+
+tags:
+  - database
+  - hard
+  - db-connectors
+  - benchmark
+
+before_test: |
+  set -e
+  python3 ./seed_db.py
+  echo "Verifying database..."
+  python3 -c "
+  import sqlite3
+  conn = sqlite3.connect('/tmp/holmesgpt_eval_233.db')
+  c = conn.cursor()
+  c.execute('SELECT COUNT(*) FROM order_lines')
+  print(f'Order lines: {c.fetchone()[0]}')
+  c.execute('SELECT COUNT(*) FROM supplier_costs')
+  print(f'Supplier cost rows: {c.fetchone()[0]}')
+  c.execute('SELECT COUNT(*) FROM shipping_costs')
+  print(f'Shipping cost rows: {c.fetchone()[0]}')
+  conn.close()
+  "
+  echo "Setup complete"
+
+after_test: |
+  rm -f /tmp/holmesgpt_eval_233.db

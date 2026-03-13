@@ -1,0 +1,49 @@
+# Test: Data Warehouse - Revenue Drop Root Cause Analysis
+# Tests whether Holmes can diagnose a multi-factor revenue decline by
+# cross-referencing orders, returns, pricing_history, and promotions tables.
+#
+# Ground truth (a human analyst would report all 3 factors):
+# 1. Massive returns spike on UltraWidget Pro (product 7) - ~$34.5K in March returns
+#    vs ~$500 in Feb (defective batch)
+# 2. Price cut on top seller CoreWidget Standard (product 1) from $49.99 to $29.99
+#    on March 15 - ~$8.2K revenue impact (only visible in pricing_history table)
+# 3. SPRING_CLEAR promo giving 30% off Widgets in March - ~$21.5K in discounts
+#    vs ~$87 in Feb promos
+#
+# The trap: gross revenue only drops ~9% (orders kept coming), but net revenue
+# (after returns) drops ~29%. The LLM must look beyond order_lines to find the
+# full picture across returns, pricing_history, and promotions.
+
+user_prompt: "Our finance team flagged that March 2025 revenue is significantly below February 2025. Investigate the revenue data and tell me what's driving the decline. I need the specific root causes with dollar amounts."
+
+expected_output:
+  - "Must identify returns/refunds as a major factor, specifically mentioning UltraWidget Pro (product 7) or defective products causing ~$34K-35K in March returns"
+  - "Must identify the price reduction on CoreWidget Standard (product 1) from $49.99 to $29.99 in mid-March as a contributing factor by referencing the pricing_history table"
+  - "Must identify the SPRING_CLEAR promotion (30% discount on Widgets) as a contributing factor causing ~$21K in discounts"
+
+include_tool_calls: true
+
+tags:
+  - database
+  - hard
+  - db-connectors
+  - benchmark
+
+before_test: |
+  set -e
+  python3 ./seed_db.py
+  echo "Verifying database..."
+  python3 -c "
+  import sqlite3
+  conn = sqlite3.connect('/tmp/holmesgpt_eval_232.db')
+  c = conn.cursor()
+  c.execute('SELECT COUNT(*) FROM orders')
+  print(f'Orders: {c.fetchone()[0]}')
+  c.execute('SELECT COUNT(*) FROM returns')
+  print(f'Returns: {c.fetchone()[0]}')
+  conn.close()
+  "
+  echo "Setup complete"
+
+after_test: |
+  rm -f /tmp/holmesgpt_eval_232.db

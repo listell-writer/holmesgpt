@@ -1,0 +1,8 @@
+toolsets:
+  sales-warehouse:
+    type: database
+    enabled: true
+    config:
+      connection_url: "sqlite:////tmp/holmesgpt_eval_233.db"
+      read_only: true
+    llm_instructions: "This is our sales data warehouse containing product catalog, order transactions, and various cost tables."
