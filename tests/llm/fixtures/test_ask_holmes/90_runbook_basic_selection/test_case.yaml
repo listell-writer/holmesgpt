@@ -3,6 +3,7 @@ tags:
   - runbooks
   - transparency
   - medium
+  - regression
 
 expected_output: |
   - Finds and uses the Application Gateway troubleshooting runbook (call the appropriate tool, gets back a response)

@@ -6,3 +6,4 @@ expected_output: |
 tags:
   - easy
   - transparency
+  - regression
