@@ -71,7 +71,11 @@ def ask_holmes():
     ai = ToolCallingLLM(tool_executor, max_steps=40, llm=MyCustomLLM())
 
     user_prompt = generate_user_prompt(prompt, context={})
-    response = ai.prompt_call(system_prompt, user_prompt)
+    messages = [
+        {"role": "system", "content": system_prompt},
+        {"role": "user", "content": user_prompt},
+    ]
+    response = ai.call(messages)
 
     print(response.model_dump())
 

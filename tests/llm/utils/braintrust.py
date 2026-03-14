@@ -236,8 +236,6 @@ def log_to_braintrust(
                 None
             )
             prompt = system_msg["content"] if system_msg else "<NO SYSTEM PROMPT FOUND>"
-        elif result and hasattr(result, "prompt"):
-            prompt = result.prompt
 
     # Build comprehensive metadata
     # Extract base test case ID without variant suffix (e.g., "91a_datadog[0]" -> "91a_datadog")

@@ -138,8 +138,6 @@ class LLMResult(RequestStats):
     result: Optional[str] = None
     unprocessed_result: Optional[str] = None
     instructions: List[str] = Field(default_factory=list)
-    # TODO: clean up these two
-    prompt: Optional[str] = None
     messages: Optional[List[dict]] = None
     metadata: Optional[Dict[Any, Any]] = None
 
@@ -306,25 +304,6 @@ class ToolCallingLLM:
 
         return messages, events
 
-    def prompt_call(
-        self,
-        system_prompt: str,
-        user_prompt: str,
-        response_format: Optional[Union[dict, Type[BaseModel]]] = None,
-        trace_span=DummySpan(),
-        request_context: Optional[Dict[str, Any]] = None,
-    ) -> LLMResult:
-        messages = [
-            {"role": "system", "content": system_prompt},
-            {"role": "user", "content": user_prompt},
-        ]
-        return self.call(
-            messages,
-            response_format=response_format,
-            trace_span=trace_span,
-            request_context=request_context,
-        )
-
     def _should_include_restricted_tools(self) -> bool:
         """Check if restricted tools should be included in the tools list."""
         return self._runbook_in_use
@@ -427,7 +406,6 @@ class ToolCallingLLM:
                 result=terminal_data["content"],
                 tool_calls=list(deduped.values()),
                 num_llm_calls=total_num_llm_calls,
-                prompt=terminal_data.get("prompt"),
                 messages=terminal_data["messages"],
                 metadata=terminal_data.get("metadata"),
                 **accumulated_stats.model_dump(),

@@ -283,12 +283,11 @@ Core AI engine for tool-calling interactions (`holmes.core.tool_calling_llm.Tool
 | Method | Returns | Description |
 |--------|---------|-------------|
 | `call(messages)` | `LLMResult` | Run a tool-calling conversation with a full message list. |
-| `prompt_call(system_prompt, user_prompt)` | `LLMResult` | Single-turn call with system and user prompts. |
 | `call_stream(msgs)` | `Generator[StreamMessage]` | Streaming version that yields events between iterations. |
 
 ### `LLMResult`
 
-Response object returned by `call()` and `prompt_call()`.
+Response object returned by `call()`.
 
 | Field | Type | Description |
 |-------|------|-------------|

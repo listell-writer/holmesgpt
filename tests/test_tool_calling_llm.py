@@ -243,8 +243,6 @@ class TestMultiIterationHappyPath:
         # LLMResult.tool_calls contains ToolCallResult objects (Pydantic coerces
         # the dicts from as_tool_result_response() back into ToolCallResult)
         assert result.tool_calls[0].tool_name == "kubectl_get"
-        assert result.prompt is not None
-        json.loads(result.prompt)  # must be valid JSON
 
         # Messages should contain: original + assistant(tool_calls) + tool + assistant(answer)
         assert result.messages is not None
@@ -933,23 +931,24 @@ class TestMessageStructure:
 
 
 # ---------------------------------------------------------------------------
-# Test 14: prompt_call wrapper
+# Test 14: call() with system + user messages
 # ---------------------------------------------------------------------------
 
 
-class TestWrapperMethods:
-    """prompt_call delegates to call() correctly."""
+class TestCallWithPromptMessages:
+    """call() works correctly with system + user message list."""
 
     @patch(LIMIT_PATCH, side_effect=_make_context_limiter_passthrough)
-    def test_prompt_call(self, _mock_limit, make_ai, mock_llm):
+    def test_call_with_system_and_user(self, _mock_limit, make_ai, mock_llm):
         resp = _make_llm_response(content="response", tool_calls=None)
         mock_llm.completion.return_value = resp
 
         ai = make_ai()
-        result = ai.prompt_call(
-            system_prompt="You are helpful",
-            user_prompt="Hello",
-        )
+        messages = [
+            {"role": "system", "content": "You are helpful"},
+            {"role": "user", "content": "Hello"},
+        ]
+        result = ai.call(messages)
 
         assert result.result == "response"
         # Verify messages passed to completion have system + user
