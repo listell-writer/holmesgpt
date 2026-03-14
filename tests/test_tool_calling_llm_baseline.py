@@ -608,3 +608,362 @@ class TestResponseFormatPassthrough:
         # Should still get ANSWER_END
         answer_ends = _events_of_type(events, StreamEvents.ANSWER_END)
         assert len(answer_ends) == 1
+
+
+# ---------------------------------------------------------------------------
+# Test 2: No-tools path (LLM answers immediately)
+# ---------------------------------------------------------------------------
+
+
+class TestNoToolsPath:
+    """LLM returns a text answer without requesting any tool calls."""
+
+    @patch(LIMIT_PATCH, side_effect=_make_context_limiter_passthrough)
+    def test_call_no_tools(self, _mock_limit, make_ai, mock_llm):
+        resp = _make_llm_response(content="The answer is 42", tool_calls=None)
+        mock_llm.completion.return_value = resp
+
+        ai = make_ai()
+        result = ai.call([{"role": "user", "content": "What is the answer?"}])
+
+        assert result.result == "The answer is 42"
+        assert result.num_llm_calls == 1
+        assert result.tool_calls == []
+        assert mock_llm.completion.call_count == 1
+
+    @patch(LIMIT_PATCH, side_effect=_make_context_limiter_passthrough)
+    def test_call_stream_no_tools(self, _mock_limit, make_ai, mock_llm):
+        resp = _make_llm_response(content="The answer is 42", tool_calls=None)
+        mock_llm.completion.return_value = resp
+
+        ai = make_ai()
+        events = _collect_stream_events(
+            ai.call_stream(msgs=[{"role": "user", "content": "What is the answer?"}])
+        )
+
+        answer_ends = _events_of_type(events, StreamEvents.ANSWER_END)
+        assert len(answer_ends) == 1
+        assert answer_ends[0].data["content"] == "The answer is 42"
+
+        # No tool events should be emitted
+        start_tools = _events_of_type(events, StreamEvents.START_TOOL)
+        tool_results = _events_of_type(events, StreamEvents.TOOL_RESULT)
+        assert len(start_tools) == 0
+        assert len(tool_results) == 0
+
+
+# ---------------------------------------------------------------------------
+# Test 6: Parallel tool execution (multiple tools in one LLM response)
+# ---------------------------------------------------------------------------
+
+
+class TestParallelToolExecution:
+    """LLM requests multiple tools at once; all are executed and results returned."""
+
+    @patch(LIMIT_PATCH, side_effect=_make_context_limiter_passthrough)
+    def test_call_parallel_tools(self, _mock_limit, make_ai, mock_llm):
+        tc1 = _make_mock_tool_call(tool_call_id="tc_a", tool_name="kubectl_get",
+                                    arguments={"command": "kubectl get pods"})
+        tc2 = _make_mock_tool_call(tool_call_id="tc_b", tool_name="kubectl_get",
+                                    arguments={"command": "kubectl get services"})
+
+        resp_with_tools = _make_llm_response(content="Checking both", tool_calls=[tc1, tc2])
+        resp_final = _make_llm_response(content="Found 2 pods and 3 services", tool_calls=None)
+        mock_llm.completion.side_effect = [resp_with_tools, resp_final]
+
+        ai = make_ai()
+        ai._invoke_llm_tool_call = MagicMock(
+            side_effect=[
+                _make_tool_call_result(tool_call_id="tc_a", data="pod1 Running\npod2 Running"),
+                _make_tool_call_result(tool_call_id="tc_b", data="svc1\nsvc2\nsvc3"),
+            ]
+        )
+
+        result = ai.call([{"role": "user", "content": "Show pods and services"}])
+
+        assert result.result == "Found 2 pods and 3 services"
+        assert result.num_llm_calls == 2
+        assert len(result.tool_calls) == 2
+        assert ai._invoke_llm_tool_call.call_count == 2
+
+    @patch(LIMIT_PATCH, side_effect=_make_context_limiter_passthrough)
+    def test_call_stream_parallel_tools(self, _mock_limit, make_ai, mock_llm):
+        tc1 = _make_mock_tool_call(tool_call_id="tc_a")
+        tc2 = _make_mock_tool_call(tool_call_id="tc_b")
+
+        resp_with_tools = _make_llm_response(content="Checking", tool_calls=[tc1, tc2])
+        resp_final = _make_llm_response(content="Done", tool_calls=None)
+        mock_llm.completion.side_effect = [resp_with_tools, resp_final]
+
+        ai = make_ai()
+        ai._invoke_llm_tool_call = MagicMock(
+            side_effect=[
+                _make_tool_call_result(tool_call_id="tc_a"),
+                _make_tool_call_result(tool_call_id="tc_b"),
+            ]
+        )
+
+        events = _collect_stream_events(
+            ai.call_stream(msgs=[{"role": "user", "content": "Show all"}])
+        )
+
+        start_tools = _events_of_type(events, StreamEvents.START_TOOL)
+        tool_results = _events_of_type(events, StreamEvents.TOOL_RESULT)
+        assert len(start_tools) == 2
+        assert len(tool_results) == 2
+
+
+# ---------------------------------------------------------------------------
+# Test 10: Stream approval flow with enable_tool_approval
+# ---------------------------------------------------------------------------
+
+
+class TestStreamApprovalFlow:
+    """call_stream with enable_tool_approval emits APPROVAL_REQUIRED and stops."""
+
+    @patch(LIMIT_PATCH, side_effect=_make_context_limiter_passthrough)
+    def test_stream_approval_required_stops(self, _mock_limit, make_ai, mock_llm):
+        tc = _make_mock_tool_call(tool_call_id="tc_del", tool_name="kubectl_delete")
+        resp = _make_llm_response(content="Deleting", tool_calls=[tc])
+        mock_llm.completion.return_value = resp
+
+        ai = make_ai()
+        approval_result = _make_tool_call_result_approval(
+            tool_call_id="tc_del", tool_name="kubectl_delete"
+        )
+        ai._invoke_llm_tool_call = MagicMock(return_value=approval_result)
+
+        events = _collect_stream_events(
+            ai.call_stream(
+                msgs=[{"role": "user", "content": "Delete pod"}],
+                enable_tool_approval=True,
+            )
+        )
+
+        approval_events = _events_of_type(events, StreamEvents.APPROVAL_REQUIRED)
+        assert len(approval_events) == 1
+        assert approval_events[0].data["requires_approval"] is True
+        assert len(approval_events[0].data["pending_approvals"]) == 1
+        assert approval_events[0].data["pending_approvals"][0]["tool_call_id"] == "tc_del"
+
+        # Stream should NOT have ANSWER_END since it stopped for approval
+        answer_ends = _events_of_type(events, StreamEvents.ANSWER_END)
+        assert len(answer_ends) == 0
+
+    @patch(LIMIT_PATCH, side_effect=_make_context_limiter_passthrough)
+    def test_stream_approval_disabled_converts_to_error(self, _mock_limit, make_ai, mock_llm):
+        """When enable_tool_approval=False (default), APPROVAL_REQUIRED becomes ERROR."""
+        tc = _make_mock_tool_call(tool_call_id="tc_del", tool_name="kubectl_delete")
+        resp_with_tool = _make_llm_response(content="Deleting", tool_calls=[tc])
+        resp_final = _make_llm_response(content="Could not delete", tool_calls=None)
+        mock_llm.completion.side_effect = [resp_with_tool, resp_final]
+
+        ai = make_ai()
+        approval_result = _make_tool_call_result_approval(
+            tool_call_id="tc_del", tool_name="kubectl_delete"
+        )
+        ai._invoke_llm_tool_call = MagicMock(return_value=approval_result)
+
+        events = _collect_stream_events(
+            ai.call_stream(
+                msgs=[{"role": "user", "content": "Delete pod"}],
+                enable_tool_approval=False,
+            )
+        )
+
+        # Should NOT have APPROVAL_REQUIRED event
+        approval_events = _events_of_type(events, StreamEvents.APPROVAL_REQUIRED)
+        assert len(approval_events) == 0
+
+        # Should have error tool result and final answer
+        tool_results = _events_of_type(events, StreamEvents.TOOL_RESULT)
+        assert len(tool_results) == 1
+        assert tool_results[0].data["result"]["status"] == "error"
+
+        answer_ends = _events_of_type(events, StreamEvents.ANSWER_END)
+        assert len(answer_ends) == 1
+
+
+# ---------------------------------------------------------------------------
+# Test 11: Compaction cost accumulation
+# ---------------------------------------------------------------------------
+
+
+class TestCompactionCosts:
+    """Compaction tokens/cost from limit_input_context_window are accumulated."""
+
+    def test_call_accumulates_compaction_costs(self, make_ai, mock_llm):
+        compaction = CompactionUsage(
+            total_tokens=500, prompt_tokens=400, completion_tokens=100, cost=0.005
+        )
+        limiter_output_with_compaction = ContextWindowLimiterOutput(
+            metadata={},
+            messages=[{"role": "user", "content": "analyze"}],
+            events=[],
+            max_context_size=128000,
+            maximum_output_token=4096,
+            tokens=DEFAULT_TOKEN_COUNT,
+            conversation_history_compacted=True,
+            compaction_usage=compaction,
+        )
+        limiter_output_normal = ContextWindowLimiterOutput(
+            metadata={},
+            messages=[{"role": "user", "content": "analyze"}],
+            events=[],
+            max_context_size=128000,
+            maximum_output_token=4096,
+            tokens=DEFAULT_TOKEN_COUNT,
+            conversation_history_compacted=False,
+            compaction_usage=CompactionUsage(),
+        )
+
+        tc = _make_mock_tool_call()
+        resp1 = _make_llm_response(content="step", tool_calls=[tc], cost=0.01,
+                                    prompt_tokens=100, completion_tokens=50)
+        resp2 = _make_llm_response(content="done", tool_calls=None, cost=0.02,
+                                    prompt_tokens=200, completion_tokens=80)
+        mock_llm.completion.side_effect = [resp1, resp2]
+
+        ai = make_ai()
+        ai._invoke_llm_tool_call = MagicMock(return_value=_make_tool_call_result())
+
+        with patch(LIMIT_PATCH, side_effect=[limiter_output_with_compaction, limiter_output_normal]):
+            result = ai.call([{"role": "user", "content": "analyze"}])
+
+        # Costs = compaction(0.005) + LLM1(0.01) + LLM2(0.02) = 0.035
+        assert result.total_cost == pytest.approx(0.035, abs=1e-9)
+        # Tokens = compaction(500) + LLM1(150) + LLM2(280) = 930
+        assert result.total_tokens == 930
+        assert result.num_compactions == 1
+
+
+# ---------------------------------------------------------------------------
+# Test 12: call_stream includes costs in metadata
+# ---------------------------------------------------------------------------
+
+
+class TestStreamCostsInMetadata:
+    """call_stream includes costs dict in TOKEN_COUNT events."""
+
+    @patch(LIMIT_PATCH, side_effect=_make_context_limiter_passthrough)
+    def test_stream_metadata_has_costs(self, _mock_limit, make_ai, mock_llm):
+        resp = _make_llm_response(content="answer", tool_calls=None, cost=0.01,
+                                   prompt_tokens=100, completion_tokens=50)
+        mock_llm.completion.return_value = resp
+
+        ai = make_ai()
+        events = _collect_stream_events(
+            ai.call_stream(msgs=[{"role": "user", "content": "question"}])
+        )
+
+        token_counts = _events_of_type(events, StreamEvents.TOKEN_COUNT)
+        assert len(token_counts) >= 1
+
+        # The metadata in TOKEN_COUNT should include costs (nested under "metadata")
+        tc_data = token_counts[0].data
+        assert "metadata" in tc_data
+        assert "costs" in tc_data["metadata"]
+        assert tc_data["metadata"]["costs"]["total_cost"] == pytest.approx(0.01, abs=1e-6)
+
+
+# ---------------------------------------------------------------------------
+# Test 13: Message structure validation
+# ---------------------------------------------------------------------------
+
+
+class TestMessageStructure:
+    """Verify the ordering and structure of messages in result."""
+
+    @patch(LIMIT_PATCH, side_effect=_make_context_limiter_passthrough)
+    def test_message_ordering(self, _mock_limit, make_ai, mock_llm):
+        tc = _make_mock_tool_call()
+        resp_with_tool = _make_llm_response(content="Let me check", tool_calls=[tc])
+        resp_final = _make_llm_response(content="All good", tool_calls=None)
+        mock_llm.completion.side_effect = [resp_with_tool, resp_final]
+
+        ai = make_ai()
+        ai._invoke_llm_tool_call = MagicMock(return_value=_make_tool_call_result())
+
+        messages = [{"role": "user", "content": "Check pods"}]
+        result = ai.call(messages)
+
+        # Message sequence: user -> assistant(tool_calls) -> tool -> assistant(text)
+        roles = [m["role"] for m in result.messages]
+        assert roles[0] == "user"
+        assert roles[1] == "assistant"
+        assert roles[2] == "tool"
+        assert roles[3] == "assistant"
+
+        # Assistant message with tool calls should have tool_calls key
+        assert "tool_calls" in result.messages[1]
+
+        # Tool message should have tool_call_id
+        assert "tool_call_id" in result.messages[2]
+        assert result.messages[2]["name"] == "kubectl_get"
+
+        # Final assistant message should have content
+        assert result.messages[3]["content"] == "All good"
+
+    @patch(LIMIT_PATCH, side_effect=_make_context_limiter_passthrough)
+    def test_stream_answer_end_contains_messages(self, _mock_limit, make_ai, mock_llm):
+        tc = _make_mock_tool_call()
+        resp_with_tool = _make_llm_response(content="Checking", tool_calls=[tc])
+        resp_final = _make_llm_response(content="Done", tool_calls=None)
+        mock_llm.completion.side_effect = [resp_with_tool, resp_final]
+
+        ai = make_ai()
+        ai._invoke_llm_tool_call = MagicMock(return_value=_make_tool_call_result())
+
+        events = _collect_stream_events(
+            ai.call_stream(msgs=[{"role": "user", "content": "Check"}])
+        )
+
+        answer_ends = _events_of_type(events, StreamEvents.ANSWER_END)
+        assert len(answer_ends) == 1
+        msgs = answer_ends[0].data["messages"]
+        # Should have at least: user, assistant(tool), tool, assistant(final)
+        assert len(msgs) >= 4
+        roles = [m["role"] for m in msgs]
+        assert "tool" in roles
+
+
+# ---------------------------------------------------------------------------
+# Test 14: prompt_call and messages_call wrappers
+# ---------------------------------------------------------------------------
+
+
+class TestWrapperMethods:
+    """prompt_call and messages_call delegate to call() correctly."""
+
+    @patch(LIMIT_PATCH, side_effect=_make_context_limiter_passthrough)
+    def test_prompt_call(self, _mock_limit, make_ai, mock_llm):
+        resp = _make_llm_response(content="response", tool_calls=None)
+        mock_llm.completion.return_value = resp
+
+        ai = make_ai()
+        result = ai.prompt_call(
+            system_prompt="You are helpful",
+            user_prompt="Hello",
+        )
+
+        assert result.result == "response"
+        # Verify messages passed to completion have system + user
+        call_args = mock_llm.completion.call_args
+        msgs = call_args.kwargs.get("messages") or call_args[1].get("messages")
+        assert msgs[0]["role"] == "system"
+        assert msgs[1]["role"] == "user"
+
+    @patch(LIMIT_PATCH, side_effect=_make_context_limiter_passthrough)
+    def test_messages_call(self, _mock_limit, make_ai, mock_llm):
+        resp = _make_llm_response(content="response", tool_calls=None)
+        mock_llm.completion.return_value = resp
+
+        ai = make_ai()
+        result = ai.messages_call(
+            messages=[
+                {"role": "system", "content": "System"},
+                {"role": "user", "content": "User"},
+            ]
+        )
+
+        assert result.result == "response"
