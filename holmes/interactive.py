@@ -261,7 +261,26 @@ class InitProgressRenderer:
         if self._toolsets_failed:
             for name, error in self._toolsets_failed:
                 err_suffix = f": {error}" if error else ""
-                self._console.print(f"  [red]x {name}{err_suffix}[/red]")
+                self._console.print(f"  [red]✗ {name}{err_suffix}[/red]")
+        self._console.rule(style="dim")
+
+
+_TODO_WRITE_TOOL_NAME = "TodoWrite"
+
+# Status icons for task list rendering
+_TASK_STATUS_ICONS = {
+    "pending": "[dim]○[/dim]",
+    "in_progress": "[bold yellow]◐[/bold yellow]",
+    "completed": "[green]✓[/green]",
+    "failed": "[bold red]✗[/bold red]",
+}
+
+_TASK_STATUS_STYLES = {
+    "pending": "dim",
+    "in_progress": "bold",
+    "completed": "dim",
+    "failed": "red",
+}
 
 
 class AgenticProgressRenderer:
@@ -272,6 +291,9 @@ class AgenticProgressRenderer:
     permanently with status icons. The Live display is transient — only in-flight
     state is shown live; completed state is printed and persists.
 
+    TodoWrite tool results are rendered as a task list panel instead of a plain
+    tool summary line.
+
     AI messages are printed immediately (outside the Live region).
     """
 
@@ -281,7 +303,8 @@ class AgenticProgressRenderer:
         self._escape_hint = escape_hint
         self._lock = threading.Lock()
 
-        # Completed tools: list of (number, name, description, elapsed, output_len, is_error)
+        # Completed tools: list of (number, name, description, elapsed, output_len, is_error, extra)
+        # extra is None for normal tools, or a list of task dicts for TodoWrite
         self._completed: List[tuple] = []
         # In-flight tools: tool_number → (name, start_time)
         self._in_flight: Dict[int, tuple] = {}
@@ -362,29 +385,60 @@ class AgenticProgressRenderer:
                 pass
             self._live = None
 
+    def _render_task_panel(self, tasks: list) -> None:
+        """Render a TodoWrite task list as a compact Rich panel."""
+        from rich.text import Text
+
+        lines = Text()
+        completed = sum(1 for t in tasks if t.get("status") == "completed")
+        total = len(tasks)
+        lines.append(f"  {completed}/{total} completed\n", style="dim")
+
+        for task in tasks:
+            status = task.get("status", "pending")
+            icon = _TASK_STATUS_ICONS.get(status, "?")
+            style = _TASK_STATUS_STYLES.get(status, "")
+            content = task.get("content", "")
+            # Rich markup in icon, plain text for content
+            self._console.print(f"  {icon} [{style}]{escape(content)}[/{style}]")
+
     def _print_completed_tools(self) -> None:
         """Print completed tools permanently with status icons."""
         if not self._completed:
             return
-        for num, name, desc, elapsed, output_len, is_error in self._completed:
-            show_hint = f"[dim]/show {num}[/dim]"
+        for num, name, desc, elapsed, output_len, is_error, extra in self._completed:
+            # TodoWrite: render task panel instead of tool summary
+            if name == _TODO_WRITE_TOOL_NAME and extra:
+                self._render_task_panel(extra)
+                continue
+
+            show_hint = f"/show {num}"
             if is_error:
                 icon = "[bold red]✗[/bold red]"
             else:
                 icon = "[green]✓[/green]"
 
-            elapsed_str = f" ({elapsed:.1f}s)" if elapsed is not None else ""
+            elapsed_str = ""
+            time_bar = ""
+            if elapsed is not None:
+                elapsed_str = f" {elapsed:.1f}s"
+                # Subtle visual time bar: each ▪ = ~1 second, max 10
+                bar_len = min(int(elapsed + 0.5), 10) if elapsed >= 0.5 else 0
+                if bar_len > 0:
+                    time_bar = f" [dim yellow]{'▪' * bar_len}[/dim yellow]"
+
             size_str = ""
             if output_len is not None and output_len > 0:
                 if output_len >= 10000:
-                    size_str = f", {output_len // 1000}K chars"
+                    size_str = f" {output_len // 1000}K"
                 elif output_len >= 1000:
-                    size_str = f", {output_len:,} chars"
+                    size_str = f" {output_len:,}"
 
-            # Build: ✓ #1 tool_name (0.1s, 2K chars) - /show 1
+            # Build: ✓ #1 tool_name  0.1s ▪  /show 1
             self._console.print(
-                f"  {icon} [dim]#{num}[/dim] [bold]{name}[/bold]"
-                f"[dim]{elapsed_str}{size_str}  {show_hint}[/dim]"
+                f"  {icon} [dim]#{num}[/dim] [bold]{escape(name)}[/bold]"
+                f"[dim]{elapsed_str}{size_str}[/dim]{time_bar}"
+                f"  [dim]{show_hint}[/dim]"
             )
         self._completed.clear()
 
@@ -417,6 +471,14 @@ class AgenticProgressRenderer:
                 is_error = output_len == 0 or result_data.get("error", False)
                 tool_number = self._tool_number_offset + len(all_tool_calls)
 
+                # Extract TodoWrite tasks for rich rendering
+                extra = None
+                if tool_name == _TODO_WRITE_TOOL_NAME:
+                    params = result_data.get("params") or {}
+                    todos = params.get("todos")
+                    if isinstance(todos, list):
+                        extra = todos
+
                 # Remove from in-flight
                 self._in_flight.pop(tool_number, None)
                 # Also try to match by order if number didn't match
@@ -426,7 +488,7 @@ class AgenticProgressRenderer:
                         break
 
                 self._completed.append(
-                    (tool_number, tool_name, description, elapsed, output_len, is_error)
+                    (tool_number, tool_name, description, elapsed, output_len, is_error, extra)
                 )
 
                 # If batch is done (no more in-flight), stop Live and print summary
@@ -621,7 +683,7 @@ class ShowCommandCompleter(Completer):
                         )
 
 
-WELCOME_BANNER = f"[bold {HELP_COLOR}]Welcome to {agent_name}:[/bold {HELP_COLOR}] Type '{SlashCommands.EXIT.command}' to exit, '{SlashCommands.CONFIG.command}' to set up Holmes, or '{SlashCommands.HELP.command}' for all commands."
+WELCOME_BANNER = f"[dim]Type [bold]{SlashCommands.HELP.command}[/bold] for commands, [bold]{SlashCommands.CONFIG.command}[/bold] to configure, [bold]{SlashCommands.EXIT.command}[/bold] to quit[/dim]"
 
 
 def format_tool_call_output(
@@ -1693,18 +1755,14 @@ def run_interactive_loop(
 
     input_prompt = [("class:prompt", "User: ")]
 
-    # TODO: merge the /feedback command description to WELCOME_BANNER once we implement feedback callback
     welcome_banner = WELCOME_BANNER
     if feedback_callback:
-        welcome_banner = (
-            welcome_banner.rstrip(".")
-            + f", '{SlashCommands.FEEDBACK.command}' to share your thoughts."
-        )
+        welcome_banner += f", [bold]{SlashCommands.FEEDBACK.command}[/bold] for feedback"
     console.print(welcome_banner)
 
     if initial_user_input:
         console.print(
-            f"[bold {USER_COLOR}]User:[/bold {USER_COLOR}] {initial_user_input}"
+            f"\n[bold {USER_COLOR}]User:[/bold {USER_COLOR}] {initial_user_input}\n"
         )
     messages = None
     last_response = None
