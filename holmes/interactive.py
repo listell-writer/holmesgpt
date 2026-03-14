@@ -324,9 +324,10 @@ class AgenticProgressRenderer:
     AI messages are printed immediately (outside the Live region).
     """
 
-    _DATA_FEED_MAX_LINES = 8  # Max lines shown in data pane
-    _DATA_FEED_SNIPPET_LEN = 60  # Max chars per snippet line
-    _DATA_FEED_MAX_ITEMS = 20  # Max items kept in buffer
+    _DATA_PANE_LINES = 14  # Visible lines in the data pane
+    _DATA_LINE_MAX = 80  # Max chars per line in the data pane
+    _DATA_BUFFER_MAX = 2000  # Max raw lines kept in buffer
+    _SCROLL_SPEED = 3  # Lines to advance per tick
 
     def __init__(self, console: Console, tool_number_offset: int, escape_hint: str = ""):
         self._console = console
@@ -350,75 +351,83 @@ class AgenticProgressRenderer:
         # Track last printed task statuses to avoid reprinting identical panels
         self._last_task_statuses: Optional[str] = None
 
-        # Data feed: recent tool output snippets for the right pane
-        # Each item: (tool_name, snippet_lines, timestamp)
-        self._data_feed: List[tuple] = []
+        # Data feed: all raw output lines for the scrolling right pane
+        self._data_lines: List[str] = []  # (line_text,) — flat buffer of all lines
+        self._scroll_offset = 0  # Current scroll position
+        self._total_bytes = 0  # Total bytes processed
+        self._total_queries = 0  # Total tool calls completed
+
         # Latest tasks for live display
         self._live_tasks: Optional[list] = None
 
-    @staticmethod
-    def _extract_snippets(output: str, max_lines: int = 4, max_len: int = 60) -> List[str]:
-        """Extract interesting snippet lines from tool output."""
+    def _ingest_output(self, tool_name: str, output: str) -> None:
+        """Ingest raw tool output into the scrolling data buffer."""
         if not output:
-            return []
-        lines = output.strip().splitlines()
-        snippets = []
+            return
+        self._total_bytes += len(output)
+        self._total_queries += 1
+
+        lines = output.splitlines()
         for line in lines:
-            line = line.strip()
-            if not line or len(line) < 5:
+            line = line.rstrip()
+            if not line:
                 continue
-            # Truncate long lines
-            if len(line) > max_len:
-                line = line[:max_len - 1] + "…"
-            snippets.append(line)
-            if len(snippets) >= max_lines:
-                break
-        return snippets
+            if len(line) > self._DATA_LINE_MAX:
+                line = line[: self._DATA_LINE_MAX - 1] + "…"
+            self._data_lines.append(line)
+
+        # Trim buffer if too large
+        if len(self._data_lines) > self._DATA_BUFFER_MAX:
+            overflow = len(self._data_lines) - self._DATA_BUFFER_MAX
+            self._data_lines = self._data_lines[overflow:]
+            self._scroll_offset = max(0, self._scroll_offset - overflow)
 
     def _build_data_pane(self) -> "Text":
-        """Build the right-side data feed pane content."""
+        """Build the scrolling data feed pane."""
         from rich.text import Text
 
-        now = time.time()
         pane = Text()
 
-        if not self._data_feed:
+        if not self._data_lines:
             pane.append("  Waiting for data…", style="dim italic")
             return pane
 
-        # Show most recent items, up to _DATA_FEED_MAX_LINES total lines
-        lines_left = self._DATA_FEED_MAX_LINES
-        # Iterate from most recent
-        for tool_name, snippets, ts in reversed(self._data_feed):
-            if lines_left <= 0:
-                break
-            age = now - ts
-            # Fade older entries
-            if age > 10:
-                style = "dim"
-                header_style = "dim"
-            elif age > 5:
+        total = len(self._data_lines)
+        visible = self._DATA_PANE_LINES
+
+        # Scroll offset wraps around for continuous scrolling
+        start = self._scroll_offset % total if total > 0 else 0
+
+        for i in range(visible):
+            idx = (start + i) % total
+            line = self._data_lines[idx]
+
+            # Gradient: top lines dim, middle bright, bottom dim — creates depth
+            dist_from_center = abs(i - visible // 2)
+            if dist_from_center <= 1:
+                style = "bold"
+            elif dist_from_center <= 3:
                 style = ""
-                header_style = "dim cyan"
             else:
-                style = ""
-                header_style = "bold cyan"
+                style = "dim"
 
-            pane.append(f"  {tool_name}", style=header_style)
-            pane.append("\n")
-            lines_left -= 1
-            for s in snippets:
-                if lines_left <= 0:
-                    break
-                pane.append(f"  {s}\n", style=style)
-                lines_left -= 1
-
-        # Remove trailing newline
-        plain = pane.plain
-        if plain.endswith("\n"):
-            pane.right_crop(1)
+            pane.append(f" {line}", style=style)
+            if i < visible - 1:
+                pane.append("\n")
 
         return pane
+
+    def _build_stats_line(self) -> str:
+        """Build the stats string for the data pane title."""
+        if self._total_bytes == 0:
+            return ""
+        if self._total_bytes >= 1_000_000:
+            size = f"{self._total_bytes / 1_000_000:.1f}M"
+        elif self._total_bytes >= 1_000:
+            size = f"{self._total_bytes / 1_000:.1f}K"
+        else:
+            size = f"{self._total_bytes}"
+        return f" [dim]{size} across {self._total_queries} queries[/dim]"
 
     def _build_left_pane(self) -> "Text":
         """Build the left-side status pane (tasks + in-flight tools)."""
@@ -487,20 +496,25 @@ class AgenticProgressRenderer:
         left = self._build_left_pane()
         right = self._build_data_pane()
 
-        # Use a table for side-by-side layout
-        table = Table.grid(padding=(0, 2))
-        table.add_column("status", ratio=1)
-        table.add_column("data", ratio=1)
+        # Use a table for side-by-side layout — data pane is wider
+        table = Table.grid(padding=(0, 1))
+        table.add_column("status", ratio=2)
+        table.add_column("data", ratio=3)
+
+        stats = self._build_stats_line()
         table.add_row(
             Panel(left, title="[bold]Status[/bold]", title_align="left", border_style="blue", padding=(0, 1)),
-            Panel(right, title="[bold]Data[/bold]", title_align="left", border_style="dim", padding=(0, 1)),
+            Panel(right, title=f"[bold]Data[/bold]{stats}", title_align="left", border_style="dim", padding=(0, 0)),
         )
         return table
 
     def _tick(self) -> None:
-        while not self._timer_stop.wait(0.5):
+        while not self._timer_stop.wait(0.15):
             with self._lock:
                 if self._live is not None:
+                    # Advance scroll when we have data and tools are running
+                    if self._data_lines and self._in_flight:
+                        self._scroll_offset += self._SCROLL_SPEED
                     self._live.update(self._build_display())
 
     def start(self) -> None:
@@ -512,7 +526,7 @@ class AgenticProgressRenderer:
                 self._build_display(),
                 console=self._console,
                 transient=True,
-                refresh_per_second=4,
+                refresh_per_second=8,
             )
             self._live.start()
         except (TypeError, AttributeError):
@@ -630,14 +644,12 @@ class AgenticProgressRenderer:
                         extra = todos
                         self._live_tasks = todos
 
-                # Feed data snippets into right pane (skip TodoWrite)
+                # Ingest raw output into scrolling data buffer (skip TodoWrite)
                 if tool_name != _TODO_WRITE_TOOL_NAME and output_str:
-                    snippets = self._extract_snippets(output_str)
-                    if snippets:
-                        self._data_feed.append((tool_name, snippets, time.time()))
-                        # Trim buffer
-                        if len(self._data_feed) > self._DATA_FEED_MAX_ITEMS:
-                            self._data_feed = self._data_feed[-self._DATA_FEED_MAX_ITEMS:]
+                    self._ingest_output(tool_name, output_str)
+                    # Jump scroll to latest data so user sees new content
+                    if len(self._data_lines) > self._DATA_PANE_LINES:
+                        self._scroll_offset = len(self._data_lines) - self._DATA_PANE_LINES
 
                 # Remove from in-flight
                 self._in_flight.pop(tool_number, None)
@@ -686,7 +698,10 @@ class AgenticProgressRenderer:
             if self._completed:
                 self._print_completed_tools()
             # Reset data feed for next invocation
-            self._data_feed.clear()
+            self._data_lines.clear()
+            self._scroll_offset = 0
+            self._total_bytes = 0
+            self._total_queries = 0
             self._live_tasks = None
 
 
