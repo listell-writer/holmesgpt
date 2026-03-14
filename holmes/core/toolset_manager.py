@@ -5,6 +5,8 @@ import os
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, List, Optional, Union
 
+display_logger = logging.getLogger("holmes.display.toolset_manager")
+
 from benedict import benedict
 from pydantic import FilePath
 
@@ -291,7 +293,7 @@ class ToolsetManager:
                 for toolset in all_toolsets
             ]
             json.dump(toolset_status, f, indent=2)
-        logging.info(f"Toolset statuses are cached to {self.toolset_status_location}")
+        display_logger.info(f"Toolset statuses are cached to {self.toolset_status_location}")
 
     def _get_datasource_file_paths(self) -> list[str]:
         """
@@ -325,11 +327,11 @@ class ToolsetManager:
         if not refresh_status:
             datasource_paths = self._get_datasource_file_paths()
             if datasource_paths and check_and_update_config_hashes(datasource_paths):
-                logging.info("Datasource config file(s) changed, refreshing toolsets")
+                display_logger.info("Datasource config file(s) changed, refreshing toolsets")
                 refresh_status = True
 
         if not os.path.exists(self.toolset_status_location) or refresh_status:
-            logging.info("Refreshing available datasources (toolsets)")
+            display_logger.info("Refreshing available datasources (toolsets)")
             self.refresh_toolset_status(
                 dal, enable_all_toolsets=enable_all_toolsets, toolset_tags=toolset_tags
             )
@@ -432,7 +434,7 @@ class ToolsetManager:
             num_available_toolsets = len(
                 [toolset for toolset in all_toolsets_with_status if toolset.enabled]
             )
-            logging.info(
+            display_logger.info(
                 f"Using {num_available_toolsets} datasources (toolsets). To refresh: use flag `--refresh-toolsets`"
             )
         return all_toolsets_with_status

@@ -3,6 +3,8 @@ import logging
 import os
 import threading
 import time
+
+display_logger = logging.getLogger("holmes.display.llm")
 from abc import abstractmethod
 from math import floor
 from typing import TYPE_CHECKING, Any, Dict, List, Optional, Type, Union
@@ -663,7 +665,7 @@ class LLMModelRegistry:
             if model_key:
                 model_params = self._llms.get(model_key)
                 if model_params:
-                    logging.info(f"Using selected model: {model_key}")
+                    display_logger.info(f"Using selected model: {model_key}")
                     return model_params.model_copy()
 
                 if model_key.startswith("Robusta/"):
@@ -671,7 +673,7 @@ class LLMModelRegistry:
                     self._init_models()
                     model_params = self._llms.get(model_key)
                     if model_params:
-                        logging.info(f"Using selected model: {model_key}")
+                        display_logger.info(f"Using selected model: {model_key}")
                         return model_params.model_copy()
 
                 logging.error(f"Couldn't find model: {model_key} in model list")

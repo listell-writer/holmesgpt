@@ -1,5 +1,6 @@
 import logging
 import os
+import queue
 import re
 import subprocess
 import sys
@@ -56,7 +57,11 @@ from holmes.core.tool_calling_llm import (
     LLMResult,
     ToolCallingLLM,
     ToolCallResult,
+    extract_bash_session_prefixes,
 )
+from holmes.core.llm_usage import RequestStats
+from holmes.core.models import ToolApprovalDecision
+from holmes.utils.stream import StreamEvents, StreamMessage
 from holmes.core.tools import pretty_print_toolset_status
 from holmes.core.tracing import DummyTracer
 from holmes.plugins.toolsets.bash.common.cli_prefixes import (
@@ -77,6 +82,95 @@ from holmes.toolset_config_tui import run_toolset_config_tui
 from holmes.utils.console.consts import agent_name
 from holmes.utils.file_utils import write_json_file
 from holmes.version import check_version_async
+
+# Display loggers that are silenced in interactive mode.
+# The interactive loop renders from stream events instead of these loggers.
+DISPLAY_LOGGER_NAMES = [
+    "holmes.display.tool_calling_llm",
+    "holmes.display.tools",
+    "holmes.display.toolset_manager",
+    "holmes.display.core_investigation",
+    "holmes.display.config",
+    "holmes.display.llm",
+    "holmes.display.toolset_utils",
+    "holmes.display.bash_toolset",
+]
+
+_SENTINEL = object()  # marks end of stream on the queue
+
+
+def silence_display_loggers():
+    """Silence display loggers so interactive mode can render from stream events."""
+    for name in DISPLAY_LOGGER_NAMES:
+        logging.getLogger(name).setLevel(logging.WARNING + 1)
+
+
+def restore_display_loggers():
+    """Restore display loggers to default level."""
+    for name in DISPLAY_LOGGER_NAMES:
+        logging.getLogger(name).setLevel(logging.NOTSET)
+
+
+def _render_stream_event(
+    event: StreamMessage,
+    console: Console,
+    tool_number_offset: int,
+    start_tool_count_ref: list,
+    saw_tool_results_ref: list,
+    all_tool_calls: list,
+    all_tool_calls_history: list,
+) -> None:
+    """Render a single stream event to the console, reproducing the original logging output.
+
+    All output lines are prefixed with AAA to identify them as coming from the new stream path.
+    """
+    # Log blank line when a tool batch ends (transition away from TOOL_RESULT)
+    if saw_tool_results_ref[0] and event.event != StreamEvents.TOOL_RESULT:
+        console.print("AAA ")
+        saw_tool_results_ref[0] = False
+
+    if event.event == StreamEvents.START_TOOL:
+        start_tool_count_ref[0] += 1
+    elif event.event == StreamEvents.TOOL_RESULT:
+        saw_tool_results_ref[0] = True
+        all_tool_calls.append(event.data)
+        if start_tool_count_ref[0] > 0:
+            console.print(
+                f"AAA The AI requested [bold]{start_tool_count_ref[0]}[/bold] tool call(s)."
+            )
+            start_tool_count_ref[0] = 0
+
+        # Render "Running tool" and "Finished" lines from the TOOL_RESULT data
+        description = event.data.get("description", "")
+        tool_name = event.data.get("tool_name", event.data.get("name", ""))
+        result_data = event.data.get("result", {})
+        output_str = result_data.get("data", "")
+        elapsed = result_data.get("elapsed_seconds")
+        tool_number = tool_number_offset + len(all_tool_calls)
+        tool_number_str = f"#{tool_number} " if tool_number else ""
+
+        console.print(
+            f"AAA Running tool {tool_number_str}[bold]{tool_name}[/bold]: {description}"
+        )
+
+        if elapsed is not None:
+            output_len = len(output_str) if output_str else 0
+            line_count = output_str.count("\n") + 1 if output_str else 0
+            show_hint = f"/show {tool_number}" if tool_number else "/show"
+            console.print(
+                f"AAA   [dim]Finished {tool_number_str}in {elapsed:.2f}s, output length: {output_len:,} characters ({line_count:,} lines) - {show_hint} to view contents[/dim]"
+            )
+    elif event.event == StreamEvents.AI_MESSAGE:
+        reasoning = event.data.get("reasoning")
+        content = event.data.get("content")
+        if reasoning:
+            console.print(
+                f"AAA [italic dim]AI reasoning:\n\n{reasoning}[/italic dim]\n"
+            )
+        if content and content.strip():
+            console.print(
+                f"AAA [bold {AI_COLOR}]AI:[/bold {AI_COLOR}] {content}"
+            )
 
 
 class SlashCommands(Enum):
@@ -1176,6 +1270,9 @@ def run_interactive_loop(
     # Enable CLI mode for bash prefix loading (server mode doesn't call this)
     enable_cli_mode()
 
+    # Silence display loggers — the interactive loop renders from stream events instead
+    silence_display_loggers()
+
     # Initialize tracer - use DummyTracer if no tracer provided
     if tracer is None:
         tracer = DummyTracer()
@@ -1498,7 +1595,10 @@ def run_interactive_loop(
 
                 call_approval_callback = _wrapped_approval
 
-            call_result: List[Optional[LLMResult]] = [None]
+            # --- Stream-based AI call ---
+            # The background thread drains call_stream() and pushes events to a queue.
+            # The main thread renders events and handles escape-to-interrupt.
+            event_queue: queue.Queue = queue.Queue()
             call_error: List[Optional[Exception]] = [None]
 
             with tracer.start_trace(user_input) as trace_span:
@@ -1507,32 +1607,107 @@ def run_interactive_loop(
                     metadata={"type": "user_question"},
                 )
 
-                def _run_ai_call(
-                    _call_result=call_result,
+                tool_number_offset = len(all_tool_calls_history)
+
+                def _run_ai_stream(
+                    _event_queue=event_queue,
                     _call_error=call_error,
                     _messages=messages,
                     _trace_span=trace_span,
                     _cancel_event=cancel_event,
                     _approval_callback=call_approval_callback,
+                    _tool_number_offset=tool_number_offset,
                 ) -> None:
                     try:
-                        _call_result[0] = ai.call(
-                            _messages,
-                            trace_span=_trace_span,
-                            tool_number_offset=len(all_tool_calls_history),
-                            cancel_event=_cancel_event,
-                            approval_callback=_approval_callback,
-                        )
+                        # Replicate the approval loop from call()
+                        tool_decisions: Optional[List[ToolApprovalDecision]] = None
+                        while True:
+                            stream = ai.call_stream(
+                                msgs=_messages,
+                                enable_tool_approval=_approval_callback is not None,
+                                tool_decisions=tool_decisions,
+                                trace_span=_trace_span,
+                                cancel_event=_cancel_event,
+                                tool_number_offset=_tool_number_offset,
+                            )
+                            tool_decisions = None
+                            for event in stream:
+                                _event_queue.put(event)
+                                if event.event == StreamEvents.TOOL_RESULT:
+                                    _tool_number_offset += 1
+                                if event.event in (StreamEvents.ANSWER_END, StreamEvents.APPROVAL_REQUIRED):
+                                    break
+
+                            # Check if we got an approval-required event
+                            if event.event == StreamEvents.APPROVAL_REQUIRED:
+                                terminal_data = event.data
+                                _messages[:] = terminal_data["messages"]
+                                tool_decisions = ai._prompt_for_approval_decisions(
+                                    terminal_data["pending_approvals"],
+                                    _approval_callback,
+                                )
+                                continue
+                            else:
+                                # ANSWER_END — done
+                                break
                     except Exception as exc:  # noqa: BLE001
                         _call_error[0] = exc
+                    finally:
+                        _event_queue.put(_SENTINEL)
 
-                ai_thread = threading.Thread(target=_run_ai_call, daemon=True)
+                ai_thread = threading.Thread(target=_run_ai_stream, daemon=True)
                 ai_thread.start()
 
-                interrupted = _wait_for_completion_or_escape(
-                    ai_thread, cancel_event, approval_active,
-                    terminal_restored,
-                )
+                # --- Main thread: render stream events while monitoring for escape ---
+                all_tool_calls_this_turn: list[dict] = []
+                start_tool_count_ref = [0]
+                saw_tool_results_ref = [False]
+                terminal_data = None
+                interrupted = False
+                accumulated_stats = RequestStats()
+                total_num_llm_calls = 0
+
+                while True:
+                    # Check for escape
+                    if _HAS_TERMINAL_CONTROL and sys.stdin.isatty() and not approval_active.is_set():
+                        # Non-blocking check: see if thread finished
+                        try:
+                            item = event_queue.get(timeout=0.05)
+                        except queue.Empty:
+                            # Check for escape key in raw mode briefly
+                            # (reuse existing escape detection pattern)
+                            if cancel_event.is_set():
+                                interrupted = True
+                                break
+                            continue
+                    else:
+                        try:
+                            item = event_queue.get(timeout=0.1)
+                        except queue.Empty:
+                            continue
+
+                    if item is _SENTINEL:
+                        break
+
+                    event = item
+
+                    # Render the event
+                    _render_stream_event(
+                        event, console, tool_number_offset,
+                        start_tool_count_ref, saw_tool_results_ref,
+                        all_tool_calls_this_turn, all_tool_calls_history,
+                    )
+
+                    if event.event == StreamEvents.ANSWER_END:
+                        terminal_data = event.data
+                        total_num_llm_calls += terminal_data.get("num_llm_calls", 0)
+                        accumulated_stats += RequestStats(**terminal_data.get("costs", {}))
+                    elif event.event == StreamEvents.APPROVAL_REQUIRED:
+                        # Approval is handled inside the background thread
+                        pass
+
+                # Wait for the thread to finish
+                ai_thread.join(timeout=5.0)
 
                 if interrupted or isinstance(call_error[0], LLMInterruptedError):
                     messages = messages_snapshot
@@ -1543,7 +1718,22 @@ def run_interactive_loop(
                 elif call_error[0] is not None:
                     raise call_error[0]
 
-                response = call_result[0]
+                if not terminal_data:
+                    raise Exception("Stream ended without ANSWER_END")
+
+                # Build LLMResult from stream data
+                deduped: dict[str, dict] = {}
+                for tc in all_tool_calls_this_turn:
+                    deduped[tc.get("tool_call_id", id(tc))] = tc
+                response = LLMResult(
+                    result=terminal_data["content"],
+                    tool_calls=list(deduped.values()),
+                    num_llm_calls=total_num_llm_calls,
+                    messages=terminal_data["messages"],
+                    metadata=terminal_data.get("metadata"),
+                    **accumulated_stats.model_dump(),
+                )
+
                 trace_span.log(
                     output=response.result,
                 )
@@ -1567,7 +1757,7 @@ def run_interactive_loop(
                     Markdown(f"{response.result}"),
                     padding=(1, 2),
                     border_style=AI_COLOR,
-                    title=f"[bold {AI_COLOR}]AI Response[/bold {AI_COLOR}]",
+                    title=f"AAA [bold {AI_COLOR}]AI Response[/bold {AI_COLOR}]",
                     title_align="left",
                 )
             )

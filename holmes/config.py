@@ -3,6 +3,8 @@ import os
 import os.path
 from enum import Enum
 from pathlib import Path
+
+display_logger = logging.getLogger("holmes.display.config")
 from typing import TYPE_CHECKING, Any, List, Optional, Union
 
 import sentry_sdk
@@ -143,7 +145,7 @@ class Config(RobustaBaseConfig):
 
     def log_useful_info(self):
         if self.llm_model_registry.models:
-            logging.info(
+            display_logger.info(
                 f"Loaded models: {list(self.llm_model_registry.models.keys())}"
             )
         else:
@@ -514,7 +516,7 @@ class Config(RobustaBaseConfig):
             name=model_name,
             is_robusta_model=is_robusta_model,
         )  # type: ignore
-        logging.info(
+        display_logger.info(
             f"Using model: {model_name} ({llm.get_context_window_size():,} total tokens, {llm.get_maximum_output_token():,} output tokens)"
         )
         return llm

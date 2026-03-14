@@ -1,6 +1,8 @@
 import logging
 
 from holmes.core.tools import Toolset, ToolsetStatusEnum
+
+display_logger = logging.getLogger("holmes.display.toolset_utils")
 from holmes.plugins.toolsets.logging_utils.logging_api import BasePodLoggingToolset
 
 
@@ -35,7 +37,7 @@ def filter_out_default_logging_toolset(toolsets: list[Toolset]) -> list[Toolset]
             final_toolsets.append(ts)
 
     if not logging_toolsets:
-        logging.warning("NO ENABLED LOGGING TOOLSET")
+        display_logger.warning("NO ENABLED LOGGING TOOLSET")
         pass
     elif len(logging_toolsets) == 1:
         final_toolsets.append(logging_toolsets[0])

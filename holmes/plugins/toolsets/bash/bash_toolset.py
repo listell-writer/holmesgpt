@@ -9,6 +9,8 @@ import logging
 import os
 from typing import Any, Dict, Optional
 
+display_logger = logging.getLogger("holmes.display.bash_toolset")
+
 from holmes.core.tools import (
     ApprovalRequirement,
     CallablePrerequisite,
@@ -253,7 +255,7 @@ class RunBashCommand(Tool):
                 )
 
         # Execute command (user_approved or validation passed)
-        logging.info(f"Executing bash command: {command_str}")
+        display_logger.info(f"Executing bash command: {command_str}")
         try:
             result = execute_bash_command(cmd=command_str, timeout=timeout)
         except FileNotFoundError:

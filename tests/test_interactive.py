@@ -16,6 +16,7 @@ from holmes.interactive import (
     handle_feedback_command,
     run_interactive_loop,
 )
+from holmes.utils.stream import StreamEvents, StreamMessage
 from tests.mocks.toolset_mocks import SampleToolset
 
 
@@ -308,6 +309,20 @@ class TestRunInteractiveLoop(unittest.TestCase):
         self.mock_response.messages = []
         self.mock_response.tool_calls = []
         self.mock_ai.call.return_value = self.mock_response
+
+        # Mock call_stream to yield an ANSWER_END event (used by interactive loop)
+        def _mock_call_stream(**kwargs):
+            yield StreamMessage(
+                event=StreamEvents.ANSWER_END,
+                data={
+                    "content": "Test response",
+                    "messages": [],
+                    "tool_calls": [],
+                    "num_llm_calls": 1,
+                    "costs": {},
+                },
+            )
+        self.mock_ai.call_stream = Mock(side_effect=_mock_call_stream)
 
         self.mock_console = Mock(spec=Console)
 
@@ -750,7 +765,7 @@ class TestRunInteractiveLoop(unittest.TestCase):
         self.assertTrue(len(initial_calls) > 0)
 
         # Verify AI was called with initial input
-        self.mock_ai.call.assert_called_once()
+        self.mock_ai.call_stream.assert_called_once()
 
     @patch("holmes.interactive.check_version_async")
     @patch("holmes.interactive.PromptSession")

@@ -6,6 +6,10 @@ import threading
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Type, Union
 
+# Named logger for user-facing display messages (tool progress, AI messages, etc.)
+# In interactive mode this logger is silenced; the CLI renders from stream events instead.
+display_logger = logging.getLogger("holmes.display.tool_calling_llm")
+
 import sentry_sdk
 from openai import BadRequestError
 from openai.types.chat.chat_completion_message_tool_call import (
@@ -351,7 +355,7 @@ class ToolCallingLLM:
             for event in stream:
                 # Log blank line when a tool batch ends (transition away from TOOL_RESULT)
                 if saw_tool_results and event.event != StreamEvents.TOOL_RESULT:
-                    logging.info("")
+                    display_logger.info("")
                     saw_tool_results = False
 
                 if event.event == StreamEvents.START_TOOL:
@@ -361,7 +365,7 @@ class ToolCallingLLM:
                     saw_tool_results = True
                     all_tool_calls.append(event.data)
                     if start_tool_count > 0:
-                        logging.info(
+                        display_logger.info(
                             f"The AI requested [bold]{start_tool_count}[/bold] tool call(s)."
                         )
                         start_tool_count = 0
@@ -369,11 +373,11 @@ class ToolCallingLLM:
                     reasoning = event.data.get("reasoning")
                     content = event.data.get("content")
                     if reasoning:
-                        logging.info(
+                        display_logger.info(
                             f"[italic dim]AI reasoning:\n\n{reasoning}[/italic dim]\n"
                         )
                     if content and content.strip():
-                        logging.info(
+                        display_logger.info(
                             f"[bold {AI_COLOR}]AI:[/bold {AI_COLOR}] {content}"
                         )
                 elif event.event in (StreamEvents.ANSWER_END, StreamEvents.APPROVAL_REQUIRED):
