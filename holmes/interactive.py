@@ -670,7 +670,7 @@ class AgenticProgressRenderer:
                     # Restart live for next thinking phase
                     self._thinking = True
                     self.start()
-                else:
+                elif self._live is not None:
                     self._live.update(self._build_display())
 
             elif event.event == StreamEvents.AI_MESSAGE:
