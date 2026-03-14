@@ -234,7 +234,7 @@ The `call()` wrapper intercepts stream events and logs to console:
 
 - Remove `system_prompt` and `user_prompt` from `call_stream()`. No caller uses these. Message building becomes: `messages: list[dict] = list(msgs) if msgs else []`
 - Remove `user_prompt` from `call()`. Dead code — declared but never read. Update `prompt_call()` to stop passing it.
-- Remove `messages_call()`. Pass-through to `call()` with no logic. Update its 3 callers (`server.py:401`, `tests/test_cache.py`, `tests/test_server_endpoints.py`) to call `call()` directly.
+- Remove `messages_call()`. Pass-through to `call()` with no logic. Update its 4 callers (`server.py:401`, `tests/test_cache.py`, `tests/test_server_endpoints.py`, `tests/llm/test_ask_holmes.py:253`) to call `call()` directly.
 
 ### Add parameters to `call_stream()`
 
@@ -392,7 +392,23 @@ Add new parameters:
 
 ### Step 2: Enrich `call_stream()` internals and ANSWER_END
 
-1. Add `all_tool_calls: list[dict] = []` accumulation using `as_tool_result_response()` format. When `process_tool_decisions()` returns events at the top of `call_stream()` (re-invocation with `tool_decisions`), extract tool call info from those TOOL_RESULT events and append to `all_tool_calls` before entering the main loop. This ensures approved tools from the previous round appear in `LLMResult.tool_calls`.
+1. Add `all_tool_calls: list[dict] = []` accumulation using `as_tool_result_response()` format. Append to `all_tool_calls` in the same `else` branch (line 1160-1167) where successful results are appended to `tool_calls` and `messages`. When `process_tool_decisions()` returns events at the top of `call_stream()` (re-invocation with `tool_decisions`), extract tool call info from those TOOL_RESULT events and append to `all_tool_calls` before entering the main loop. This ensures approved tools from the previous round appear in `LLMResult.tool_calls`.
+
+    **Carry forward completed tools across approval rounds:** When `APPROVAL_REQUIRED` fires, successful tools from the interrupted batch are already in `all_tool_calls` inside `call_stream()` but are lost when the generator exits (no `ANSWER_END` is yielded). Include `all_tool_calls` in the `APPROVAL_REQUIRED` event data so the `call()` wrapper can accumulate them:
+    ```python
+    # In call_stream() APPROVAL_REQUIRED event:
+    data={
+        ...
+        "tool_calls": all_tool_calls,  # completed tools from this round
+    }
+    ```
+    The `call()` wrapper accumulates these before re-invoking:
+    ```python
+    elif event.event == StreamEvents.APPROVAL_REQUIRED:
+        all_tool_calls.extend(event.data.get("tool_calls", []))
+        ...
+    ```
+    Without this, a mixed batch (e.g., `kubectl get pods` succeeds, `rm -rf /tmp/foo` needs approval) would lose the successful tool's result from `LLMResult.tool_calls`.
 
 2. Enrich ANSWER_END (line 1073-1080):
 ```python
@@ -541,16 +557,17 @@ cost_fields = {k: v for k, v in accumulated_costs.items() if k in LLMCosts.model
 
 ### Step 4: Remove `messages_call()`, update callers
 
-Delete `messages_call()`. Update its 3 callers to call `call()` directly:
+Delete `messages_call()`. Update its 4 callers to call `call()` directly:
 - `server.py:401` → `ai.call(messages=messages, ...)`
 - `tests/test_cache.py` → update call site
 - `tests/test_server_endpoints.py` → update call site
+- `tests/llm/test_ask_holmes.py:253` → `ai.call(messages=messages, trace_span=llm_span)`
 
 ### Step 5: Delete dead code
 
 - Remove old `call()` loop body (~220 lines). The method stays but becomes ~60 lines.
 - Remove `_handle_tool_call_approval()` — no longer called.
-- Remove `messages_call()` — callers updated in Step 4.
+- Remove `messages_call()` — 4 callers updated in Step 4.
 - Remove `user_prompt` parameter from `call()`. Update `prompt_call()` to stop passing it.
 - `process_tool_decisions()` stays — still called by `call_stream()` on re-invocation.
 
@@ -585,6 +602,8 @@ poetry run pytest tests -m "not llm" --no-cov
 | `server.py` | Replace `ai.messages_call(...)` with `ai.call(...)` |
 | `tests/test_cache.py` | Replace `messages_call()` with `call()` |
 | `tests/test_server_endpoints.py` | Replace `messages_call()` with `call()` |
+| `tests/llm/test_ask_holmes.py` | Replace `messages_call()` with `call()` |
+| `docs/reference/python-sdk.md` | Remove `messages_call` row from API reference table (line 287) |
 
 No changes needed to: `main.py`, `interactive.py`, `checks.py`, `experimental/ag-ui/server-agui.py`, `holmes/utils/stream.py`, `holmes/core/tools.py`.
 
