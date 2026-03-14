@@ -177,6 +177,17 @@ class ToolParameter(BaseModel):
     properties: Optional[Dict[str, "ToolParameter"]] = None  # For object types
     items: Optional["ToolParameter"] = None  # For array item schemas
     enum: Optional[List[str]] = None  # For restricting to specific values
+    # JSON Schema fields passed through from MCP to help the LLM produce valid params
+    default: Optional[Any] = None
+    format: Optional[str] = None  # e.g. "date-time", "uri", "email", "uuid"
+    pattern: Optional[str] = None  # regex the value must match
+    examples: Optional[List[Any]] = None
+    minimum: Optional[float] = None
+    maximum: Optional[float] = None
+    min_length: Optional[int] = None
+    max_length: Optional[int] = None
+    min_items: Optional[int] = None
+    max_items: Optional[int] = None
 
 
 class ToolInvokeContext(BaseModel):

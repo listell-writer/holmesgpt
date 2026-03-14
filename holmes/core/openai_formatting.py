@@ -69,6 +69,10 @@ def type_to_open_ai_schema(param_attributes: Any) -> dict[str, Any]:
         else:
             type_obj = {"type": match.group("simple_type")}
 
+    # Pass through JSON Schema constraint fields from MCP so the LLM sees them
+    if type_obj:
+        _add_json_schema_constraints(type_obj, param_attributes, param_type)
+
     # Add nullability using anyOf per the OpenAI Structured Outputs spec when strict mode
     # requires optional params to accept null, or when the source schema explicitly marks
     # the field as nullable (e.g., MCP ["string", "null"]).
@@ -76,6 +80,31 @@ def type_to_open_ai_schema(param_attributes: Any) -> dict[str, Any]:
         type_obj = {"anyOf": [type_obj, {"type": "null"}]}
 
     return type_obj
+
+
+def _add_json_schema_constraints(
+    type_obj: dict[str, Any], param_attributes: Any, param_type: str
+) -> None:
+    """Add JSON Schema constraint fields (format, pattern, min/max, etc.) to a type object."""
+    if getattr(param_attributes, "format", None):
+        type_obj["format"] = param_attributes.format
+    if getattr(param_attributes, "pattern", None):
+        type_obj["pattern"] = param_attributes.pattern
+    if param_type in ("number", "integer"):
+        if getattr(param_attributes, "minimum", None) is not None:
+            type_obj["minimum"] = param_attributes.minimum
+        if getattr(param_attributes, "maximum", None) is not None:
+            type_obj["maximum"] = param_attributes.maximum
+    if param_type == "string":
+        if getattr(param_attributes, "min_length", None) is not None:
+            type_obj["minLength"] = param_attributes.min_length
+        if getattr(param_attributes, "max_length", None) is not None:
+            type_obj["maxLength"] = param_attributes.max_length
+    if param_type == "array":
+        if getattr(param_attributes, "min_items", None) is not None:
+            type_obj["minItems"] = param_attributes.min_items
+        if getattr(param_attributes, "max_items", None) is not None:
+            type_obj["maxItems"] = param_attributes.max_items
 
 
 def format_tool_to_open_ai_standard(
@@ -89,6 +118,10 @@ def format_tool_to_open_ai_standard(
         )
         if param_attributes.description is not None:
             tool_properties[param_name]["description"] = param_attributes.description
+        if getattr(param_attributes, "default", None) is not None:
+            tool_properties[param_name]["default"] = param_attributes.default
+        if getattr(param_attributes, "examples", None):
+            tool_properties[param_name]["examples"] = param_attributes.examples
         # Add enum constraint if specified
         if hasattr(param_attributes, "enum") and param_attributes.enum:
             enum_values = list(

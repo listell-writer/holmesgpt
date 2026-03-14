@@ -338,6 +338,16 @@ class RemoteMCPTool(Tool):
             items=items,
             properties=properties,
             enum=enum,
+            default=schema.get("default"),
+            format=schema.get("format"),
+            pattern=schema.get("pattern"),
+            examples=schema.get("examples"),
+            minimum=schema.get("minimum"),
+            maximum=schema.get("maximum"),
+            min_length=schema.get("minLength"),
+            max_length=schema.get("maxLength"),
+            min_items=schema.get("minItems"),
+            max_items=schema.get("maxItems"),
         )
 
     def _coerce_params(self, params: Dict) -> Dict:

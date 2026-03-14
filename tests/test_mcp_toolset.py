@@ -65,6 +65,157 @@ class TestToolParameter:
         param = ToolParameter()
         assert param.type == "string"
 
+    def test_json_schema_constraint_fields(self) -> None:
+        """Test that ToolParameter stores JSON Schema constraint fields."""
+        param = ToolParameter(
+            type="string",
+            format="date-time",
+            pattern=r"^\d{4}-\d{2}-\d{2}",
+            default="2026-01-01T00:00:00Z",
+            examples=["2026-01-01T00:00:00Z", "2026-06-15T12:00:00Z"],
+            min_length=1,
+            max_length=30,
+        )
+        assert param.format == "date-time"
+        assert param.pattern == r"^\d{4}-\d{2}-\d{2}"
+        assert param.default == "2026-01-01T00:00:00Z"
+        assert param.examples == ["2026-01-01T00:00:00Z", "2026-06-15T12:00:00Z"]
+        assert param.min_length == 1
+        assert param.max_length == 30
+
+    def test_numeric_constraint_fields(self) -> None:
+        param = ToolParameter(type="integer", minimum=0, maximum=100)
+        assert param.minimum == 0
+        assert param.maximum == 100
+
+    def test_array_constraint_fields(self) -> None:
+        param = ToolParameter(type="array", min_items=1, max_items=5)
+        assert param.min_items == 1
+        assert param.max_items == 5
+
+    def test_constraint_fields_default_to_none(self) -> None:
+        param = ToolParameter(type="string")
+        assert param.format is None
+        assert param.default is None
+        assert param.examples is None
+        assert param.pattern is None
+        assert param.minimum is None
+        assert param.maximum is None
+
+
+class TestMCPSchemaConstraintParsing:
+    """Verify that _parse_tool_parameter extracts JSON Schema constraints from MCP."""
+
+    def test_parse_string_with_format_and_pattern(self):
+        params = RemoteMCPTool.parse_input_schema({
+            "type": "object",
+            "properties": {
+                "startDate": {
+                    "type": "string",
+                    "format": "date-time",
+                    "pattern": r"^\d{4}-\d{2}-\d{2}T",
+                    "examples": ["2026-01-01T00:00:00Z"],
+                },
+            },
+            "required": ["startDate"],
+        })
+        p = params["startDate"]
+        assert p.format == "date-time"
+        assert p.pattern == r"^\d{4}-\d{2}-\d{2}T"
+        assert p.examples == ["2026-01-01T00:00:00Z"]
+
+    def test_parse_number_with_min_max(self):
+        params = RemoteMCPTool.parse_input_schema({
+            "type": "object",
+            "properties": {
+                "threshold": {
+                    "type": "number",
+                    "minimum": 0,
+                    "maximum": 100,
+                    "default": 50,
+                },
+            },
+            "required": ["threshold"],
+        })
+        p = params["threshold"]
+        assert p.minimum == 0
+        assert p.maximum == 100
+        assert p.default == 50
+
+    def test_parse_string_with_length_constraints(self):
+        params = RemoteMCPTool.parse_input_schema({
+            "type": "object",
+            "properties": {
+                "query": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 500,
+                },
+            },
+            "required": ["query"],
+        })
+        p = params["query"]
+        assert p.min_length == 1
+        assert p.max_length == 500
+
+    def test_parse_array_with_item_constraints(self):
+        params = RemoteMCPTool.parse_input_schema({
+            "type": "object",
+            "properties": {
+                "tags": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "minItems": 1,
+                    "maxItems": 10,
+                },
+            },
+            "required": ["tags"],
+        })
+        p = params["tags"]
+        assert p.min_items == 1
+        assert p.max_items == 10
+
+    def test_constraints_absent_when_not_in_schema(self):
+        params = RemoteMCPTool.parse_input_schema({
+            "type": "object",
+            "properties": {"name": {"type": "string"}},
+            "required": ["name"],
+        })
+        p = params["name"]
+        assert p.format is None
+        assert p.default is None
+        assert p.minimum is None
+
+    def test_nested_object_inherits_constraints(self):
+        params = RemoteMCPTool.parse_input_schema({
+            "type": "object",
+            "properties": {
+                "timeRange": {
+                    "type": "object",
+                    "properties": {
+                        "start": {
+                            "type": "string",
+                            "format": "date-time",
+                        },
+                        "durationMinutes": {
+                            "type": "integer",
+                            "minimum": 1,
+                            "maximum": 1440,
+                            "default": 60,
+                        },
+                    },
+                    "required": ["start"],
+                },
+            },
+            "required": ["timeRange"],
+        })
+        tr = params["timeRange"]
+        assert tr.properties is not None
+        assert tr.properties["start"].format == "date-time"
+        assert tr.properties["durationMinutes"].minimum == 1
+        assert tr.properties["durationMinutes"].maximum == 1440
+        assert tr.properties["durationMinutes"].default == 60
+
 
 def npx_not_available() -> tuple[bool, str]:
     """
