@@ -277,7 +277,7 @@ def test_streaming_chat_approval_workflow_approve_and_execute(
 
     # Mock process_tool_decisions to simulate approval and execution
     ai.process_tool_decisions = MagicMock(
-        side_effect=lambda messages, tool_decisions, request_context=None: (
+        side_effect=lambda messages, tool_decisions, request_context=None, trace_span=None: (
             messages
             + [
                 {
@@ -429,7 +429,7 @@ def test_streaming_chat_approval_workflow_reject_command(
 
     # Mock process_tool_decisions to simulate rejection
     ai.process_tool_decisions = MagicMock(
-        side_effect=lambda messages, tool_decisions, request_context=None: (
+        side_effect=lambda messages, tool_decisions, request_context=None, trace_span=None: (
             messages
             + [
                 {

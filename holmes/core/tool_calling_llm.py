@@ -278,6 +278,7 @@ class ToolCallingLLM:
         messages: List[Dict[str, Any]],
         tool_decisions: List[ToolApprovalDecision],
         request_context: Optional[Dict[str, Any]] = None,
+        trace_span: Any = None,
     ) -> tuple[List[Dict[str, Any]], list[StreamMessage]]:
         """
         Process tool approval decisions and execute approved tools.
@@ -289,6 +290,9 @@ class ToolCallingLLM:
         Returns:
             Updated messages list with tool execution results
         """
+        if trace_span is None:
+            trace_span = DummySpan()
+
         events: list[StreamMessage] = []
         if not tool_decisions:
             return messages, events
@@ -334,7 +338,7 @@ class ToolCallingLLM:
                 tool_result = self._invoke_llm_tool_call(
                     tool_to_call=tool_call,
                     previous_tool_calls=[],
-                    trace_span=DummySpan(),  # TODO: replace with proper span
+                    trace_span=trace_span,
                     tool_number=None,
                     user_approved=True,
                     session_approved_prefixes=session_prefixes,
@@ -823,7 +827,7 @@ class ToolCallingLLM:
         if msgs and tool_decisions:
             logging.info(f"Processing {len(tool_decisions)} tool decisions")
             msgs, events = self.process_tool_decisions(
-                msgs, tool_decisions, request_context
+                msgs, tool_decisions, request_context, trace_span=trace_span
             )
             for ev in events:
                 yield ev
