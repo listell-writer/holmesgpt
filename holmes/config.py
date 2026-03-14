@@ -485,6 +485,17 @@ class Config(RobustaBaseConfig):
             raise ValueError("--slack-channel must be specified")
         return SlackDestination(self.slack_token.get_secret_value(), self.slack_channel)
 
+    @staticmethod
+    def _format_token_count(n: int) -> str:
+        """Format a token count for display: 1048576 → '1M', 32768 → '32K'."""
+        if n >= 1_000_000:
+            value = n / 1_000_000
+            return f"{int(value)}M" if value == int(value) else f"{value:.1f}M"
+        if n >= 1_000:
+            value = n / 1_000
+            return f"{int(value)}K" if value == int(value) else f"{value:.0f}K"
+        return str(n)
+
     # TODO: move this to the llm model registry
     def _get_llm(
         self,
@@ -527,7 +538,9 @@ class Config(RobustaBaseConfig):
             name=model_name,
             is_robusta_model=is_robusta_model,
         )  # type: ignore
-        msg = f"Using model: {model_name} ({llm.get_context_window_size():,} total tokens, {llm.get_maximum_output_token():,} output tokens)"
+        context_size = self._format_token_count(llm.get_context_window_size())
+        max_response = self._format_token_count(llm.get_maximum_output_token())
+        msg = f"Model: {model_name} ({context_size} context, {max_response} max response)"
         display_logger.info(msg)
         if on_event is not None:
             on_event(InitEvent(kind="model_loaded", name=model_name, message=msg))

@@ -115,7 +115,10 @@ def restore_display_loggers():
 
 
 class InitProgressRenderer:
-    """Collects InitEvents and renders a live spinner during initialization.
+    """Collects InitEvents and renders live progress during initialization.
+
+    Uses Rich Live(transient=True) so the detailed progress vanishes when done,
+    leaving only a compact summary (plus any errors).
 
     Thread-safe: events arrive from the ThreadPoolExecutor in check_toolset_prerequisites.
     """
@@ -124,10 +127,43 @@ class InitProgressRenderer:
         self._console = console
         self._lock = threading.Lock()
         self._toolsets_ok: List[str] = []
-        self._toolsets_failed: List[str] = []
+        self._toolsets_failed: List[tuple[str, str]] = []  # (name, error)
         self._model_message: str = ""
-        self._status_text: str = "Initializing datasources..."
-        self._status: Optional[Any] = None  # Rich Status context manager
+        self._phase: str = "Loading datasources"
+        self._start_time: float = 0.0
+        self._live: Optional[Any] = None  # Rich Live
+        self._timer_stop = threading.Event()
+
+    def _build_display(self) -> "Text":
+        """Build the Rich renderable for the current state."""
+        from rich.text import Text
+
+        elapsed = int(time.time() - self._start_time)
+        ok = len(self._toolsets_ok)
+        failed = len(self._toolsets_failed)
+        checked = ok + failed
+
+        display = Text()
+        display.append("  ")
+        display.append(f"{self._phase}", style="bold")
+        display.append(f"  {checked} checked", style="dim")
+        display.append(f"  ({elapsed}s)", style="dim")
+
+        # Show last few completed toolset names
+        recent = self._toolsets_ok[-4:]
+        if recent:
+            names = ", ".join(recent)
+            if ok > 4:
+                names = "..., " + names
+            display.append("\n  ")
+            display.append(f"  ready: {names}", style="green dim")
+
+        if self._toolsets_failed:
+            failed_names = ", ".join(name for name, _ in self._toolsets_failed[-4:])
+            display.append("\n  ")
+            display.append(f"  failed: {failed_names}", style="red dim")
+
+        return display
 
     def on_event(self, event: "InitEvent") -> None:
         """Callback passed as on_event to create_console_toolcalling_llm."""
@@ -136,51 +172,71 @@ class InitProgressRenderer:
                 if event.status == "enabled":
                     self._toolsets_ok.append(event.name)
                 else:
-                    self._toolsets_failed.append(event.name)
-                count = len(self._toolsets_ok) + len(self._toolsets_failed)
-                self._status_text = f"Checking datasources... ({count} checked)"
+                    self._toolsets_failed.append((event.name, event.error))
             elif event.kind == "toolset_lazy":
                 if event.status == "enabled":
                     self._toolsets_ok.append(event.name)
                 else:
-                    self._toolsets_failed.append(event.name)
+                    self._toolsets_failed.append((event.name, event.error))
             elif event.kind == "refreshing":
-                self._status_text = "Refreshing datasources..."
+                self._phase = "Refreshing datasources"
             elif event.kind == "model_loaded":
                 self._model_message = event.message
             elif event.kind == "datasource_count":
-                self._status_text = f"Loaded {event.count} datasources"
+                pass  # We compute our own count
 
-            if self._status is not None:
-                self._status.update(self._status_text)
+            if self._live is not None:
+                self._live.update(self._build_display())
+
+    def _tick(self) -> None:
+        """Background timer that updates the elapsed time every second."""
+        while not self._timer_stop.wait(1.0):
+            with self._lock:
+                if self._live is not None:
+                    self._live.update(self._build_display())
 
     def start(self) -> None:
-        """Start the spinner. Call before create_console_toolcalling_llm."""
-        from rich.status import Status
+        """Start the live display. Call before create_console_toolcalling_llm."""
+        from rich.live import Live
 
-        self._status = Status(self._status_text, console=self._console, spinner="dots")
-        self._status.start()
+        self._start_time = time.time()
+        self._live = Live(
+            self._build_display(),
+            console=self._console,
+            transient=True,
+            refresh_per_second=4,
+        )
+        self._live.start()
+        # Background thread to update elapsed time every second
+        self._timer_stop.clear()
+        timer_thread = threading.Thread(target=self._tick, daemon=True)
+        timer_thread.start()
 
     def stop(self) -> None:
-        """Stop the spinner and print a compact summary."""
-        if self._status is not None:
-            self._status.stop()
-            self._status = None
+        """Stop the live display and print a compact summary."""
+        self._timer_stop.set()
+        if self._live is not None:
+            self._live.stop()
+            self._live = None
 
         ok = len(self._toolsets_ok)
         failed = len(self._toolsets_failed)
+        elapsed = time.time() - self._start_time
 
         parts = []
         parts.append(f"[bold green]{ok}[/bold green] datasources loaded")
         if failed:
-            parts.append(f"[bold red]{failed}[/bold red] failed")
+            parts.append(f"[bold red]{failed} failed[/bold red]")
+        parts.append(f"[dim]{elapsed:.1f}s[/dim]")
         if self._model_message:
             parts.append(self._model_message)
         self._console.print(" | ".join(parts))
 
+        # Show failed toolsets with their error messages
         if self._toolsets_failed:
-            for name in self._toolsets_failed:
-                self._console.print(f"  [dim red]x {name}[/dim red]")
+            for name, error in self._toolsets_failed:
+                err_suffix = f": {error}" if error else ""
+                self._console.print(f"  [red]x {name}{err_suffix}[/red]")
 
 
 def _render_stream_event(
