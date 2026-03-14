@@ -267,59 +267,38 @@ class InitProgressRenderer:
 
 _TODO_WRITE_TOOL_NAME = "TodoWrite"
 
-# Status icons for task list rendering
-_TASK_ICONS = {
-    "pending": "○",
-    "in_progress": "◐",
-    "completed": "✓",
-    "failed": "✗",
-}
-
-_TASK_STYLES = {
-    "pending": "dim",
-    "in_progress": "bold yellow",
-    "completed": "green",
-    "failed": "bold red",
-}
-
-
 def _build_task_panel(tasks: list) -> Panel:
-    """Build a Rich Panel showing the task list."""
+    """Build a Rich Panel showing the task list with checkbox-style icons."""
     from rich.text import Text
 
     completed = sum(1 for t in tasks if t.get("status") == "completed")
     in_progress = sum(1 for t in tasks if t.get("status") == "in_progress")
+    failed = sum(1 for t in tasks if t.get("status") == "failed")
     total = len(tasks)
 
     content = Text()
     for i, task in enumerate(tasks):
         status = task.get("status", "pending")
-        icon = _TASK_ICONS.get(status, "?")
-        icon_style = _TASK_STYLES.get(status, "")
         task_content = task.get("content", "")
 
-        content.append(f" {icon} ", style=icon_style)
         if status == "completed":
+            content.append(" ☑ ", style="green")
             content.append(task_content, style="dim strike")
         elif status == "in_progress":
+            content.append(" ☐ ", style="bold yellow")
             content.append(task_content, style="bold")
+            content.append(" ◀", style="bold yellow")
         elif status == "failed":
+            content.append(" ☒ ", style="bold red")
             content.append(task_content, style="red")
         else:
-            content.append(task_content)
+            content.append(" ☐ ", style="dim")
+            content.append(task_content, style="dim")
         if i < len(tasks) - 1:
             content.append("\n")
 
-    # Title with progress
-    progress_parts = []
-    if completed:
-        progress_parts.append(f"[green]{completed} done[/green]")
-    if in_progress:
-        progress_parts.append(f"[yellow]{in_progress} active[/yellow]")
-    remaining = total - completed - in_progress
-    if remaining > 0:
-        progress_parts.append(f"[dim]{remaining} pending[/dim]")
-    title = f"[bold]Tasks[/bold] {' · '.join(progress_parts)}"
+    # Title with progress bar
+    title = f"[bold]Tasks[/bold] [dim]{completed}/{total}[/dim]"
 
     return Panel(
         content,
@@ -384,9 +363,11 @@ class AgenticProgressRenderer:
             return display
 
         # Show in-flight tools
+        spinner_frames = "⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏"
+        frame = spinner_frames[int(now * 8) % len(spinner_frames)]
         for num, (name, started) in sorted(self._in_flight.items()):
             elapsed = now - started
-            display.append("  ◐ ", style="bold yellow")
+            display.append(f"  {frame} ", style="bold magenta")
             display.append(f"#{num} ", style="dim")
             display.append(f"{name}", style="bold")
             if elapsed >= 1.0:
@@ -455,13 +436,13 @@ class AgenticProgressRenderer:
             else:
                 regular_tools.append(item)
 
-        # Print regular tools first
+        # Print regular tools
         for num, name, desc, elapsed, output_len, is_error, _extra in regular_tools:
             show_hint = f"/show {num}"
             if is_error:
-                icon = "[bold red]✗[/bold red]"
+                icon = "[bold red]⚠[/bold red]"
             else:
-                icon = "[green]✓[/green]"
+                icon = "[dim]→[/dim]"
 
             elapsed_str = ""
             time_bar = ""
