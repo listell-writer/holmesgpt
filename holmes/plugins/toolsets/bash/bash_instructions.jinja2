@@ -76,7 +76,7 @@ Commands matching these prefixes will execute immediately without prompting:
 
 ## Other Commands
 
-Commands not in the pre-approved list above (e.g., `kubectl exec`, `kubectl cp`, `curl`, `python`) **can still be used**. They will be sent to the user for approval before execution. Do not refuse to run a command just because it is not pre-approved — go ahead and attempt it, and the user will be prompted to approve or deny.
+Prefer pre-approved commands and built-in tools whenever they can accomplish the task — this avoids interrupting the user with approval prompts. However, commands not in the pre-approved list (e.g., `kubectl exec`, `kubectl cp`, `curl`, `python`) **can still be used** when needed. They will be sent to the user for approval before execution. Never refuse to run a command just because it is not pre-approved — attempt it, and the user will be prompted to approve or deny.
 
 ## Blocked Commands
 
