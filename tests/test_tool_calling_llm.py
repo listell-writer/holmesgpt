@@ -21,7 +21,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from holmes.core.llm import LLM, TokenCountMetadata
-from holmes.core.models import ToolCallResult
+from holmes.core.models import ToolApprovalDecision, ToolCallResult
 from holmes.core.tool_calling_llm import LLMInterruptedError, ToolCallingLLM
 from holmes.core.tools import StructuredToolResult, StructuredToolResultStatus
 from holmes.core.tools_utils.tool_executor import ToolExecutor
@@ -1051,7 +1051,6 @@ class TestApprovalViaReinvocation:
         )
         ai._invoke_llm_tool_call = MagicMock(return_value=approved_tool_result)
 
-        from holmes.core.models import ToolApprovalDecision
         decisions = [ToolApprovalDecision(tool_call_id="tc_del", approved=True)]
 
         events2 = _collect_stream_events(

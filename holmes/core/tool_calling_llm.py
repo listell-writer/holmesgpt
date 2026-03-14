@@ -480,6 +480,9 @@ class ToolCallingLLM:
                     messages = event.data["messages"]
                     pending = event.data["pending_approvals"]
                     tool_results_map = event.data["tool_results"]
+                    total_num_llm_calls += event.data.get("num_llm_calls", 0)
+                    round_costs = event.data.get("costs", {})
+                    accumulated_costs = _sum_costs(accumulated_costs, round_costs)
                     tool_decisions = self._build_approval_decisions(pending, tool_results_map)
                     break
                 elif event.event == StreamEvents.ANSWER_END:
@@ -494,9 +497,19 @@ class ToolCallingLLM:
                 round_costs = answer_data.get("costs", {})
                 accumulated_costs = _sum_costs(accumulated_costs, round_costs)
                 cost_fields = {k: v for k, v in accumulated_costs.items() if k in LLMCosts.model_fields}
+                # Deduplicate tool calls by tool_call_id, keeping the last (final) entry
+                seen_ids: dict[str, int] = {}
+                for idx, tc in enumerate(all_tool_calls):
+                    tc_id = tc.get("tool_call_id")
+                    if tc_id:
+                        seen_ids[tc_id] = idx
+                deduped_tool_calls = [
+                    tc for idx, tc in enumerate(all_tool_calls)
+                    if tc.get("tool_call_id") not in seen_ids or seen_ids[tc.get("tool_call_id")] == idx
+                ]
                 return LLMResult(
                     result=answer_data["content"],
-                    tool_calls=all_tool_calls,
+                    tool_calls=deduped_tool_calls,
                     num_llm_calls=total_num_llm_calls,
                     prompt=answer_data.get("prompt"),
                     messages=answer_data["messages"],
@@ -1077,6 +1090,8 @@ class ToolCallingLLM:
                             ],
                             "tool_results": tool_results_map,
                             "requires_approval": True,
+                            "num_llm_calls": i,
+                            "costs": costs.model_dump(),
                         },
                     )
                     return
