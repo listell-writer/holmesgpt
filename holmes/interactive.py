@@ -264,63 +264,180 @@ class InitProgressRenderer:
                 self._console.print(f"  [red]x {name}{err_suffix}[/red]")
 
 
-def _render_stream_event(
-    event: StreamMessage,
-    console: Console,
-    tool_number_offset: int,
-    start_tool_count_ref: list,
-    saw_tool_results_ref: list,
-    all_tool_calls: list,
-    all_tool_calls_history: list,
-) -> None:
-    """Render a single stream event to the console."""
-    # Log blank line when a tool batch ends (transition away from TOOL_RESULT)
-    if saw_tool_results_ref[0] and event.event != StreamEvents.TOOL_RESULT:
-        console.print()
-        saw_tool_results_ref[0] = False
+class AgenticProgressRenderer:
+    """Renders tool-calling progress using Rich Live.
 
-    if event.event == StreamEvents.START_TOOL:
-        start_tool_count_ref[0] += 1
-    elif event.event == StreamEvents.TOOL_RESULT:
-        saw_tool_results_ref[0] = True
-        all_tool_calls.append(event.data)
-        if start_tool_count_ref[0] > 0:
-            console.print(
-                f"The AI requested [bold]{start_tool_count_ref[0]}[/bold] tool call(s)."
-            )
-            start_tool_count_ref[0] = 0
+    While tools are running, a transient live display shows a spinner with
+    tool names and elapsed times.  When the batch completes the live display
+    vanishes and a compact summary line is printed.
 
-        # Render "Running tool" and "Finished" lines from the TOOL_RESULT data
-        description = event.data.get("description", "")
-        tool_name = event.data.get("tool_name", event.data.get("name", ""))
-        result_data = event.data.get("result", {})
-        output_str = result_data.get("data", "")
-        elapsed = result_data.get("elapsed_seconds")
-        tool_number = tool_number_offset + len(all_tool_calls)
-        tool_number_str = f"#{tool_number} " if tool_number else ""
+    AI messages are printed immediately (outside the Live region).
+    """
 
-        console.print(
-            f"Running tool {tool_number_str}[bold]{tool_name}[/bold]: {description}"
-        )
+    def __init__(self, console: Console, tool_number_offset: int):
+        self._console = console
+        self._tool_number_offset = tool_number_offset
+        self._lock = threading.Lock()
 
-        if elapsed is not None:
-            output_len = len(output_str) if output_str else 0
-            line_count = output_str.count("\n") + 1 if output_str else 0
-            show_hint = f"/show {tool_number}" if tool_number else "/show"
-            console.print(
-                f"  [dim]Finished {tool_number_str}in {elapsed:.2f}s, output length: {output_len:,} characters ({line_count:,} lines) - {show_hint} to view contents[/dim]"
+        # Completed tools: list of (number, name, description, elapsed, output_len, line_count)
+        self._completed: List[tuple] = []
+        # In-flight tools: tool_number → (name, description, start_time)
+        self._in_flight: Dict[int, tuple] = {}
+        self._next_tool_number = tool_number_offset + 1
+        self._batch_size = 0  # tools in current batch (from START_TOOL events)
+
+        self._live: Optional[Any] = None  # Rich Live
+        self._timer_stop = threading.Event()
+
+    def _build_display(self) -> "Text":
+        from rich.text import Text
+
+        now = time.time()
+        display = Text()
+
+        # Show in-flight tools with elapsed
+        for num, (name, desc, started) in sorted(self._in_flight.items()):
+            elapsed = now - started
+            display.append(f"  Running #{num} ", style="bold")
+            display.append(f"{name}", style="bold cyan")
+            if desc:
+                display.append(f": {desc}", style="dim")
+            display.append(f"  ({elapsed:.0f}s)", style="dim")
+            display.append("\n")
+
+        # Remove trailing newline
+        if display.plain.endswith("\n"):
+            display.right_crop(1)
+
+        return display
+
+    def _tick(self) -> None:
+        while not self._timer_stop.wait(1.0):
+            with self._lock:
+                if self._live is not None and self._in_flight:
+                    self._live.update(self._build_display())
+
+    def _ensure_live(self) -> None:
+        """Start Live display if not already running."""
+        if self._live is None:
+            from rich.live import Live
+
+            self._live = Live(
+                self._build_display(),
+                console=self._console,
+                transient=True,
+                refresh_per_second=4,
             )
-    elif event.event == StreamEvents.AI_MESSAGE:
-        reasoning = event.data.get("reasoning")
-        content = event.data.get("content")
-        if reasoning:
-            console.print(
-                f"[italic dim]AI reasoning:\n\n{reasoning}[/italic dim]\n"
-            )
-        if content and content.strip():
-            console.print(
-                f"[bold {AI_COLOR}]AI:[/bold {AI_COLOR}] {content}"
-            )
+            self._live.start()
+            self._timer_stop.clear()
+            timer_thread = threading.Thread(target=self._tick, daemon=True)
+            timer_thread.start()
+
+    def _stop_live(self) -> None:
+        """Stop the Live display."""
+        self._timer_stop.set()
+        if self._live is not None:
+            self._live.stop()
+            self._live = None
+
+    def _print_completed_summary(self) -> None:
+        """Print a compact summary of the completed tool batch."""
+        if not self._completed:
+            return
+        for num, name, desc, elapsed, output_len, line_count in self._completed:
+            show_hint = f"/show {num}"
+            if elapsed is not None:
+                self._console.print(
+                    f"  [dim]#{num} [bold]{name}[/bold]: {desc}  "
+                    f"({elapsed:.1f}s, {output_len:,} chars) - {show_hint}[/dim]"
+                )
+            else:
+                self._console.print(
+                    f"  [dim]#{num} [bold]{name}[/bold]: {desc} - {show_hint}[/dim]"
+                )
+        self._completed.clear()
+
+    def handle_event(
+        self,
+        event: StreamMessage,
+        all_tool_calls: list,
+        all_tool_calls_history: list,
+    ) -> None:
+        """Process one stream event. Called from the main render thread."""
+        with self._lock:
+            if event.event == StreamEvents.START_TOOL:
+                self._batch_size += 1
+                num = self._next_tool_number
+                self._next_tool_number += 1
+                tool_name = event.data.get("tool_name", "...")
+                self._in_flight[num] = (tool_name, "", time.time())
+                self._ensure_live()
+                self._live.update(self._build_display())
+
+            elif event.event == StreamEvents.TOOL_RESULT:
+                all_tool_calls.append(event.data)
+
+                description = event.data.get("description", "")
+                tool_name = event.data.get("tool_name", event.data.get("name", ""))
+                result_data = event.data.get("result", {})
+                output_str = result_data.get("data", "")
+                elapsed = result_data.get("elapsed_seconds")
+                output_len = len(output_str) if output_str else 0
+                line_count = output_str.count("\n") + 1 if output_str else 0
+                tool_number = self._tool_number_offset + len(all_tool_calls)
+
+                # Remove from in-flight
+                self._in_flight.pop(tool_number, None)
+                # Also try to match by order if number didn't match
+                if not self._in_flight.get(tool_number):
+                    # Find oldest placeholder and remove it
+                    for k in sorted(self._in_flight.keys()):
+                        self._in_flight.pop(k, None)
+                        break
+
+                self._completed.append(
+                    (tool_number, tool_name, description, elapsed, output_len, line_count)
+                )
+
+                # If batch is done (no more in-flight), stop Live and print summary
+                if not self._in_flight:
+                    self._stop_live()
+                    batch = self._batch_size
+                    self._batch_size = 0
+                    if batch > 0:
+                        self._console.print(
+                            f"Ran [bold]{batch}[/bold] tool(s):"
+                        )
+                    self._print_completed_summary()
+                    self._console.print()
+                else:
+                    self._live.update(self._build_display())
+
+            elif event.event == StreamEvents.AI_MESSAGE:
+                # AI messages print immediately — stop Live first if running
+                if self._in_flight:
+                    self._stop_live()
+                    if self._completed:
+                        self._print_completed_summary()
+                        self._console.print()
+
+                reasoning = event.data.get("reasoning")
+                content = event.data.get("content")
+                if reasoning:
+                    self._console.print(
+                        f"[italic dim]AI reasoning:\n\n{reasoning}[/italic dim]\n"
+                    )
+                if content and content.strip():
+                    self._console.print(
+                        f"[bold {AI_COLOR}]AI:[/bold {AI_COLOR}] {content}"
+                    )
+
+    def flush(self) -> None:
+        """Ensure any remaining in-flight display is cleaned up."""
+        with self._lock:
+            self._stop_live()
+            if self._completed:
+                self._print_completed_summary()
 
 
 class SlashCommands(Enum):
@@ -1818,9 +1935,8 @@ def run_interactive_loop(
                 escape_thread.start()
 
                 # --- Main thread: render stream events while monitoring for escape ---
+                progress = AgenticProgressRenderer(console, tool_number_offset)
                 all_tool_calls_this_turn: list[dict] = []
-                start_tool_count_ref = [0]
-                saw_tool_results_ref = [False]
                 terminal_data = None
                 interrupted = False
                 accumulated_stats = RequestStats()
@@ -1841,10 +1957,8 @@ def run_interactive_loop(
                     event = item
 
                     # Render the event
-                    _render_stream_event(
-                        event, console, tool_number_offset,
-                        start_tool_count_ref, saw_tool_results_ref,
-                        all_tool_calls_this_turn, all_tool_calls_history,
+                    progress.handle_event(
+                        event, all_tool_calls_this_turn, all_tool_calls_history,
                     )
 
                     if event.event == StreamEvents.ANSWER_END:
@@ -1855,7 +1969,8 @@ def run_interactive_loop(
                         # Approval is handled inside the background thread
                         pass
 
-                # Wait for threads to finish
+                # Clean up live display and wait for threads
+                progress.flush()
                 ai_thread.join(timeout=5.0)
                 escape_thread.join(timeout=2.0)
 
