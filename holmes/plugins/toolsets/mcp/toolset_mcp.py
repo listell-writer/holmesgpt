@@ -369,8 +369,37 @@ class RemoteMCPTool(Tool):
             # Drop None for non-nullable params (LLM sent null for a required field)
             if coerced_value is None and not is_nullable:
                 continue
+            # Recurse into objects to strip nulls from non-nullable nested fields
+            if isinstance(coerced_value, dict) and schema.properties:
+                coerced_value = self._coerce_nested_object(coerced_value, schema.properties)
             coerced[key] = coerced_value
         return coerced
+
+    @classmethod
+    def _coerce_nested_object(cls, obj: Dict, properties: Dict[str, "ToolParameter"]) -> Dict:
+        """Strip null values from nested object fields that are not nullable."""
+        result = {}
+        for k, v in obj.items():
+            prop_schema = properties.get(k)
+            if prop_schema is None:
+                result[k] = v
+                continue
+
+            prop_type = prop_schema.type
+            is_nullable = False
+            if isinstance(prop_type, list):
+                is_nullable = "null" in prop_type
+                non_null = [t for t in prop_type if t != "null"]
+                prop_type = non_null[0] if non_null else "string"
+
+            coerced_v = cls._coerce_value(v, prop_type)
+            if coerced_v is None and not is_nullable:
+                continue
+            # Recurse deeper if needed
+            if isinstance(coerced_v, dict) and prop_schema.properties:
+                coerced_v = cls._coerce_nested_object(coerced_v, prop_schema.properties)
+            result[k] = coerced_v
+        return result
 
     @staticmethod
     def _coerce_value(value: Any, expected_type: str) -> Any:

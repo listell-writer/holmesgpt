@@ -1934,6 +1934,63 @@ class TestParamCoercion:
         assert tool._coerce_params({}) == {}
         assert tool._coerce_params(None) is None
 
+    def test_nested_nulls_stripped_from_object(self):
+        """Null values inside nested objects are stripped when schema says non-nullable."""
+        tool = self._make_tool({
+            "timeRange": ToolParameter(
+                type="object",
+                required=True,
+                properties={
+                    "minutes": ToolParameter(type="integer", required=True),
+                    "startDate": ToolParameter(type="string", required=False),
+                    "endDate": ToolParameter(type="string", required=False),
+                },
+            ),
+        })
+        result = tool._coerce_params({
+            "timeRange": {"minutes": 15, "startDate": None, "endDate": None},
+        })
+        assert result == {"timeRange": {"minutes": 15}}
+
+    def test_nested_nulls_kept_when_nullable(self):
+        """Null values inside nested objects are kept when schema allows null."""
+        tool = self._make_tool({
+            "config": ToolParameter(
+                type="object",
+                required=True,
+                properties={
+                    "name": ToolParameter(type="string", required=True),
+                    "override": ToolParameter(type=["string", "null"], required=False),
+                },
+            ),
+        })
+        result = tool._coerce_params({
+            "config": {"name": "test", "override": None},
+        })
+        assert result == {"config": {"name": "test", "override": None}}
+
+    def test_nested_string_null_stripped(self):
+        """String "null" inside nested objects is also stripped for non-nullable fields."""
+        tool = self._make_tool({
+            "opts": ToolParameter(
+                type="object",
+                required=True,
+                properties={
+                    "limit": ToolParameter(type="integer", required=False),
+                },
+            ),
+        })
+        result = tool._coerce_params({"opts": {"limit": "null"}})
+        assert result == {"opts": {}}
+
+    def test_nested_object_without_schema_passes_through(self):
+        """Object params without nested properties schema pass through unchanged."""
+        tool = self._make_tool({
+            "data": ToolParameter(type="object", required=True),
+        })
+        result = tool._coerce_params({"data": {"a": None, "b": 1}})
+        assert result == {"data": {"a": None, "b": 1}}
+
     def test_full_mcp_scenario(self):
         """End-to-end test: all coercion types combined in one call."""
         tool = self._make_tool({
