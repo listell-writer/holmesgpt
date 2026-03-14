@@ -262,30 +262,10 @@ def test_as_tool_result_response():
     response = tcr.as_tool_result_response()
     assert response["tool_call_id"] == "call1"
     assert response["tool_name"] == "toolX"
+    assert response["name"] == "toolX"  # both keys carry the same value
     assert response["description"] == "desc"
     assert response["role"] == "tool"
 
     expected_dump = structured.model_dump()
     expected_dump["data"] = structured.get_stringified_data()
     assert response["result"] == expected_dump
-
-
-def test_as_streaming_tool_result_response():
-    structured = StructuredToolResult(
-        status=StructuredToolResultStatus.SUCCESS, data="hello"
-    )
-    tcr = ToolCallResult(
-        tool_call_id="call2",
-        tool_name="toolY",
-        description="desc2",
-        result=structured,
-    )
-    streaming = tcr.as_streaming_tool_result_response()
-    assert streaming["tool_call_id"] == "call2"
-    assert streaming["role"] == "tool"
-    assert streaming["description"] == "desc2"
-    assert streaming["name"] == "toolY"
-
-    expected_dump = structured.model_dump()
-    expected_dump["data"] = structured.get_stringified_data()
-    assert streaming["result"] == expected_dump
