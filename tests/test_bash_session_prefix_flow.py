@@ -19,7 +19,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 from fastapi.testclient import TestClient
 
-from holmes.core.llm import LLM, TokenCountMetadata
+from holmes.core.llm import LLM, ContextWindowUsage
 from holmes.core.models import StructuredToolResult, StructuredToolResultStatus
 from holmes.core.tool_calling_llm import ToolCallingLLM
 from holmes.core.tools import Tool, ToolInvokeContext, ToolParameter, Toolset
@@ -189,7 +189,7 @@ def test_bash_session_prefix_memory_flow(
 
     # Create mock LLM
     mock_llm = MagicMock(spec=LLM)
-    mock_llm.count_tokens.return_value = TokenCountMetadata(
+    mock_llm.count_tokens.return_value = ContextWindowUsage(
         total_tokens=100,
         system_tokens=0,
         tools_to_call_tokens=0,

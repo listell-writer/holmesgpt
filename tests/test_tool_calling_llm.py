@@ -20,12 +20,12 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from holmes.core.llm import LLM, TokenCountMetadata
+from holmes.core.llm import LLM, ContextWindowUsage
 from holmes.core.models import ToolApprovalDecision, ToolCallResult
+from holmes.core.llm_usage import RequestStats
 from holmes.core.tool_calling_llm import LLMInterruptedError, ToolCallingLLM
 from holmes.core.tools import StructuredToolResult, StructuredToolResultStatus
 from holmes.core.tools_utils.tool_executor import ToolExecutor
-from holmes.core.truncation.compaction import CompactionUsage
 from holmes.core.truncation.input_context_window_limiter import (
     ContextWindowLimiterOutput,
 )
@@ -47,7 +47,7 @@ SIMPLE_TOOL_OPENAI = {
     },
 }
 
-DEFAULT_TOKEN_COUNT = TokenCountMetadata(
+DEFAULT_TOKEN_COUNT = ContextWindowUsage(
     total_tokens=100,
     system_tokens=0,
     tools_to_call_tokens=0,
@@ -68,7 +68,7 @@ def _make_context_limiter_passthrough(messages, **_kwargs):
         maximum_output_token=4096,
         tokens=DEFAULT_TOKEN_COUNT,
         conversation_history_compacted=False,
-        compaction_usage=CompactionUsage(),
+        compaction_usage=RequestStats(),
     )
 
 
@@ -795,8 +795,8 @@ class TestCompactionCosts:
     """Compaction tokens/cost from limit_input_context_window are accumulated."""
 
     def test_call_accumulates_compaction_costs(self, make_ai, mock_llm):
-        compaction = CompactionUsage(
-            total_tokens=500, prompt_tokens=400, completion_tokens=100, cost=0.005
+        compaction = RequestStats(
+            total_tokens=500, prompt_tokens=400, completion_tokens=100, total_cost=0.005
         )
         limiter_output_with_compaction = ContextWindowLimiterOutput(
             metadata={},
@@ -816,7 +816,7 @@ class TestCompactionCosts:
             maximum_output_token=4096,
             tokens=DEFAULT_TOKEN_COUNT,
             conversation_history_compacted=False,
-            compaction_usage=CompactionUsage(),
+            compaction_usage=RequestStats(),
         )
 
         tc = _make_mock_tool_call()
@@ -1109,3 +1109,124 @@ class TestApprovalViaReinvocation:
         tool_names = [tc.tool_name for tc in result.tool_calls]
         assert "kubectl_get" in tool_names
         assert "kubectl_delete" in tool_names
+
+
+# ---------------------------------------------------------------------------
+# Test: Blackbox SSE event shapes (public contract for HTTP clients)
+# ---------------------------------------------------------------------------
+
+EXPECTED_COSTS_KEYS = {
+    "total_cost", "total_tokens", "prompt_tokens", "completion_tokens",
+    "cached_tokens", "reasoning_tokens", "max_completion_tokens_per_call",
+    "max_prompt_tokens_per_call", "num_compactions",
+}
+
+EXPECTED_TOKEN_COUNT_METADATA_KEYS = {"costs", "usage", "tokens", "max_tokens", "max_output_tokens"}
+
+EXPECTED_ANSWER_END_KEYS = {
+    "content", "messages", "metadata", "tool_calls", "num_llm_calls", "prompt", "costs",
+}
+
+EXPECTED_APPROVAL_REQUIRED_KEYS = {
+    "content", "messages", "pending_approvals", "tool_results",
+    "requires_approval", "num_llm_calls", "costs",
+}
+
+
+class TestSSEEventShapes:
+    """Assert the exact JSON key sets an HTTP client sees in each SSE event type.
+
+    These tests treat call_stream() as a black box and only inspect the
+    StreamMessage.data dicts — the same dicts that get json.dumps'd into SSE
+    ``data:`` lines by stream_chat_formatter().
+    """
+
+    @patch(LIMIT_PATCH, side_effect=_make_context_limiter_passthrough)
+    def test_token_count_event_shape(self, _mock_limit, make_ai, mock_llm):
+        """TOKEN_COUNT events carry metadata with costs, usage, tokens, and limits."""
+        tc = _make_mock_tool_call(tool_call_id="tc_shape")
+        resp1 = _make_llm_response(content="working", tool_calls=[tc], cost=0.01)
+        resp2 = _make_llm_response(content="done", tool_calls=None, cost=0.02)
+        mock_llm.completion.side_effect = [resp1, resp2]
+
+        ai = make_ai()
+        ai._invoke_llm_tool_call = MagicMock(
+            return_value=_make_tool_call_result(tool_call_id="tc_shape")
+        )
+
+        events = _collect_stream_events(
+            ai.call_stream(msgs=[{"role": "user", "content": "check"}])
+        )
+
+        token_counts = _events_of_type(events, StreamEvents.TOKEN_COUNT)
+        assert len(token_counts) >= 1
+
+        for tc_event in token_counts:
+            meta = tc_event.data["metadata"]
+            assert set(meta.keys()) >= EXPECTED_TOKEN_COUNT_METADATA_KEYS, (
+                f"TOKEN_COUNT metadata missing keys: "
+                f"{EXPECTED_TOKEN_COUNT_METADATA_KEYS - set(meta.keys())}"
+            )
+            assert set(meta["costs"].keys()) == EXPECTED_COSTS_KEYS, (
+                f"costs keys mismatch: got {set(meta['costs'].keys())}"
+            )
+
+    @patch(LIMIT_PATCH, side_effect=_make_context_limiter_passthrough)
+    def test_answer_end_event_shape(self, _mock_limit, make_ai, mock_llm):
+        """ANSWER_END event carries all required top-level keys."""
+        tc = _make_mock_tool_call(tool_call_id="tc_ae")
+        resp1 = _make_llm_response(content="step", tool_calls=[tc], cost=0.01)
+        resp2 = _make_llm_response(content="answer", tool_calls=None, cost=0.02)
+        mock_llm.completion.side_effect = [resp1, resp2]
+
+        ai = make_ai()
+        ai._invoke_llm_tool_call = MagicMock(
+            return_value=_make_tool_call_result(tool_call_id="tc_ae")
+        )
+
+        events = _collect_stream_events(
+            ai.call_stream(msgs=[{"role": "user", "content": "go"}])
+        )
+
+        answer_ends = _events_of_type(events, StreamEvents.ANSWER_END)
+        assert len(answer_ends) == 1
+        data = answer_ends[0].data
+
+        assert set(data.keys()) == EXPECTED_ANSWER_END_KEYS, (
+            f"ANSWER_END keys mismatch: got {set(data.keys())}"
+        )
+        assert set(data["costs"].keys()) == EXPECTED_COSTS_KEYS
+        assert isinstance(data["messages"], list)
+        assert isinstance(data["tool_calls"], list)
+        assert isinstance(data["num_llm_calls"], int)
+
+    @patch(LIMIT_PATCH, side_effect=_make_context_limiter_passthrough)
+    def test_approval_required_event_shape(self, _mock_limit, make_ai, mock_llm):
+        """APPROVAL_REQUIRED event carries the expected top-level keys."""
+        tc = _make_mock_tool_call(tool_call_id="tc_apr", tool_name="kubectl_delete")
+        resp = _make_llm_response(content="deleting", tool_calls=[tc])
+        mock_llm.completion.return_value = resp
+
+        ai = make_ai()
+        ai._invoke_llm_tool_call = MagicMock(
+            return_value=_make_tool_call_result_approval(tool_call_id="tc_apr")
+        )
+
+        events = _collect_stream_events(
+            ai.call_stream(
+                msgs=[{"role": "user", "content": "delete pod"}],
+                enable_tool_approval=True,
+            )
+        )
+
+        approval_events = _events_of_type(events, StreamEvents.APPROVAL_REQUIRED)
+        assert len(approval_events) == 1
+        data = approval_events[0].data
+
+        assert set(data.keys()) == EXPECTED_APPROVAL_REQUIRED_KEYS, (
+            f"APPROVAL_REQUIRED keys mismatch: got {set(data.keys())}"
+        )
+        assert set(data["costs"].keys()) == EXPECTED_COSTS_KEYS
+        assert data["requires_approval"] is True
+        assert isinstance(data["pending_approvals"], list)
+        assert len(data["pending_approvals"]) > 0

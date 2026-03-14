@@ -21,7 +21,8 @@ from holmes.common.env_vars import (
 )
 from holmes.core.issue import Issue
 from holmes.core.llm import LLM
-from holmes.core.llm_usage import extract_usage_from_response
+from holmes.core.llm_usage import RequestStats, extract_usage_from_response
+
 from holmes.core.models import (
     PendingToolApproval,
     ToolApprovalDecision,
@@ -134,85 +135,7 @@ def extract_bash_session_prefixes(messages: List[Dict[str, Any]]) -> List[str]:
     return list(prefixes)
 
 
-class LLMCosts(BaseModel):
-    """Tracks cost and token usage for LLM calls."""
-
-    total_cost: float = 0.0
-    total_tokens: int = 0
-    prompt_tokens: int = 0
-    completion_tokens: int = 0
-    cached_tokens: Optional[int] = None
-    reasoning_tokens: int = 0
-    max_completion_tokens_per_call: int = 0
-    max_prompt_tokens_per_call: int = 0
-    num_compactions: int = 0
-
-
-def _process_cost_info(
-    full_response, costs: Optional[LLMCosts] = None, log_prefix: str = "LLM call"
-) -> None:
-    """Process cost and token information from LLM response.
-
-    Logs the cost information and optionally accumulates it into a costs object.
-
-    Args:
-        full_response: The raw LLM response object
-        costs: Optional LLMCosts object to accumulate costs into
-        log_prefix: Prefix for logging messages (e.g., "LLM call", "Post-processing")
-    """
-    try:
-        raw = extract_usage_from_response(full_response)
-
-        if LOG_LLM_USAGE_RESPONSE:
-            usage = getattr(full_response, "usage", None)
-            if usage:
-                logging.info(f"LLM usage response:\n{usage}\n")
-
-        if raw.total_tokens > 0:
-            cost_logger.debug(
-                f"{log_prefix} cost: ${raw.cost:.6f} | Tokens: {raw.prompt_tokens} prompt + {raw.completion_tokens} completion = {raw.total_tokens} total"
-            )
-            if costs:
-                costs.total_cost += raw.cost
-                costs.prompt_tokens += raw.prompt_tokens
-                costs.completion_tokens += raw.completion_tokens
-                costs.total_tokens += raw.total_tokens
-                if raw.cached_tokens is not None:
-                    costs.cached_tokens = (costs.cached_tokens or 0) + raw.cached_tokens
-                costs.reasoning_tokens += raw.reasoning_tokens
-                costs.max_completion_tokens_per_call = max(
-                    costs.max_completion_tokens_per_call, raw.completion_tokens
-                )
-                costs.max_prompt_tokens_per_call = max(
-                    costs.max_prompt_tokens_per_call, raw.prompt_tokens
-                )
-        elif raw.cost > 0:
-            cost_logger.debug(
-                f"{log_prefix} cost: ${raw.cost:.6f} | Token usage not available"
-            )
-            if costs:
-                costs.total_cost += raw.cost
-    except (AttributeError, TypeError, KeyError) as e:
-        logging.debug(f"Could not extract cost information: {e}")
-
-
-_SUM_COST_FIELDS = ["total_cost", "total_tokens", "prompt_tokens", "completion_tokens", "reasoning_tokens", "num_compactions"]
-_MAX_COST_FIELDS = ["max_prompt_tokens_per_call", "max_completion_tokens_per_call"]
-
-
-def _sum_costs(a: dict, b: dict) -> dict:
-    """Sum two cost dicts across approval rounds."""
-    result = {}
-    for f in _SUM_COST_FIELDS:
-        result[f] = a.get(f, 0) + b.get(f, 0)
-    for f in _MAX_COST_FIELDS:
-        result[f] = max(a.get(f, 0), b.get(f, 0))
-    a_c, b_c = a.get("cached_tokens"), b.get("cached_tokens")
-    result["cached_tokens"] = (a_c or 0) + (b_c or 0) if a_c is not None or b_c is not None else None
-    return result
-
-
-class LLMResult(LLMCosts):
+class LLMResult(RequestStats):
     tool_calls: Optional[List[ToolCallResult]] = None
     num_llm_calls: Optional[int] = None  # Number of LLM API calls (turns)
     result: Optional[str] = None
@@ -433,7 +356,7 @@ class ToolCallingLLM:
         all_tool_calls: list[dict] = []
         tool_decisions: Optional[List[ToolApprovalDecision]] = None
         total_num_llm_calls = 0
-        accumulated_costs: dict = {}
+        accumulated_stats = RequestStats()
 
         while True:
             stream = self.call_stream(
@@ -485,8 +408,7 @@ class ToolCallingLLM:
                     pending = event.data["pending_approvals"]
                     tool_results_map = event.data["tool_results"]
                     total_num_llm_calls += event.data.get("num_llm_calls", 0)
-                    round_costs = event.data.get("costs", {})
-                    accumulated_costs = _sum_costs(accumulated_costs, round_costs)
+                    accumulated_stats += RequestStats(**event.data.get("costs", {}))
                     tool_decisions = self._build_approval_decisions(pending, tool_results_map)
                     break
                 elif event.event == StreamEvents.ANSWER_END:
@@ -498,9 +420,7 @@ class ToolCallingLLM:
 
             if answer_data:
                 total_num_llm_calls += answer_data.get("num_llm_calls", 0)
-                round_costs = answer_data.get("costs", {})
-                accumulated_costs = _sum_costs(accumulated_costs, round_costs)
-                cost_fields = {k: v for k, v in accumulated_costs.items() if k in LLMCosts.model_fields}
+                accumulated_stats += RequestStats(**answer_data.get("costs", {}))
                 # Deduplicate tool calls by tool_call_id, keeping the last (final) entry
                 seen_ids: dict[str, int] = {}
                 for idx, tc in enumerate(all_tool_calls):
@@ -518,7 +438,7 @@ class ToolCallingLLM:
                     prompt=answer_data.get("prompt"),
                     messages=answer_data["messages"],
                     metadata=answer_data.get("metadata"),
-                    **cost_fields,
+                    **accumulated_stats.model_dump(),
                 )
 
             if not tool_decisions:
@@ -536,15 +456,8 @@ class ToolCallingLLM:
             tool_result = tool_results_map.get(tool_call_id)
 
             # Re-check if approval is still needed (prefix may have been approved by another tool)
-            temp_result = ToolCallResult(
-                tool_call_id=tool_call_id,
-                tool_name=approval["tool_name"],
-                description=approval.get("description", ""),
-                result=tool_result or StructuredToolResult(
-                    status=StructuredToolResultStatus.APPROVAL_REQUIRED,
-                ),
-            )
-            if self._is_tool_call_already_approved(temp_result):
+            tool_params = (tool_result.params or {}) if tool_result else approval.get("params", {})
+            if self._is_tool_call_already_approved(approval["tool_name"], tool_params):
                 logging.info(f"Approval no longer needed for {approval['tool_name']}")
                 decisions.append(ToolApprovalDecision(
                     tool_call_id=tool_call_id,
@@ -631,66 +544,6 @@ class ToolCallingLLM:
             )
         return tool_response
 
-    def _get_tool_call_result(
-        self,
-        tool_call_id: str,
-        tool_name: str,
-        tool_arguments: str,
-        user_approved: bool,
-        previous_tool_calls: list[dict],
-        tool_number: Optional[int] = None,
-        session_approved_prefixes: Optional[List[str]] = None,
-        request_context: Optional[Dict[str, Any]] = None,
-    ) -> ToolCallResult:
-        tool_params = {}
-        try:
-            tool_params = json.loads(tool_arguments)
-        except Exception:
-            logging.warning(
-                f"Failed to parse arguments for tool: {tool_name}. args: {tool_arguments}"
-            )
-
-        tool_response = None
-        if not user_approved:
-            tool_response = prevent_overly_repeated_tool_call(
-                tool_name=tool_name,
-                tool_params=tool_params,
-                tool_calls=previous_tool_calls,
-            )
-
-        if not tool_response:
-            tool_response = self._directly_invoke_tool_call(
-                tool_name=tool_name,
-                tool_params=tool_params,
-                user_approved=user_approved,
-                tool_number=tool_number,
-                tool_call_id=tool_call_id,
-                session_approved_prefixes=session_approved_prefixes,
-                request_context=request_context,
-            )
-
-        if not isinstance(tool_response, StructuredToolResult):
-            # Should never be needed but ensure Holmes does not crash if one of the tools does not return the right type
-            logging.error(
-                f"Tool {tool_name} return type is not StructuredToolResult. Nesting the tool result into StructuredToolResult..."
-            )
-            tool_response = StructuredToolResult(
-                status=StructuredToolResultStatus.SUCCESS,
-                data=tool_response,
-                params=tool_params,
-            )
-
-        tool = self.tool_executor.get_tool_by_name(tool_name)
-
-        return ToolCallResult(
-            tool_call_id=tool_call_id,
-            tool_name=tool_name,
-            description=str(tool.get_parameterized_one_liner(tool_params))
-            if tool
-            else "",
-            result=tool_response,
-        )
-
     @staticmethod
     def _log_tool_call_result(
         tool_span,
@@ -763,15 +616,52 @@ class ToolCallingLLM:
                 tool_name = tool_to_call.function.name
                 tool_arguments = tool_to_call.function.arguments
                 tool_id = tool_to_call.id
-                tool_call_result = self._get_tool_call_result(
-                    tool_id,
-                    tool_name,
-                    tool_arguments,
-                    previous_tool_calls=previous_tool_calls,
-                    tool_number=tool_number,
-                    user_approved=user_approved,
-                    session_approved_prefixes=session_approved_prefixes,
-                    request_context=request_context,
+
+                tool_params = {}
+                try:
+                    tool_params = json.loads(tool_arguments)
+                except Exception:
+                    logging.warning(
+                        f"Failed to parse arguments for tool: {tool_name}. args: {tool_arguments}"
+                    )
+
+                tool_response = None
+                if not user_approved:
+                    tool_response = prevent_overly_repeated_tool_call(
+                        tool_name=tool_name,
+                        tool_params=tool_params,
+                        tool_calls=previous_tool_calls,
+                    )
+
+                if not tool_response:
+                    tool_response = self._directly_invoke_tool_call(
+                        tool_name=tool_name,
+                        tool_params=tool_params,
+                        user_approved=user_approved,
+                        tool_number=tool_number,
+                        tool_call_id=tool_id,
+                        session_approved_prefixes=session_approved_prefixes,
+                        request_context=request_context,
+                    )
+
+                if not isinstance(tool_response, StructuredToolResult):
+                    logging.error(
+                        f"Tool {tool_name} return type is not StructuredToolResult. Nesting the tool result into StructuredToolResult..."
+                    )
+                    tool_response = StructuredToolResult(
+                        status=StructuredToolResultStatus.SUCCESS,
+                        data=tool_response,
+                        params=tool_params,
+                    )
+
+                tool = self.tool_executor.get_tool_by_name(tool_name)
+                tool_call_result = ToolCallResult(
+                    tool_call_id=tool_id,
+                    tool_name=tool_name,
+                    description=str(tool.get_parameterized_one_liner(tool_params))
+                    if tool
+                    else "",
+                    result=tool_response,
                 )
 
             original_token_count = prevent_overly_big_tool_response(
@@ -790,17 +680,17 @@ class ToolCallingLLM:
             )
             return tool_call_result
 
-    def _is_tool_call_already_approved(self, tool_call_result):
-        tool = self.tool_executor.get_tool_by_name(tool_call_result.tool_name)
+    def _is_tool_call_already_approved(self, tool_name: str, params: dict) -> bool:
+        tool = self.tool_executor.get_tool_by_name(tool_name)
         if not tool:
             return False
         context = ToolInvokeContext(
             llm=self.llm,
             max_token_count=self.llm.get_max_token_count_for_single_tool(),
-            tool_name=tool_call_result.tool_name,
-            tool_call_id=tool_call_result.tool_call_id,
+            tool_name=tool_name,
+            tool_call_id="",
         )
-        approval = tool.requires_approval(tool_call_result.result.params or {}, context)
+        approval = tool.requires_approval(params, context)
         return not approval or not approval.needs_approval
 
     def call_stream(
@@ -840,7 +730,7 @@ class ToolCallingLLM:
         tools: Optional[list] = self._get_tools()
         max_steps = self.max_steps
         metadata: Dict[Any, Any] = {}
-        costs = LLMCosts()
+        stats = RequestStats()
         i = 0
 
         while i < max_steps:
@@ -860,22 +750,13 @@ class ToolCallingLLM:
             messages = limit_result.messages
             metadata = metadata | limit_result.metadata
 
-            # Accumulate compaction costs (mirrors call() logic)
+            # Accumulate compaction costs
             compaction = limit_result.compaction_usage
-            if compaction.total_tokens > 0:
-                costs.num_compactions += 1
-                costs.total_tokens += compaction.total_tokens
-                costs.prompt_tokens += compaction.prompt_tokens
-                costs.completion_tokens += compaction.completion_tokens
-                costs.total_cost += compaction.cost
-                costs.max_prompt_tokens_per_call = max(
-                    costs.max_prompt_tokens_per_call, compaction.prompt_tokens
-                )
-                costs.max_completion_tokens_per_call = max(
-                    costs.max_completion_tokens_per_call, compaction.completion_tokens
-                )
+            if compaction and compaction.total_tokens > 0:
+                compaction.num_compactions = 1
+                stats += compaction
                 cost_logger.debug(
-                    f"Compaction cost (streaming): ${compaction.cost:.6f} | "
+                    f"Compaction cost (streaming): ${compaction.total_cost:.6f} | "
                     f"Tokens: {compaction.prompt_tokens} prompt + {compaction.completion_tokens} completion = {compaction.total_tokens} total"
                 )
 
@@ -899,7 +780,19 @@ class ToolCallingLLM:
                 )
 
                 # Accumulate cost information for this iteration
-                _process_cost_info(full_response, costs, log_prefix="LLM iteration")
+                response_stats = RequestStats.from_response(full_response)
+                if response_stats.total_tokens > 0:
+                    cost_logger.debug(
+                        f"LLM iteration cost: ${response_stats.total_cost:.6f} | "
+                        f"Tokens: {response_stats.prompt_tokens} prompt + {response_stats.completion_tokens} completion = {response_stats.total_tokens} total"
+                    )
+                elif response_stats.total_cost > 0:
+                    cost_logger.debug(f"LLM iteration cost: ${response_stats.total_cost:.6f} | Token usage not available")
+                if LOG_LLM_USAGE_RESPONSE:
+                    usage = getattr(full_response, "usage", None)
+                    if usage:
+                        logging.info(f"LLM usage response:\n{usage}\n")
+                stats += response_stats
 
             # catch a known error that occurs with Azure and replace the error message with something more obvious to the user
             except BadRequestError as e:
@@ -942,7 +835,7 @@ class ToolCallingLLM:
                 maximum_output_token=limit_result.maximum_output_token,
                 metadata=metadata,
             )
-            metadata["costs"] = costs.model_dump()
+            metadata["costs"] = stats.model_dump()
             yield build_stream_event_token_count(metadata=metadata)
 
             tools_to_call = getattr(response_message, "tool_calls", None)
@@ -956,7 +849,7 @@ class ToolCallingLLM:
                         "tool_calls": all_tool_calls,
                         "num_llm_calls": i,
                         "prompt": json.dumps(messages, indent=2),
-                        "costs": costs.model_dump(),
+                        "costs": stats.model_dump(),
                     },
                 )
                 return
@@ -1065,7 +958,7 @@ class ToolCallingLLM:
                     maximum_output_token=limit_result.maximum_output_token,
                     metadata=metadata,
                 )
-                metadata["costs"] = costs.model_dump()
+                metadata["costs"] = stats.model_dump()
                 yield build_stream_event_token_count(metadata=metadata)
 
                 # If we have approval required tools, end the stream with pending approvals
@@ -1095,7 +988,7 @@ class ToolCallingLLM:
                             "tool_results": tool_results_map,
                             "requires_approval": True,
                             "num_llm_calls": i,
-                            "costs": costs.model_dump(),
+                            "costs": stats.model_dump(),
                         },
                     )
                     return

@@ -11,11 +11,12 @@ from holmes.common.env_vars import (
 )
 from holmes.core.llm import (
     LLM,
-    TokenCountMetadata,
+    ContextWindowUsage,
     get_context_window_compaction_threshold_pct,
 )
+from holmes.core.llm_usage import RequestStats
 from holmes.core.models import TruncationMetadata, TruncationResult
-from holmes.core.truncation.compaction import CompactionUsage, compact_conversation_history
+from holmes.core.truncation.compaction import compact_conversation_history
 from holmes.utils import sentry_helper
 from holmes.utils.stream import StreamEvents, StreamMessage
 
@@ -142,9 +143,9 @@ class ContextWindowLimiterOutput(BaseModel):
     events: list[StreamMessage]
     max_context_size: int
     maximum_output_token: int
-    tokens: TokenCountMetadata
+    tokens: ContextWindowUsage
     conversation_history_compacted: bool
-    compaction_usage: CompactionUsage = CompactionUsage()
+    compaction_usage: Optional["RequestStats"] = None
 
 
 @sentry_sdk.trace
@@ -158,7 +159,7 @@ def limit_input_context_window(
     max_context_size = llm.get_context_window_size()
     maximum_output_token = llm.get_maximum_output_token()
     conversation_history_compacted = False
-    compaction_usage = CompactionUsage()
+    compaction_usage = RequestStats()
     if ENABLE_CONVERSATION_HISTORY_COMPACTION and (
         initial_tokens.total_tokens + maximum_output_token
     ) > (max_context_size * get_context_window_compaction_threshold_pct() / 100):
