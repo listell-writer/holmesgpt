@@ -114,6 +114,9 @@ def restore_display_loggers():
         logging.getLogger(name).setLevel(logging.NOTSET)
 
 
+_SLOW_THRESHOLD_SECS = 1.0  # Show a toolset by name if it takes longer than this
+
+
 class InitProgressRenderer:
     """Collects InitEvents and renders live progress during initialization.
 
@@ -128,6 +131,7 @@ class InitProgressRenderer:
         self._lock = threading.Lock()
         self._toolsets_ok: List[str] = []
         self._toolsets_failed: List[tuple[str, str]] = []  # (name, error)
+        self._in_flight: Dict[str, float] = {}  # name → start time
         self._model_message: str = ""
         self._phase: str = "Loading datasources"
         self._start_time: float = 0.0
@@ -138,25 +142,43 @@ class InitProgressRenderer:
         """Build the Rich renderable for the current state."""
         from rich.text import Text
 
-        elapsed = int(time.time() - self._start_time)
+        now = time.time()
+        elapsed = int(now - self._start_time)
         ok = len(self._toolsets_ok)
         failed = len(self._toolsets_failed)
         checked = ok + failed
+        in_flight = len(self._in_flight)
 
         display = Text()
         display.append("  ")
         display.append(f"{self._phase}", style="bold")
-        display.append(f"  {checked} checked", style="dim")
+        display.append(f"  {checked} ready", style="dim")
+        if in_flight:
+            display.append(f", {in_flight} checking", style="dim")
         display.append(f"  ({elapsed}s)", style="dim")
 
-        # Show last few completed toolset names
-        recent = self._toolsets_ok[-4:]
-        if recent:
+        # Show recently completed toolset names (last 4, with "+N more" suffix)
+        if self._toolsets_ok:
+            max_show = 4
+            recent = self._toolsets_ok[-max_show:]
             names = ", ".join(recent)
-            if ok > 4:
-                names = "..., " + names
+            remaining = ok - len(recent)
+            if remaining > 0:
+                names += f" and {remaining} more"
             display.append("\n  ")
             display.append(f"  ready: {names}", style="green dim")
+
+        # Show in-flight toolsets that are taking more than 1 second
+        slow: List[tuple[str, float]] = []
+        for name, started_at in self._in_flight.items():
+            duration = now - started_at
+            if duration >= _SLOW_THRESHOLD_SECS:
+                slow.append((name, duration))
+        if slow:
+            slow.sort(key=lambda x: -x[1])  # longest first
+            parts = [f"{name} ({dur:.0f}s)" for name, dur in slow]
+            display.append("\n  ")
+            display.append(f"  checking: {', '.join(parts)}", style="yellow dim")
 
         if self._toolsets_failed:
             failed_names = ", ".join(name for name, _ in self._toolsets_failed[-4:])
@@ -168,7 +190,10 @@ class InitProgressRenderer:
     def on_event(self, event: "InitEvent") -> None:
         """Callback passed as on_event to create_console_toolcalling_llm."""
         with self._lock:
-            if event.kind == "toolset_ready":
+            if event.kind == "toolset_checking":
+                self._in_flight[event.name] = time.time()
+            elif event.kind == "toolset_ready":
+                self._in_flight.pop(event.name, None)
                 if event.status == "enabled":
                     self._toolsets_ok.append(event.name)
                 else:

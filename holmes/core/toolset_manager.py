@@ -202,10 +202,11 @@ class ToolsetManager:
         on_event: EventCallback = None,
     ):
         with concurrent.futures.ThreadPoolExecutor(max_workers=10) as executor:
-            future_to_toolset = {
-                executor.submit(toolset.check_prerequisites, silent): toolset
-                for toolset in toolsets
-            }
+            future_to_toolset = {}
+            for toolset in toolsets:
+                if on_event is not None:
+                    on_event(InitEvent(kind="toolset_checking", name=toolset.name))
+                future_to_toolset[executor.submit(toolset.check_prerequisites, silent)] = toolset
 
             for future in concurrent.futures.as_completed(future_to_toolset):
                 if on_event is not None:

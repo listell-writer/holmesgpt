@@ -13,6 +13,7 @@ class InitEvent:
 
     kind: str
     """Event kind — one of:
+    - ``toolset_checking``: a toolset prerequisite check has started
     - ``toolset_ready``   : a single toolset finished prerequisite checks
     - ``toolset_lazy``    : a toolset passed config checks and is deferred
     - ``datasource_count``: summary of how many datasources are available
