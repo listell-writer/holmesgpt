@@ -43,6 +43,7 @@ from rich.markup import escape
 
 from holmes.config import Config
 from holmes.core.config import config_path_dir
+from holmes.core.init_event import InitEvent
 from holmes.core.feedback import (
     PRIVACY_NOTICE_BANNER,
     Feedback,
@@ -111,6 +112,75 @@ def restore_display_loggers():
     """Restore display loggers to default level."""
     for name in DISPLAY_LOGGER_NAMES:
         logging.getLogger(name).setLevel(logging.NOTSET)
+
+
+class InitProgressRenderer:
+    """Collects InitEvents and renders a live spinner during initialization.
+
+    Thread-safe: events arrive from the ThreadPoolExecutor in check_toolset_prerequisites.
+    """
+
+    def __init__(self, console: Console):
+        self._console = console
+        self._lock = threading.Lock()
+        self._toolsets_ok: List[str] = []
+        self._toolsets_failed: List[str] = []
+        self._model_message: str = ""
+        self._status_text: str = "Initializing datasources..."
+        self._status: Optional[Any] = None  # Rich Status context manager
+
+    def on_event(self, event: "InitEvent") -> None:
+        """Callback passed as on_event to create_console_toolcalling_llm."""
+        with self._lock:
+            if event.kind == "toolset_ready":
+                if event.status == "enabled":
+                    self._toolsets_ok.append(event.name)
+                else:
+                    self._toolsets_failed.append(event.name)
+                count = len(self._toolsets_ok) + len(self._toolsets_failed)
+                self._status_text = f"Checking datasources... ({count} checked)"
+            elif event.kind == "toolset_lazy":
+                if event.status == "enabled":
+                    self._toolsets_ok.append(event.name)
+                else:
+                    self._toolsets_failed.append(event.name)
+            elif event.kind == "refreshing":
+                self._status_text = "Refreshing datasources..."
+            elif event.kind == "model_loaded":
+                self._model_message = event.message
+            elif event.kind == "datasource_count":
+                self._status_text = f"Loaded {event.count} datasources"
+
+            if self._status is not None:
+                self._status.update(self._status_text)
+
+    def start(self) -> None:
+        """Start the spinner. Call before create_console_toolcalling_llm."""
+        from rich.status import Status
+
+        self._status = Status(self._status_text, console=self._console, spinner="dots")
+        self._status.start()
+
+    def stop(self) -> None:
+        """Stop the spinner and print a compact summary."""
+        if self._status is not None:
+            self._status.stop()
+            self._status = None
+
+        ok = len(self._toolsets_ok)
+        failed = len(self._toolsets_failed)
+
+        parts = []
+        parts.append(f"[bold green]{ok}[/bold green] datasources loaded")
+        if failed:
+            parts.append(f"[bold red]{failed}[/bold red] failed")
+        if self._model_message:
+            parts.append(self._model_message)
+        self._console.print(" | ".join(parts))
+
+        if self._toolsets_failed:
+            for name in self._toolsets_failed:
+                self._console.print(f"  [dim red]x {name}[/dim red]")
 
 
 def _render_stream_event(
