@@ -1088,9 +1088,18 @@ class TestApprovalViaReinvocation:
 
         # First invocation: tc_ok succeeds, tc_del needs approval
         # Second invocation (after approval): tc_del re-executed via process_tool_decisions
-        ai._invoke_llm_tool_call = MagicMock(
-            side_effect=[ok_result, approval_result, approved_result]
-        )
+        del_call_count = 0
+
+        def _route_tool_call(tool_to_call, **kwargs):
+            nonlocal del_call_count
+            if tool_to_call.id == "tc_ok":
+                return ok_result
+            elif tool_to_call.id == "tc_del":
+                del_call_count += 1
+                return approval_result if del_call_count == 1 else approved_result
+            raise ValueError(f"Unexpected tool call: {tool_to_call.id}")
+
+        ai._invoke_llm_tool_call = MagicMock(side_effect=_route_tool_call)
         ai._is_tool_call_already_approved = MagicMock(return_value=False)
 
         result = ai.call([{"role": "user", "content": "Get pods and delete one"}])
