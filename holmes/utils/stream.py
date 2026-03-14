@@ -112,13 +112,11 @@ def add_token_count_to_metadata(
     full_llm_response: Union[
         ModelResponse, CustomStreamWrapper, TextCompletionResponse
     ],
-    after_tool_results: bool = False,
 ):
     metadata["usage"] = build_usage_metadata(full_llm_response)
     metadata["tokens"] = tokens.model_dump()
     metadata["max_tokens"] = max_context_size
     metadata["max_output_tokens"] = maximum_output_token
-    metadata["after_tool_results"] = after_tool_results
 
 
 def build_stream_event_token_count(metadata: dict) -> StreamMessage:

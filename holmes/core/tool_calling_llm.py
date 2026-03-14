@@ -670,17 +670,8 @@ class ToolCallingLLM:
         limit_result: Any,
         metadata: Dict[Any, Any],
         stats: RequestStats,
-        after_tool_results: bool = False,
     ) -> StreamMessage:
-        """Build a TOKEN_COUNT event with current token usage and costs.
-
-        Args:
-            after_tool_results: When True, this emission happens after tool results
-                have been appended but before the next iteration's context window
-                truncation. The token counts may exceed max_tokens in this case.
-                When False (default), the emission reflects the post-truncation
-                state that was actually sent to the LLM.
-        """
+        """Build a TOKEN_COUNT event with current token usage and costs."""
         tokens = self.llm.count_tokens(messages=messages, tools=tools)
         add_token_count_to_metadata(
             tokens=tokens,
@@ -688,7 +679,6 @@ class ToolCallingLLM:
             max_context_size=limit_result.max_context_size,
             maximum_output_token=limit_result.maximum_output_token,
             metadata=metadata,
-            after_tool_results=after_tool_results,
         )
         metadata["costs"] = stats.model_dump()
         return build_stream_event_token_count(metadata=metadata)
@@ -939,8 +929,8 @@ class ToolCallingLLM:
                             data=tool_result_dict,
                         )
 
-                # Emit updated token counts after tool results (pre-next-truncation, may exceed max_tokens)
-                yield self._emit_token_count(messages, tools, full_response, limit_result, metadata, stats, after_tool_results=True)
+                # Emit updated token counts after tool results
+                yield self._emit_token_count(messages, tools, full_response, limit_result, metadata, stats)
 
                 # If we have approval required tools, end the stream with pending approvals
                 if pending_approvals:
