@@ -551,7 +551,7 @@ Delete `messages_call()`. Update its 3 callers to call `call()` directly:
    - `process_tool_decisions()` in `tool_calling_llm.py`
 4. Update tests: `tests/test_structured_toolcall_result.py` (rename test, assert both keys present), `tests/core/test_tool_output_deduplication.py`.
 
-### Step 5b: Write Test 6 (post-refactor approval)
+### Step 5c: Write Test 6 (post-refactor approval)
 
 Write Test 6. Run green.
 
