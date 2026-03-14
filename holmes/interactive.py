@@ -268,19 +268,66 @@ class InitProgressRenderer:
 _TODO_WRITE_TOOL_NAME = "TodoWrite"
 
 # Status icons for task list rendering
-_TASK_STATUS_ICONS = {
-    "pending": "[dim]○[/dim]",
-    "in_progress": "[bold yellow]◐[/bold yellow]",
-    "completed": "[green]✓[/green]",
-    "failed": "[bold red]✗[/bold red]",
+_TASK_ICONS = {
+    "pending": "○",
+    "in_progress": "◐",
+    "completed": "✓",
+    "failed": "✗",
 }
 
-_TASK_STATUS_STYLES = {
+_TASK_STYLES = {
     "pending": "dim",
-    "in_progress": "bold",
-    "completed": "dim",
-    "failed": "red",
+    "in_progress": "bold yellow",
+    "completed": "green",
+    "failed": "bold red",
 }
+
+
+def _build_task_panel(tasks: list) -> Panel:
+    """Build a Rich Panel showing the task list."""
+    from rich.text import Text
+
+    completed = sum(1 for t in tasks if t.get("status") == "completed")
+    in_progress = sum(1 for t in tasks if t.get("status") == "in_progress")
+    total = len(tasks)
+
+    content = Text()
+    for i, task in enumerate(tasks):
+        status = task.get("status", "pending")
+        icon = _TASK_ICONS.get(status, "?")
+        icon_style = _TASK_STYLES.get(status, "")
+        task_content = task.get("content", "")
+
+        content.append(f" {icon} ", style=icon_style)
+        if status == "completed":
+            content.append(task_content, style="dim strike")
+        elif status == "in_progress":
+            content.append(task_content, style="bold")
+        elif status == "failed":
+            content.append(task_content, style="red")
+        else:
+            content.append(task_content)
+        if i < len(tasks) - 1:
+            content.append("\n")
+
+    # Title with progress
+    progress_parts = []
+    if completed:
+        progress_parts.append(f"[green]{completed} done[/green]")
+    if in_progress:
+        progress_parts.append(f"[yellow]{in_progress} active[/yellow]")
+    remaining = total - completed - in_progress
+    if remaining > 0:
+        progress_parts.append(f"[dim]{remaining} pending[/dim]")
+    title = f"[bold]Tasks[/bold] {' · '.join(progress_parts)}"
+
+    return Panel(
+        content,
+        title=title,
+        title_align="left",
+        border_style="blue",
+        padding=(0, 1),
+    )
 
 
 class AgenticProgressRenderer:
@@ -291,8 +338,8 @@ class AgenticProgressRenderer:
     permanently with status icons. The Live display is transient — only in-flight
     state is shown live; completed state is printed and persists.
 
-    TodoWrite tool results are rendered as a task list panel instead of a plain
-    tool summary line.
+    TodoWrite results render as a bordered "Tasks" panel, visually separate from
+    tool execution lines. The panel only reprints when task statuses change.
 
     AI messages are printed immediately (outside the Live region).
     """
@@ -315,6 +362,9 @@ class AgenticProgressRenderer:
 
         self._live: Optional[Any] = None  # Rich Live
         self._timer_stop = threading.Event()
+
+        # Track last printed task statuses to avoid reprinting identical panels
+        self._last_task_statuses: Optional[str] = None
 
     def _build_display(self) -> "Text":
         from rich.text import Text
@@ -385,33 +435,28 @@ class AgenticProgressRenderer:
                 pass
             self._live = None
 
-    def _render_task_panel(self, tasks: list) -> None:
-        """Render a TodoWrite task list as a compact Rich panel."""
-        from rich.text import Text
-
-        lines = Text()
-        completed = sum(1 for t in tasks if t.get("status") == "completed")
-        total = len(tasks)
-        lines.append(f"  {completed}/{total} completed\n", style="dim")
-
-        for task in tasks:
-            status = task.get("status", "pending")
-            icon = _TASK_STATUS_ICONS.get(status, "?")
-            style = _TASK_STATUS_STYLES.get(status, "")
-            content = task.get("content", "")
-            # Rich markup in icon, plain text for content
-            self._console.print(f"  {icon} [{style}]{escape(content)}[/{style}]")
-
     def _print_completed_tools(self) -> None:
-        """Print completed tools permanently with status icons."""
+        """Print completed tools permanently with status icons.
+
+        TodoWrite results are rendered as a bordered panel. Regular tools
+        are shown as compact lines with elapsed time bars.
+        """
         if not self._completed:
             return
-        for num, name, desc, elapsed, output_len, is_error, extra in self._completed:
-            # TodoWrite: render task panel instead of tool summary
-            if name == _TODO_WRITE_TOOL_NAME and extra:
-                self._render_task_panel(extra)
-                continue
 
+        # Separate TodoWrite results from regular tools
+        regular_tools: List[tuple] = []
+        latest_tasks: Optional[list] = None
+
+        for item in self._completed:
+            num, name, desc, elapsed, output_len, is_error, extra = item
+            if name == _TODO_WRITE_TOOL_NAME and extra:
+                latest_tasks = extra
+            else:
+                regular_tools.append(item)
+
+        # Print regular tools first
+        for num, name, desc, elapsed, output_len, is_error, _extra in regular_tools:
             show_hint = f"/show {num}"
             if is_error:
                 icon = "[bold red]✗[/bold red]"
@@ -434,12 +479,22 @@ class AgenticProgressRenderer:
                 elif output_len >= 1000:
                     size_str = f" {output_len:,}"
 
-            # Build: ✓ #1 tool_name  0.1s ▪  /show 1
             self._console.print(
                 f"  {icon} [dim]#{num}[/dim] [bold]{escape(name)}[/bold]"
                 f"[dim]{elapsed_str}{size_str}[/dim]{time_bar}"
                 f"  [dim]{show_hint}[/dim]"
             )
+
+        # Print task panel if tasks changed
+        if latest_tasks is not None:
+            # Build a fingerprint of task statuses to avoid reprinting identical panels
+            fingerprint = "|".join(
+                f"{t.get('id', i)}:{t.get('status', '?')}" for i, t in enumerate(latest_tasks)
+            )
+            if fingerprint != self._last_task_statuses:
+                self._last_task_statuses = fingerprint
+                self._console.print(_build_task_panel(latest_tasks))
+
         self._completed.clear()
 
     def handle_event(
