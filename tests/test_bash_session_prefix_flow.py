@@ -8,7 +8,7 @@ Tests the full client experience:
 
 This test mocks LLM and bash tool responses but uses the real:
 - Server endpoints
-- process_tool_decisions()
+- _execute_tool_decisions()
 - extract_bash_session_prefixes()
 """
 
@@ -345,7 +345,7 @@ def test_bash_session_prefix_memory_flow(
     # available for the NEXT request, not the current one
     #
     # Actually, let me trace through:
-    # 1. process_tool_decisions runs, executes call_1, injects prefixes into message
+    # 1. _execute_tool_decisions runs, executes call_1, injects prefixes into message
     # 2. LLM is called again, returns call_2 (kubectl get nodes)
     # 3. call_2 is executed - but at this point, the message with prefixes
     #    IS in the conversation, so extract_bash_session_prefixes should find it

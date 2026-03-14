@@ -49,6 +49,7 @@ from holmes.core.feedback import (
     UserFeedback,
 )
 from holmes.core.prompt import PromptComponent, build_initial_ask_messages
+from holmes.core.models import PendingToolApproval
 from holmes.core.tool_calling_llm import (
     ApprovalCallback,
     LLMInterruptedError,
@@ -56,7 +57,7 @@ from holmes.core.tool_calling_llm import (
     ToolCallingLLM,
     ToolCallResult,
 )
-from holmes.core.tools import StructuredToolResult, pretty_print_toolset_status
+from holmes.core.tools import pretty_print_toolset_status
 from holmes.core.tracing import DummyTracer
 from holmes.plugins.toolsets.bash.common.cli_prefixes import (
     enable_cli_mode,
@@ -718,7 +719,7 @@ def _run_inline_menu(options: list[str], console: Console) -> Optional[int]:
 
 
 def handle_tool_approval(
-    tool_result: StructuredToolResult,
+    pending_approval: PendingToolApproval,
     style: Style,
     console: Console,
 ) -> tuple[bool, Optional[str]]:
@@ -731,7 +732,7 @@ def handle_tool_approval(
     3. Type feedback to tell Holmes what to do differently
 
     Args:
-        tool_result: The StructuredToolResult containing command and prefixes
+        pending_approval: The PendingToolApproval describing what needs approval
         style: Style for prompts
         console: Rich console for output
 
@@ -740,10 +741,8 @@ def handle_tool_approval(
         - approved: True if user approves, False if denied
         - feedback: User's optional feedback message when denying
     """
-    command = tool_result.invocation
-    prefixes = (
-        tool_result.params.get("suggested_prefixes", []) if tool_result.params else []
-    )
+    command = pending_approval.description
+    prefixes = pending_approval.params.get("suggested_prefixes", [])
 
     # Format prefixes for display
     if prefixes:
@@ -1198,10 +1197,10 @@ def run_interactive_loop(
         approval_callback = lambda _: (True, None)
     elif not bash_always_deny:
         def approval_handler(
-            tool_call_result: StructuredToolResult,
+            pending_approval: PendingToolApproval,
         ) -> tuple[bool, Optional[str]]:
             return handle_tool_approval(
-                tool_result=tool_call_result,
+                pending_approval=pending_approval,
                 style=style,
                 console=console,
             )
@@ -1483,7 +1482,7 @@ def run_interactive_loop(
             if approval_callback:
 
                 def _wrapped_approval(
-                    tool_result: StructuredToolResult,
+                    pending_approval: PendingToolApproval,
                     _orig=approval_callback,
                     _approval_active=approval_active,
                     _terminal_restored=terminal_restored,
@@ -1493,7 +1492,7 @@ def run_interactive_loop(
                     # from cbreak mode before launching the prompt_toolkit UI.
                     _terminal_restored.wait(timeout=2.0)
                     try:
-                        return _orig(tool_result)
+                        return _orig(pending_approval)
                     finally:
                         _approval_active.clear()
 

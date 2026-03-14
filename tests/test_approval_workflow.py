@@ -275,8 +275,8 @@ def test_streaming_chat_approval_workflow_approve_and_execute(
     mock_toolset.status.value = "enabled"
     mock_tool_executor.toolsets = [mock_toolset]
 
-    # Mock process_tool_decisions to simulate approval and execution
-    ai.process_tool_decisions = MagicMock(
+    # Mock _execute_tool_decisions to simulate approval and execution
+    ai._execute_tool_decisions = MagicMock(
         side_effect=lambda messages, tool_decisions, request_context=None, trace_span=None: (
             messages
             + [
@@ -350,8 +350,8 @@ def test_streaming_chat_approval_workflow_approve_and_execute(
     assert "Command executed successfully" in answer_event["analysis"]
 
     # Verify tool execution was called
-    ai.process_tool_decisions.assert_called_once()
-    args, kwargs = ai.process_tool_decisions.call_args
+    ai._execute_tool_decisions.assert_called_once()
+    args, kwargs = ai._execute_tool_decisions.call_args
     tool_decisions = args[1]  # Second argument is tool_decisions
     assert len(tool_decisions) == 1
     assert tool_decisions[0].tool_call_id == "tool_call_123"
@@ -427,8 +427,8 @@ def test_streaming_chat_approval_workflow_reject_command(
     mock_toolset.status.value = "enabled"
     mock_tool_executor.toolsets = [mock_toolset]
 
-    # Mock process_tool_decisions to simulate rejection
-    ai.process_tool_decisions = MagicMock(
+    # Mock _execute_tool_decisions to simulate rejection
+    ai._execute_tool_decisions = MagicMock(
         side_effect=lambda messages, tool_decisions, request_context=None, trace_span=None: (
             messages
             + [
@@ -502,8 +502,8 @@ def test_streaming_chat_approval_workflow_reject_command(
     assert "won't execute" in answer_event["analysis"]
 
     # Verify tool processing was called
-    ai.process_tool_decisions.assert_called_once()
-    args, kwargs = ai.process_tool_decisions.call_args
+    ai._execute_tool_decisions.assert_called_once()
+    args, kwargs = ai._execute_tool_decisions.call_args
     tool_decisions = args[1]  # Second argument is tool_decisions
     assert len(tool_decisions) == 1
     assert tool_decisions[0].tool_call_id == "tool_call_123"

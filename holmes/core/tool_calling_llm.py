@@ -132,8 +132,8 @@ def extract_bash_session_prefixes(messages: List[Dict[str, Any]]) -> List[str]:
     return list(prefixes)
 
 
-# Callback type: receives a tool result, returns (approved, optional_feedback)
-ApprovalCallback = Callable[[StructuredToolResult], tuple[bool, Optional[str]]]
+# Callback type: receives a pending approval, returns (approved, optional_feedback)
+ApprovalCallback = Callable[[PendingToolApproval], tuple[bool, Optional[str]]]
 
 
 class LLMResult(RequestStats):
@@ -187,22 +187,21 @@ class ToolCallingLLM:
                 return False
         return False
 
-    def process_tool_decisions(
+    def _execute_tool_decisions(
         self,
         messages: List[Dict[str, Any]],
         tool_decisions: List[ToolApprovalDecision],
         request_context: Optional[Dict[str, Any]] = None,
         trace_span: Any = None,
     ) -> tuple[List[Dict[str, Any]], list[StreamMessage]]:
-        """
-        Process tool approval decisions and execute approved tools.
+        """Execute approved tools and record rejections for denied ones.
 
-        Args:
-            messages: Current conversation messages
-            tool_decisions: List of ToolApprovalDecision objects
+        Called after the user (CLI callback or HTTP client) has decided on each
+        pending tool call. Re-invokes approved tools with user_approved=True,
+        and injects denial errors for rejected ones.
 
         Returns:
-            Updated messages list with tool execution results
+            Updated messages list with tool execution results and stream events.
         """
         if trace_span is None:
             trace_span = DummySpan()
@@ -348,8 +347,6 @@ class ToolCallingLLM:
             terminal_event = None
             start_tool_count = 0
             saw_tool_results = False
-            # Collect tool results for approval-required tools (keyed by tool_call_id)
-            pending_tool_results: Dict[str, StructuredToolResult] = {}
 
             for event in stream:
                 # Log blank line when a tool batch ends (transition away from TOOL_RESULT)
@@ -363,10 +360,6 @@ class ToolCallingLLM:
                     tool_number_offset += 1
                     saw_tool_results = True
                     all_tool_calls.append(event.data)
-                    # Track approval-required results for the callback
-                    result_data = event.data.get("result", {})
-                    if result_data.get("status") == StructuredToolResultStatus.APPROVAL_REQUIRED:
-                        pending_tool_results[event.data["tool_call_id"]] = StructuredToolResult(**result_data)
                     if start_tool_count > 0:
                         logging.info(
                             f"The AI requested [bold]{start_tool_count}[/bold] tool call(s)."
@@ -397,8 +390,8 @@ class ToolCallingLLM:
 
             if terminal_event == StreamEvents.APPROVAL_REQUIRED:
                 messages = terminal_data["messages"]
-                tool_decisions = self._build_approval_decisions(
-                    terminal_data["pending_approvals"], pending_tool_results,
+                tool_decisions = self._prompt_for_approval_decisions(
+                    terminal_data["pending_approvals"],
                     approval_callback,
                 )
                 continue
@@ -416,38 +409,41 @@ class ToolCallingLLM:
                 **accumulated_stats.model_dump(),
             )
 
-    def _build_approval_decisions(
+    def _prompt_for_approval_decisions(
         self,
         pending_approvals: List[dict],
-        tool_results_map: Dict[str, StructuredToolResult],
         approval_callback: Optional[ApprovalCallback] = None,
     ) -> List[ToolApprovalDecision]:
-        """Build approval decisions by calling the approval callback for each pending tool."""
-        decisions: List[ToolApprovalDecision] = []
-        for approval in pending_approvals:
-            tool_call_id = approval["tool_call_id"]
-            tool_result = tool_results_map.get(tool_call_id)
+        """Prompt the user for approval decisions on each pending tool call.
 
-            # Re-check if approval is still needed (prefix may have been approved by another tool)
-            tool_params = (tool_result.params or {}) if tool_result else approval.get("params", {})
-            if self._is_tool_call_already_approved(approval["tool_name"], tool_params):
-                logging.info(f"Approval no longer needed for {approval['tool_name']}")
+        For CLI: the approval_callback shows an interactive menu per tool.
+        When a user approves one tool with "save prefix", a subsequent tool
+        in the same batch with the same prefix is auto-approved (re-check).
+        """
+        decisions: List[ToolApprovalDecision] = []
+        for approval_dict in pending_approvals:
+            approval = PendingToolApproval(**approval_dict)
+
+            # Re-check: a previous approval in this batch may have saved
+            # the prefix to disk, making this tool no longer need approval.
+            if self._is_tool_call_already_approved(approval.tool_name, approval.params):
+                logging.info(f"Approval no longer needed for {approval.tool_name}")
                 decisions.append(ToolApprovalDecision(
-                    tool_call_id=tool_call_id,
+                    tool_call_id=approval.tool_call_id,
                     approved=True,
                 ))
                 continue
 
-            if not approval_callback or not tool_result:
+            if not approval_callback:
                 decisions.append(ToolApprovalDecision(
-                    tool_call_id=tool_call_id,
+                    tool_call_id=approval.tool_call_id,
                     approved=False,
                 ))
                 continue
 
-            approved, feedback = approval_callback(tool_result)
+            approved, feedback = approval_callback(approval)
             decisions.append(ToolApprovalDecision(
-                tool_call_id=tool_call_id,
+                tool_call_id=approval.tool_call_id,
                 approved=approved,
                 feedback=feedback if not approved else None,
             ))
@@ -642,7 +638,17 @@ class ToolCallingLLM:
             )
             return tool_call_result
 
-    def _is_tool_call_already_approved(self, tool_name: str, params: dict) -> bool:
+    def _is_tool_call_already_approved(
+        self,
+        tool_name: str,
+        params: dict,
+        session_approved_prefixes: Optional[List[str]] = None,
+    ) -> bool:
+        """Check whether a tool call would pass approval without user interaction.
+
+        Checks both static allow lists (config + CLI-saved prefixes) and
+        optionally session-approved prefixes from the conversation history.
+        """
         tool = self.tool_executor.get_tool_by_name(tool_name)
         if not tool:
             return False
@@ -651,6 +657,7 @@ class ToolCallingLLM:
             max_token_count=self.llm.get_max_token_count_for_single_tool(),
             tool_name=tool_name,
             tool_call_id="",
+            session_approved_prefixes=session_approved_prefixes or [],
         )
         approval = tool.requires_approval(params, context)
         return not approval or not approval.needs_approval
@@ -699,7 +706,7 @@ class ToolCallingLLM:
         # Process tool decisions if provided
         if msgs and tool_decisions:
             logging.info(f"Processing {len(tool_decisions)} tool decisions")
-            msgs, events = self.process_tool_decisions(
+            msgs, events = self._execute_tool_decisions(
                 msgs, tool_decisions, request_context, trace_span=trace_span
             )
             for ev in events:

@@ -21,7 +21,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from holmes.core.llm import LLM, ContextWindowUsage
-from holmes.core.models import ToolApprovalDecision, ToolCallResult
+from holmes.core.models import PendingToolApproval, ToolApprovalDecision, ToolCallResult
 from holmes.core.llm_usage import RequestStats
 from holmes.core.tool_calling_llm import LLMInterruptedError, ToolCallingLLM
 from holmes.core.tools import StructuredToolResult, StructuredToolResultStatus
@@ -282,13 +282,13 @@ class TestMultiIterationHappyPath:
 
 
 # ---------------------------------------------------------------------------
-# Test 3: Approval callback flow (call() → call_stream() → _build_approval_decisions)
+# Test 3: Approval callback flow (call() → call_stream() → _prompt_for_approval_decisions)
 # ---------------------------------------------------------------------------
 
 
 class TestApprovalCallbackFlow:
-    """Mock tool returns APPROVAL_REQUIRED, callback approves via _build_approval_decisions,
-    then call() re-invokes call_stream() with tool_decisions and process_tool_decisions
+    """Mock tool returns APPROVAL_REQUIRED, callback approves via _prompt_for_approval_decisions,
+    then call() re-invokes call_stream() with tool_decisions and _execute_tool_decisions
     re-executes the tool."""
 
     @patch(LIMIT_PATCH, side_effect=_make_context_limiter_passthrough)
@@ -297,7 +297,7 @@ class TestApprovalCallbackFlow:
         resp_with_tool = _make_llm_response(content="Deleting pod", tool_calls=[tc])
         resp_final = _make_llm_response(content="Pod deleted", tool_calls=None)
         # Round 1: LLM requests tool → APPROVAL_REQUIRED → stream stops
-        # Round 2: process_tool_decisions re-executes tool, then LLM gives final answer
+        # Round 2: _execute_tool_decisions re-executes tool, then LLM gives final answer
         mock_llm.completion.side_effect = [resp_with_tool, resp_final]
 
         callback = MagicMock(return_value=(True, None))
@@ -307,7 +307,7 @@ class TestApprovalCallbackFlow:
         approval_result = _make_tool_call_result_approval(
             tool_call_id="tc_del", tool_name="kubectl_delete"
         )
-        # After approval, process_tool_decisions calls _invoke_llm_tool_call with user_approved=True
+        # After approval, _execute_tool_decisions calls _invoke_llm_tool_call with user_approved=True
         approved_result = _make_tool_call_result(
             tool_call_id="tc_del", tool_name="kubectl_delete", data="pod deleted"
         )
@@ -319,12 +319,13 @@ class TestApprovalCallbackFlow:
         messages = [{"role": "user", "content": "Delete the pod"}]
         result = ai.call(messages, approval_callback=callback)
 
-        # Callback was invoked with the StructuredToolResult
+        # Callback was invoked with a PendingToolApproval
         callback.assert_called_once()
         callback_arg = callback.call_args[0][0]
-        assert callback_arg.status == StructuredToolResultStatus.APPROVAL_REQUIRED
+        assert isinstance(callback_arg, PendingToolApproval)
+        assert callback_arg.tool_name == "kubectl_delete"
 
-        # Tool was re-executed via process_tool_decisions (second _invoke_llm_tool_call call)
+        # Tool was re-executed via _execute_tool_decisions (second _invoke_llm_tool_call call)
         assert ai._invoke_llm_tool_call.call_count == 2
 
         # Final result includes the approved tool, deduplicated
@@ -340,7 +341,7 @@ class TestApprovalCallbackFlow:
         resp_with_tool = _make_llm_response(content="Deleting pod", tool_calls=[tc])
         resp_final = _make_llm_response(content="OK I won't delete it", tool_calls=None)
         # Round 1: LLM requests tool → APPROVAL_REQUIRED → stream stops
-        # Round 2: process_tool_decisions adds denial error, LLM gives final answer
+        # Round 2: _execute_tool_decisions adds denial error, LLM gives final answer
         mock_llm.completion.side_effect = [resp_with_tool, resp_final]
 
         callback = MagicMock(return_value=(False, "try using namespace kube-system instead"))
@@ -1087,7 +1088,7 @@ class TestApprovalViaReinvocation:
         )
 
         # First invocation: tc_ok succeeds, tc_del needs approval
-        # Second invocation (after approval): tc_del re-executed via process_tool_decisions
+        # Second invocation (after approval): tc_del re-executed via _execute_tool_decisions
         del_call_count = 0
 
         def _route_tool_call(tool_to_call, **kwargs):
