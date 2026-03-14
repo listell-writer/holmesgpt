@@ -371,7 +371,8 @@ class ToolCallingLLM:
             )
 
             tool_decisions = None
-            answer_data = None
+            terminal_data = None
+            terminal_event = None
             start_tool_count = 0
             saw_tool_results = False
 
@@ -403,46 +404,38 @@ class ToolCallingLLM:
                         logging.info(
                             f"[bold {AI_COLOR}]AI:[/bold {AI_COLOR}] {content}"
                         )
-                elif event.event == StreamEvents.APPROVAL_REQUIRED:
-                    messages = event.data["messages"]
-                    pending = event.data["pending_approvals"]
-                    tool_results_map = event.data["tool_results"]
-                    total_num_llm_calls += event.data.get("num_llm_calls", 0)
-                    accumulated_stats += RequestStats(**event.data.get("costs", {}))
-                    tool_decisions = self._build_approval_decisions(pending, tool_results_map)
+                elif event.event in (StreamEvents.ANSWER_END, StreamEvents.APPROVAL_REQUIRED):
+                    terminal_data = event.data
+                    terminal_event = event.event
                     break
-                elif event.event == StreamEvents.ANSWER_END:
-                    answer_data = event.data
 
-            # Log trailing blank line if we ended on tool results
-            if saw_tool_results:
-                logging.info("")
-
-            if answer_data:
-                total_num_llm_calls += answer_data.get("num_llm_calls", 0)
-                accumulated_stats += RequestStats(**answer_data.get("costs", {}))
-                # Deduplicate tool calls by tool_call_id, keeping the last (final) entry
-                seen_ids: dict[str, int] = {}
-                for idx, tc in enumerate(all_tool_calls):
-                    tc_id = tc.get("tool_call_id")
-                    if tc_id:
-                        seen_ids[tc_id] = idx
-                deduped_tool_calls = [
-                    tc for idx, tc in enumerate(all_tool_calls)
-                    if tc.get("tool_call_id") not in seen_ids or seen_ids[tc.get("tool_call_id")] == idx
-                ]
-                return LLMResult(
-                    result=answer_data["content"],
-                    tool_calls=deduped_tool_calls,
-                    num_llm_calls=total_num_llm_calls,
-                    prompt=answer_data.get("prompt"),
-                    messages=answer_data["messages"],
-                    metadata=answer_data.get("metadata"),
-                    **accumulated_stats.model_dump(),
-                )
-
-            if not tool_decisions:
+            if not terminal_data:
                 raise Exception("Stream ended without ANSWER_END or APPROVAL_REQUIRED")
+
+            # Both terminal events carry costs and num_llm_calls
+            total_num_llm_calls += terminal_data.get("num_llm_calls", 0)
+            accumulated_stats += RequestStats(**terminal_data.get("costs", {}))
+
+            if terminal_event == StreamEvents.APPROVAL_REQUIRED:
+                messages = terminal_data["messages"]
+                tool_decisions = self._build_approval_decisions(
+                    terminal_data["pending_approvals"], terminal_data["tool_results"]
+                )
+                continue
+
+            # ANSWER_END — deduplicate tool calls keeping last per ID
+            deduped: dict[str, dict] = {}
+            for tc in all_tool_calls:
+                deduped[tc.get("tool_call_id", id(tc))] = tc
+            return LLMResult(
+                result=terminal_data["content"],
+                tool_calls=list(deduped.values()),
+                num_llm_calls=total_num_llm_calls,
+                prompt=terminal_data.get("prompt"),
+                messages=terminal_data["messages"],
+                metadata=terminal_data.get("metadata"),
+                **accumulated_stats.model_dump(),
+            )
 
     def _build_approval_decisions(
         self,
@@ -642,16 +635,6 @@ class ToolCallingLLM:
                         tool_call_id=tool_id,
                         session_approved_prefixes=session_approved_prefixes,
                         request_context=request_context,
-                    )
-
-                if not isinstance(tool_response, StructuredToolResult):
-                    logging.error(
-                        f"Tool {tool_name} return type is not StructuredToolResult. Nesting the tool result into StructuredToolResult..."
-                    )
-                    tool_response = StructuredToolResult(
-                        status=StructuredToolResultStatus.SUCCESS,
-                        data=tool_response,
-                        params=tool_params,
                     )
 
                 tool = self.tool_executor.get_tool_by_name(tool_name)
