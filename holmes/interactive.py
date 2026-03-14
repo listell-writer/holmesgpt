@@ -268,13 +268,47 @@ class InitProgressRenderer:
 
 _TODO_WRITE_TOOL_NAME = "TodoWrite"
 
+_SPINNER_FRAMES = "⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏"
+
+
+def _task_spinner_frame() -> str:
+    """Return the current braille spinner frame based on wall-clock time."""
+    return _SPINNER_FRAMES[int(time.time() * 8) % len(_SPINNER_FRAMES)]
+
+
+def _format_size(n: int) -> str:
+    """Format a byte/char count as a human-readable string."""
+    if n >= 1_000_000:
+        return f"{n / 1_000_000:.1f}M"
+    if n >= 10_000:
+        return f"{n // 1000}K"
+    if n >= 1_000:
+        return f"{n:,}"
+    return str(n)
+
+
+def _size_bar(output_len: int, max_width: int = 20) -> str:
+    """Build a proportional bar representing data volume.
+
+    Uses a log scale so small results still get a visible bar.
+    Returns a string like '▰▰▰▰▱▱▱▱▱▱ 39K'.
+    """
+    import math
+
+    if not output_len or output_len <= 0:
+        return ""
+    # log scale: 100 chars → 1 block, 100K → max blocks
+    filled = min(max_width, max(1, int(math.log10(max(output_len, 1)) * (max_width / 5))))
+    empty = max_width - filled
+    size_str = _format_size(output_len)
+    return f"{'▰' * filled}{'▱' * empty} {size_str}"
+
+
 def _build_task_panel(tasks: list) -> Panel:
     """Build a Rich Panel showing the task list with checkbox-style icons."""
     from rich.text import Text
 
     completed = sum(1 for t in tasks if t.get("status") == "completed")
-    in_progress = sum(1 for t in tasks if t.get("status") == "in_progress")
-    failed = sum(1 for t in tasks if t.get("status") == "failed")
     total = len(tasks)
 
     content = Text()
@@ -286,9 +320,9 @@ def _build_task_panel(tasks: list) -> Panel:
             content.append(" ☑ ", style="green")
             content.append(task_content, style="dim strike")
         elif status == "in_progress":
-            content.append(" ☐ ", style="bold yellow")
+            frame = _task_spinner_frame()
+            content.append(f" {frame} ", style="bold magenta")
             content.append(task_content, style="bold")
-            content.append(" ◀", style="bold yellow")
         elif status == "failed":
             content.append(" ☒ ", style="bold red")
             content.append(task_content, style="red")
@@ -298,7 +332,7 @@ def _build_task_panel(tasks: list) -> Panel:
         if i < len(tasks) - 1:
             content.append("\n")
 
-    # Title with progress bar
+    # Title with progress
     title = f"[bold]Tasks[/bold] [dim]{completed}/{total}[/dim]"
 
     return Panel(
@@ -445,9 +479,9 @@ class AgenticProgressRenderer:
                     display.append(" ☑ ", style="green")
                     display.append(tc, style="dim strike")
                 elif status == "in_progress":
-                    display.append(" ☐ ", style="bold yellow")
+                    frame = _task_spinner_frame()
+                    display.append(f" {frame} ", style="bold magenta")
                     display.append(tc, style="bold")
-                    display.append(" ◀", style="bold yellow")
                 elif status == "failed":
                     display.append(" ☒ ", style="bold red")
                     display.append(tc, style="red")
@@ -477,12 +511,17 @@ class AgenticProgressRenderer:
 
         return display
 
+    def _has_investigation_context(self) -> bool:
+        """True if we have tasks or data to show in the two-pane layout."""
+        return bool(self._live_tasks or self._data_lines)
+
     def _build_display(self) -> Any:
         from rich.text import Text
 
         now = time.time()
 
-        if self._thinking and not self._in_flight:
+        # Before any data is gathered, show simple thinking spinner
+        if self._thinking and not self._in_flight and not self._has_investigation_context():
             display = Text()
             elapsed = now - self._start_time
             display.append("  ◐ ", style=f"bold {AI_COLOR}")
@@ -494,6 +533,17 @@ class AgenticProgressRenderer:
             return display
 
         left = self._build_left_pane()
+
+        # During thinking with context, add a thinking indicator to the left pane
+        if self._thinking and not self._in_flight:
+            left.append("\n\n")
+            elapsed = now - self._start_time
+            frame = _task_spinner_frame()
+            left.append(f"  {frame} ", style=f"bold {AI_COLOR}")
+            left.append("Analyzing", style=f"bold {AI_COLOR}")
+            dots = "." * (int(elapsed * 2) % 4)
+            left.append(f"{dots:<4}", style=f"bold {AI_COLOR}")
+
         right = self._build_data_pane()
 
         # Use a table for side-by-side layout — data pane is wider
@@ -512,8 +562,8 @@ class AgenticProgressRenderer:
         while not self._timer_stop.wait(0.15):
             with self._lock:
                 if self._live is not None:
-                    # Advance scroll when we have data and tools are running
-                    if self._data_lines and self._in_flight:
+                    # Keep scrolling whenever we have data (tools running or thinking)
+                    if self._data_lines:
                         self._scroll_offset += self._SCROLL_SPEED
                     self._live.update(self._build_display())
 
@@ -567,7 +617,7 @@ class AgenticProgressRenderer:
             else:
                 regular_tools.append(item)
 
-        # Print regular tools
+        # Print regular tools with size bars
         for num, name, desc, elapsed, output_len, is_error, _extra in regular_tools:
             if is_error:
                 icon = "[bold red]⚠[/bold red]"
@@ -575,23 +625,15 @@ class AgenticProgressRenderer:
                 icon = "[dim]→[/dim]"
 
             elapsed_str = ""
-            time_bar = ""
             if elapsed is not None:
                 elapsed_str = f" {elapsed:.1f}s"
-                bar_len = min(int(elapsed + 0.5), 10) if elapsed >= 0.5 else 0
-                if bar_len > 0:
-                    time_bar = f" [dim yellow]{'▪' * bar_len}[/dim yellow]"
 
-            size_str = ""
-            if output_len is not None and output_len > 0:
-                if output_len >= 10000:
-                    size_str = f" {output_len // 1000}K"
-                elif output_len >= 1000:
-                    size_str = f" {output_len:,}"
+            bar = _size_bar(output_len or 0)
+            bar_str = f" [dim cyan]{bar}[/dim cyan]" if bar else ""
 
             self._console.print(
                 f"  {icon} [bold]{escape(name)}[/bold]"
-                f"[dim]{elapsed_str}{size_str}[/dim]{time_bar}"
+                f"[dim]{elapsed_str}[/dim]{bar_str}"
             )
 
         # Print task panel if tasks changed
