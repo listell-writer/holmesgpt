@@ -56,7 +56,7 @@ No caller uses `system_prompt` or `user_prompt` parameters of `call_stream()`. B
 - `as_tool_result_response()` → dict with keys `tool_call_id`, **`tool_name`**, `description`, `role`, `result`. This is what `call()` accumulates into `LLMResult.tool_calls`.
 - `as_streaming_tool_result_response()` → dict with keys `tool_call_id`, **`name`** (not `tool_name`!), `description`, `role`, `result`. This is what `call_stream()` puts in `TOOL_RESULT` event data.
 
-**Format mismatch:** `as_tool_result_response()` uses key `tool_name`. `as_streaming_tool_result_response()` uses key `name`. The wrapper cannot collect `TOOL_RESULT` event data directly as `LLMResult.tool_calls`. Instead, `call_stream()` accumulates an internal `all_tool_calls` list using `as_tool_result_response()` format and includes it in `ANSWER_END`.
+**Format mismatch (resolved by Step 1b):** `as_tool_result_response()` uses key `tool_name`. `as_streaming_tool_result_response()` uses key `name`. After Step 1b unifies these into a single method emitting both keys, `TOOL_RESULT` event data and `LLMResult.tool_calls` use the same format, and the `call()` wrapper can safely collect from `TOOL_RESULT` events directly.
 
 **`StructuredToolResult`** (`holmes/core/tools.py:86-95`): Has fields `status`, `error`, `data`, `invocation`, `params`, etc. The approval callback in interactive mode reads `tool_result.invocation` (the command string) and `tool_result.params.suggested_prefixes` to display the approval prompt.
 
@@ -244,13 +244,11 @@ The `call()` wrapper intercepts stream events and logs to console:
 
 ### Add `all_tool_calls` to `call_stream()` and ANSWER_END
 
-Add a parallel `all_tool_calls: list[dict] = []` list using `as_tool_result_response()` format. Include it in `ANSWER_END` data as `tool_calls`. The wrapper uses this for `LLMResult.tool_calls`.
+Add a parallel `all_tool_calls: list[dict] = []` list inside `call_stream()` using `as_tool_result_response()` format. Include it in `ANSWER_END` data as `tool_calls`. This serves streaming clients that want a complete tool call list without tracking individual `TOOL_RESULT` events.
 
-When `process_tool_decisions()` returns events at the top of `call_stream()` (re-invocation with `tool_decisions`), those TOOL_RESULT events contain tool call data for approved/denied tools. `call_stream()` must extract tool call info from these events and append to `all_tool_calls` before entering the main loop. This ensures approved tools appear in the final `LLMResult.tool_calls`.
+When `process_tool_decisions()` returns events at the top of `call_stream()` (re-invocation with `tool_decisions`), those TOOL_RESULT events contain tool call data for approved/denied tools. `call_stream()` must extract tool call info from these events and append to `all_tool_calls` before entering the main loop. This ensures approved tools appear in the final ANSWER_END.
 
-The `call()` wrapper accumulates `tool_calls` across approval rounds: `all_tool_calls.extend(answer_data.get("tool_calls", []))` on each round's ANSWER_END.
-
-`TOOL_RESULT` events continue using `as_streaming_tool_result_response()` format — no wire format change.
+The `call()` wrapper does NOT use ANSWER_END's `tool_calls` — it accumulates directly from `TOOL_RESULT` events as they stream by (see Step 3 wrapper code). This is how the wrapper retains tool results from interrupted rounds (APPROVAL_REQUIRED exits before ANSWER_END). After Step 1b unifies the serialization format, `TOOL_RESULT` event data and `as_tool_result_response()` format are identical — both contain `tool_name` and `name` keys.
 
 ### Cost handling across approval rounds
 
@@ -404,6 +402,17 @@ Add new parameters:
 - `cancel_event: Optional[threading.Event]` (default `None`) — check before LLM calls and between tool futures, raise `LLMInterruptedError` (3 check points, matching `call()`)
 - `tool_number_offset: int` (default `0`) — initialize local variable from parameter instead of hardcoded 0 at line 973
 
+### Step 1b: Unify tool result serialization
+
+**Must happen before Step 2** — Step 2 adds `all_tool_calls` accumulation using `as_tool_result_response()` format, and Step 3's wrapper collects from `TOOL_RESULT` events directly. Both require a single consistent format.
+
+1. Modify `as_tool_result_response()` in `holmes/core/models.py` to emit both `tool_name` and `name` keys (see "Included Cleanup" section for exact code).
+2. Delete `as_streaming_tool_result_response()`.
+3. Replace all callers of `as_streaming_tool_result_response()` with `as_tool_result_response()`:
+   - `tool_calling_llm.py` lines 342, 1142, 1157, 1166
+   - `process_tool_decisions()` in `tool_calling_llm.py`
+4. Update tests: `tests/test_structured_toolcall_result.py` (rename test, assert both keys present), `tests/core/test_tool_output_deduplication.py`.
+
 ### Step 2: Enrich `call_stream()` internals and ANSWER_END
 
 1. Add `all_tool_calls: list[dict] = []` accumulation using `as_tool_result_response()` format. Append to `all_tool_calls` in the same `else` branch (line 1160-1167) where successful results are appended to `tool_calls` and `messages`. When `process_tool_decisions()` returns events at the top of `call_stream()` (re-invocation with `tool_decisions`), extract tool call info from those TOOL_RESULT events and append to `all_tool_calls` before entering the main loop. This ensures approved tools from the previous round appear in `LLMResult.tool_calls`.
@@ -462,12 +471,19 @@ def call(self, messages, response_format=None,
         tool_decisions = None
         answer_data = None
         start_tool_count = 0
+        saw_tool_results = False  # tracks whether to log blank line after batch
 
         for event in stream:
+            # Log blank line when a tool batch ends (transition away from TOOL_RESULT)
+            if saw_tool_results and event.event != StreamEvents.TOOL_RESULT:
+                logging.info("")
+                saw_tool_results = False
+
             if event.event == StreamEvents.START_TOOL:
                 start_tool_count += 1
             elif event.event == StreamEvents.TOOL_RESULT:
                 tool_number_offset += 1
+                saw_tool_results = True
                 # Accumulate tool results as they stream by.
                 # This captures ALL tools (successful + approval-required)
                 # across all rounds, so LLMResult.tool_calls is complete
@@ -576,16 +592,7 @@ Delete `messages_call()`. Update its 4 callers to call `call()` directly:
 - Remove `user_prompt` parameter from `call()`. Update `prompt_call()` to stop passing it.
 - `process_tool_decisions()` stays — still called by `call_stream()` on re-invocation.
 
-### Step 5b: Unify tool result serialization
-
-1. Modify `as_tool_result_response()` in `holmes/core/models.py` to emit both `tool_name` and `name` keys (see "Included Cleanup" section for exact code).
-2. Delete `as_streaming_tool_result_response()`.
-3. Replace all callers of `as_streaming_tool_result_response()` with `as_tool_result_response()`:
-   - `tool_calling_llm.py` lines 342, 1142, 1157, 1166
-   - `process_tool_decisions()` in `tool_calling_llm.py`
-4. Update tests: `tests/test_structured_toolcall_result.py` (rename test, assert both keys present), `tests/core/test_tool_output_deduplication.py`.
-
-### Step 5c: Write Tests 6, 10, 11 (post-refactor approval edge cases)
+### Step 5b: Write Tests 6, 10, 11 (post-refactor approval edge cases)
 
 Write Tests 6, 10, 11. Run green.
 
