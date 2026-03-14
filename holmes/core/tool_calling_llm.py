@@ -348,6 +348,8 @@ class ToolCallingLLM:
             terminal_event = None
             start_tool_count = 0
             saw_tool_results = False
+            # Collect tool results for approval-required tools (keyed by tool_call_id)
+            pending_tool_results: Dict[str, StructuredToolResult] = {}
 
             for event in stream:
                 # Log blank line when a tool batch ends (transition away from TOOL_RESULT)
@@ -361,6 +363,10 @@ class ToolCallingLLM:
                     tool_number_offset += 1
                     saw_tool_results = True
                     all_tool_calls.append(event.data)
+                    # Track approval-required results for the callback
+                    result_data = event.data.get("result", {})
+                    if result_data.get("status") == StructuredToolResultStatus.APPROVAL_REQUIRED:
+                        pending_tool_results[event.data["tool_call_id"]] = StructuredToolResult(**result_data)
                     if start_tool_count > 0:
                         logging.info(
                             f"The AI requested [bold]{start_tool_count}[/bold] tool call(s)."
@@ -392,7 +398,7 @@ class ToolCallingLLM:
             if terminal_event == StreamEvents.APPROVAL_REQUIRED:
                 messages = terminal_data["messages"]
                 tool_decisions = self._build_approval_decisions(
-                    terminal_data["pending_approvals"], terminal_data["tool_results"],
+                    terminal_data["pending_approvals"], pending_tool_results,
                     approval_callback,
                 )
                 continue
@@ -834,7 +840,6 @@ class ToolCallingLLM:
 
             # Check if any tools require approval first
             pending_approvals = []
-            approval_required_tools = []
 
             # Extract session approved prefixes from conversation history
             session_prefixes = extract_bash_session_prefixes(messages)
@@ -883,7 +888,6 @@ class ToolCallingLLM:
                                     params=tool_call_result.result.params or {},
                                 )
                             )
-                            approval_required_tools.append(tool_call_result)
 
                             all_tool_calls.append(tool_result_dict)
                             yield StreamMessage(
@@ -921,18 +925,12 @@ class ToolCallingLLM:
 
                 # If we have approval required tools, end the stream with pending approvals
                 if pending_approvals:
-                    # Add assistant message with pending tool calls
-                    for result in approval_required_tools:
+                    # Mark pending tool calls in assistant messages
+                    for approval in pending_approvals:
                         tool_call = self.find_assistant_tool_call_request(
-                            tool_call_id=result.tool_call_id, messages=messages
+                            tool_call_id=approval.tool_call_id, messages=messages
                         )
                         tool_call["pending_approval"] = True
-
-                    # Build tool_results dict for approval callback (keyed by tool_call_id)
-                    tool_results_map = {
-                        r.tool_call_id: r.result
-                        for r in approval_required_tools
-                    }
 
                     # End stream with approvals required
                     yield StreamMessage(
@@ -943,7 +941,6 @@ class ToolCallingLLM:
                             "pending_approvals": [
                                 approval.model_dump() for approval in pending_approvals
                             ],
-                            "tool_results": tool_results_map,
                             "requires_approval": True,
                             "num_llm_calls": i,
                             "costs": stats.model_dump(),
