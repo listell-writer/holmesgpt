@@ -128,10 +128,10 @@ class TestPreventOverlyBigToolResponse:
 
             assert "2000/1024 tokens" in success_tool_call_result.result.error
 
-    def test_message_construction_calls_as_tool_call_message(
+    def test_message_construction_calls_to_llm_message(
         self, mock_llm, success_tool_call_result
     ):
-        """Test that the function calls as_tool_call_message to get the message for token counting."""
+        """Test that the function calls to_llm_message to get the message for token counting."""
         with patch(
             "holmes.common.env_vars.TOOL_MAX_ALLOCATED_CONTEXT_WINDOW_PCT",
             50,

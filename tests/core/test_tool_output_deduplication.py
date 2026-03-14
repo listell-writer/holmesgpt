@@ -170,7 +170,7 @@ class TestNoOutputDuplication:
             result=tool_result,
         )
 
-        response = tcr.as_tool_result_response()
+        response = tcr.to_client_dict()
         result_dump = response["result"]
 
         # The raw output should not appear in both error and data

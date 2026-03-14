@@ -196,9 +196,8 @@ def make_ai(mock_llm, mock_tool_executor):
             max_steps=max_steps,
             llm=mock_llm,
             tool_results_dir=None,
+            approval_callback=approval_callback,
         )
-        if approval_callback:
-            ai.approval_callback = approval_callback
         return ai
     return _make
 
@@ -241,7 +240,7 @@ class TestMultiIterationHappyPath:
         assert result.num_llm_calls == 2
         assert len(result.tool_calls) == 1
         # LLMResult.tool_calls contains ToolCallResult objects (Pydantic coerces
-        # the dicts from as_tool_result_response() back into ToolCallResult)
+        # the dicts from to_client_dict() back into ToolCallResult)
         assert result.tool_calls[0].tool_name == "kubectl_get"
 
         # Messages should contain: original + assistant(tool_calls) + tool + assistant(answer)

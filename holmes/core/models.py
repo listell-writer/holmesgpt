@@ -26,7 +26,7 @@ class ToolCallResult(BaseModel):
     result: StructuredToolResult
     size: Optional[int] = None
 
-    def as_tool_call_message(self, extra_metadata: Optional[Dict[str, Any]] = None):
+    def to_llm_message(self, extra_metadata: Optional[Dict[str, Any]] = None):
         return {
             "tool_call_id": self.tool_call_id,
             "role": "tool",
@@ -39,7 +39,7 @@ class ToolCallResult(BaseModel):
             ),
         }
 
-    def as_tool_result_response(self):
+    def to_client_dict(self):
         result_dump = self.result.model_dump()
         result_dump["data"] = self.result.get_stringified_data()
 

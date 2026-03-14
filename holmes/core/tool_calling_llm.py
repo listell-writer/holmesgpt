@@ -132,6 +132,10 @@ def extract_bash_session_prefixes(messages: List[Dict[str, Any]]) -> List[str]:
     return list(prefixes)
 
 
+# Callback type: receives a tool result, returns (approved, optional_feedback)
+ApprovalCallback = Callable[[StructuredToolResult], tuple[bool, Optional[str]]]
+
+
 class LLMResult(RequestStats):
     tool_calls: Optional[List[ToolCallResult]] = None
     num_llm_calls: Optional[int] = None  # Number of LLM API calls (turns)
@@ -140,11 +144,6 @@ class LLMResult(RequestStats):
     instructions: List[str] = Field(default_factory=list)
     messages: Optional[List[dict]] = None
     metadata: Optional[Dict[Any, Any]] = None
-
-    def get_tool_usage_summary(self):
-        return "AI used info from issue and " + ",".join(
-            [f"`{tool_call.description}`" for tool_call in self.tool_calls]
-        )
 
 
 class ToolCallWithDecision(BaseModel):
@@ -163,17 +162,24 @@ class ToolCallingLLM:
         llm: LLM,
         tool_results_dir: Optional[Path],
         tracer=None,
+        approval_callback: Optional[ApprovalCallback] = None,
     ):
         self.tool_executor = tool_executor
         self.max_steps = max_steps
         self.tracer = tracer
         self.llm = llm
         self.tool_results_dir = tool_results_dir
-        self.approval_callback: Optional[
-            Callable[[StructuredToolResult], tuple[bool, Optional[str]]]
-        ] = None
+        self._approval_callback = approval_callback
 
         self._runbook_in_use: bool = False
+
+    @property
+    def approval_callback(self) -> Optional[ApprovalCallback]:
+        return self._approval_callback
+
+    @approval_callback.setter
+    def approval_callback(self, value: Optional[ApprovalCallback]) -> None:
+        self._approval_callback = value
 
     def reset_interaction_state(self) -> None:
         """
@@ -277,7 +283,7 @@ class ToolCallingLLM:
             events.append(
                 StreamMessage(
                     event=StreamEvents.TOOL_RESULT,
-                    data=tool_result.as_tool_result_response(),
+                    data=tool_result.to_client_dict(),
                 )
             )
 
@@ -291,7 +297,7 @@ class ToolCallingLLM:
                     "bash_session_approved_prefixes": decision.save_prefixes
                 }
 
-            tool_call_message = tool_result.as_tool_call_message(
+            tool_call_message = tool_result.to_llm_message(
                 extra_metadata=extra_metadata
             )
 
@@ -866,7 +872,7 @@ class ToolCallingLLM:
 
                     tool_call_result: ToolCallResult = future.result()
 
-                    tool_result_dict = tool_call_result.as_tool_result_response()
+                    tool_result_dict = tool_call_result.to_client_dict()
 
                     if (
                         tool_call_result.result.status
@@ -893,11 +899,11 @@ class ToolCallingLLM:
                                 StructuredToolResultStatus.ERROR
                             )
                             tool_call_result.result.error = f"Tool call rejected for security reasons: {tool_call_result.result.error}"
-                            tool_result_dict = tool_call_result.as_tool_result_response()
+                            tool_result_dict = tool_call_result.to_client_dict()
 
                             tool_calls.append(tool_result_dict)
                             all_tool_calls.append(tool_result_dict)
-                            messages.append(tool_call_result.as_tool_call_message())
+                            messages.append(tool_call_result.to_llm_message())
 
                             yield StreamMessage(
                                 event=StreamEvents.TOOL_RESULT,
@@ -907,7 +913,7 @@ class ToolCallingLLM:
                     else:
                         tool_calls.append(tool_result_dict)
                         all_tool_calls.append(tool_result_dict)
-                        messages.append(tool_call_result.as_tool_call_message())
+                        messages.append(tool_call_result.to_llm_message())
 
                         yield StreamMessage(
                             event=StreamEvents.TOOL_RESULT,
