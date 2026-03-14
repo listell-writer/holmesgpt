@@ -102,3 +102,107 @@ class TestJsonSchemaConstraints:
         prop = result["function"]["parameters"]["properties"]["x"]
         assert "default" not in prop
         assert "examples" not in prop
+
+
+class TestNestedPropertyMetadata:
+    """Verify that nested object properties get description, default, examples, enum, and format."""
+
+    def test_nested_description_preserved(self):
+        params = {
+            "config": ToolParameter(
+                type="object", required=True,
+                properties={
+                    "startDate": ToolParameter(
+                        type="string", required=False,
+                        description="ISO 8601 timestamp for the start of the range",
+                        format="date-time",
+                    ),
+                },
+            ),
+        }
+        result = format_tool_to_open_ai_standard("test", "test", params)
+        nested = result["function"]["parameters"]["properties"]["config"]
+        start = nested["properties"]["startDate"]
+        assert start["description"] == "ISO 8601 timestamp for the start of the range"
+
+    def test_nested_format_preserved(self):
+        params = {
+            "config": ToolParameter(
+                type="object", required=True,
+                properties={
+                    "email": ToolParameter(type="string", required=True, format="email"),
+                },
+            ),
+        }
+        result = format_tool_to_open_ai_standard("test", "test", params)
+        nested = result["function"]["parameters"]["properties"]["config"]
+        # format is inside the type schema, which may be wrapped in anyOf
+        email_prop = nested["properties"]["email"]
+        # In non-strict mode, format is directly on the type object
+        # In strict mode, it might be inside anyOf
+        if "anyOf" in email_prop:
+            type_schema = email_prop["anyOf"][0]
+        else:
+            type_schema = email_prop
+        assert type_schema.get("format") == "email"
+
+    def test_nested_default_and_examples_preserved(self):
+        params = {
+            "opts": ToolParameter(
+                type="object", required=True,
+                properties={
+                    "limit": ToolParameter(
+                        type="integer", required=False,
+                        default=10, examples=[10, 50, 100],
+                    ),
+                },
+            ),
+        }
+        result = format_tool_to_open_ai_standard("test", "test", params)
+        limit = result["function"]["parameters"]["properties"]["opts"]["properties"]["limit"]
+        assert limit["default"] == 10
+        assert limit["examples"] == [10, 50, 100]
+
+    def test_nested_enum_preserved(self):
+        params = {
+            "settings": ToolParameter(
+                type="object", required=True,
+                properties={
+                    "mode": ToolParameter(
+                        type="string", required=True,
+                        enum=["fast", "balanced", "thorough"],
+                    ),
+                },
+            ),
+        }
+        result = format_tool_to_open_ai_standard("test", "test", params)
+        mode = result["function"]["parameters"]["properties"]["settings"]["properties"]["mode"]
+        assert "fast" in mode["enum"]
+        assert "balanced" in mode["enum"]
+        assert "thorough" in mode["enum"]
+
+    def test_deeply_nested_metadata_preserved(self):
+        """Metadata survives two levels of nesting."""
+        params = {
+            "outer": ToolParameter(
+                type="object", required=True,
+                properties={
+                    "inner": ToolParameter(
+                        type="object", required=True,
+                        properties={
+                            "deep": ToolParameter(
+                                type="string", required=True,
+                                description="deeply nested field",
+                                format="uri",
+                            ),
+                        },
+                    ),
+                },
+            ),
+        }
+        result = format_tool_to_open_ai_standard("test", "test", params)
+        deep = (
+            result["function"]["parameters"]["properties"]["outer"]
+            ["properties"]["inner"]["properties"]["deep"]
+        )
+        assert deep["description"] == "deeply nested field"

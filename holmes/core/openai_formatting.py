@@ -36,7 +36,7 @@ def type_to_open_ai_schema(param_attributes: Any) -> dict[str, Any]:
         # Use explicit properties if provided
         if hasattr(param_attributes, "properties") and param_attributes.properties:
             type_obj["properties"] = {
-                name: type_to_open_ai_schema(prop)
+                name: _build_property_schema(prop)
                 for name, prop in param_attributes.properties.items()
             }
             if STRICT_MODE:
@@ -107,34 +107,33 @@ def _add_json_schema_constraints(
             type_obj["maxItems"] = param_attributes.max_items
 
 
+def _build_property_schema(param_attributes: Any) -> dict[str, Any]:
+    """Build a complete property schema including type, description, default, examples, and enum.
+
+    Used for both top-level and nested properties so metadata is never lost.
+    """
+    schema = type_to_open_ai_schema(param_attributes)
+    if param_attributes.description is not None:
+        schema["description"] = param_attributes.description
+    if getattr(param_attributes, "default", None) is not None:
+        schema["default"] = param_attributes.default
+    if getattr(param_attributes, "examples", None):
+        schema["examples"] = param_attributes.examples
+    if hasattr(param_attributes, "enum") and param_attributes.enum:
+        enum_values = list(param_attributes.enum)
+        if STRICT_MODE and not param_attributes.required and None not in enum_values:
+            enum_values.append(None)
+        schema["enum"] = enum_values
+    return schema
+
+
 def format_tool_to_open_ai_standard(
     tool_name: str, tool_description: str, tool_parameters: dict
 ):
     tool_properties = {}
 
     for param_name, param_attributes in tool_parameters.items():
-        tool_properties[param_name] = type_to_open_ai_schema(
-            param_attributes=param_attributes
-        )
-        if param_attributes.description is not None:
-            tool_properties[param_name]["description"] = param_attributes.description
-        if getattr(param_attributes, "default", None) is not None:
-            tool_properties[param_name]["default"] = param_attributes.default
-        if getattr(param_attributes, "examples", None):
-            tool_properties[param_name]["examples"] = param_attributes.examples
-        # Add enum constraint if specified
-        if hasattr(param_attributes, "enum") and param_attributes.enum:
-            enum_values = list(
-                param_attributes.enum
-            )  # Create a copy to avoid modifying original
-            # In strict mode, optional parameters need None in their enum to match the type allowing null
-            if (
-                STRICT_MODE
-                and not param_attributes.required
-                and None not in enum_values
-            ):
-                enum_values.append(None)
-            tool_properties[param_name]["enum"] = enum_values
+        tool_properties[param_name] = _build_property_schema(param_attributes)
 
     result: dict[str, Any] = {
         "type": "function",
