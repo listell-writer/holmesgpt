@@ -11,7 +11,7 @@ from benedict import benedict
 from pydantic import FilePath
 
 from holmes.core.config import config_path_dir
-from holmes.core.init_event import EventCallback, InitEvent
+from holmes.core.init_event import EventCallback, StatusEvent, StatusEventKind, ToolsetStatus
 from holmes.core.supabase_dal import SupabaseDal
 from holmes.core.tools import Toolset, ToolsetStatusEnum, ToolsetTag, ToolsetType
 from holmes.plugins.toolsets import load_builtin_toolsets, load_toolsets_from_config
@@ -205,17 +205,17 @@ class ToolsetManager:
             future_to_toolset = {}
             for toolset in toolsets:
                 if on_event is not None:
-                    on_event(InitEvent(kind="toolset_checking", name=toolset.name))
+                    on_event(StatusEvent(kind=StatusEventKind.TOOLSET_CHECKING, name=toolset.name))
                 future_to_toolset[executor.submit(toolset.check_prerequisites, silent)] = toolset
 
             for future in concurrent.futures.as_completed(future_to_toolset):
                 if on_event is not None:
                     ts = future_to_toolset[future]
                     on_event(
-                        InitEvent(
-                            kind="toolset_ready",
+                        StatusEvent(
+                            kind=StatusEventKind.TOOLSET_READY,
                             name=ts.name,
-                            status=ts.status.value,
+                            status=ToolsetStatus(ts.status.value),
                             error=ts.error or "",
                         )
                     )
@@ -354,7 +354,7 @@ class ToolsetManager:
         if not os.path.exists(self.toolset_status_location) or refresh_status:
             display_logger.info("Refreshing available datasources (toolsets)")
             if on_event is not None:
-                on_event(InitEvent(kind="refreshing", message="Refreshing available datasources (toolsets)"))
+                on_event(StatusEvent(kind=StatusEventKind.REFRESHING, message="Refreshing available datasources (toolsets)"))
             self.refresh_toolset_status(
                 dal, enable_all_toolsets=enable_all_toolsets, toolset_tags=toolset_tags, on_event=on_event
             )
@@ -412,10 +412,10 @@ class ToolsetManager:
             if on_event is not None:
                 for ts in lazy_toolsets:
                     on_event(
-                        InitEvent(
-                            kind="toolset_lazy",
+                        StatusEvent(
+                            kind=StatusEventKind.TOOLSET_LAZY,
                             name=ts.name,
-                            status=ts.status.value,
+                            status=ToolsetStatus(ts.status.value),
                             error=ts.error or "",
                         )
                     )
@@ -470,7 +470,7 @@ class ToolsetManager:
             msg = f"Using {num_available_toolsets} datasources (toolsets). To refresh: use flag `--refresh-toolsets`"
             display_logger.info(msg)
             if on_event is not None:
-                on_event(InitEvent(kind="datasource_count", count=num_available_toolsets, message=msg))
+                on_event(StatusEvent(kind=StatusEventKind.DATASOURCE_COUNT, count=num_available_toolsets, message=msg))
         return all_toolsets_with_status
 
     def list_console_toolsets(

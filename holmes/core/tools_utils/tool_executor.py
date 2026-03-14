@@ -3,7 +3,7 @@ from typing import List, Optional
 
 import sentry_sdk
 
-from holmes.core.init_event import EventCallback, InitEvent
+from holmes.core.init_event import EventCallback, StatusEvent, StatusEventKind
 from holmes.core.tools import (
     Tool,
     Toolset,
@@ -36,7 +36,7 @@ class ToolExecutor:
                 msg = f"Overriding toolset '{ts.name}'!"
                 display_logger.warning(msg)
                 if on_event is not None:
-                    on_event(InitEvent(kind="tool_override", name=ts.name, message=msg))
+                    on_event(StatusEvent(kind=StatusEventKind.TOOL_OVERRIDE, name=ts.name, message=msg))
             toolsets_by_name[ts.name] = ts
 
         self.tools_by_name: dict[str, Tool] = {}
@@ -49,7 +49,7 @@ class ToolExecutor:
                     msg = f"Overriding existing tool '{tool.name} with new tool from {ts.name} at {ts.path}'!"
                     display_logger.warning(msg)
                     if on_event is not None:
-                        on_event(InitEvent(kind="tool_override", name=tool.name, message=msg))
+                        on_event(StatusEvent(kind=StatusEventKind.TOOL_OVERRIDE, name=tool.name, message=msg))
                 self.tools_by_name[tool.name] = tool
                 self._tool_to_toolset[tool.name] = ts
 

@@ -18,7 +18,7 @@ from pydantic import (
 )
 
 from holmes.common.env_vars import ROBUSTA_CONFIG_PATH
-from holmes.core.init_event import EventCallback, InitEvent
+from holmes.core.init_event import EventCallback, StatusEvent, StatusEventKind
 from holmes.core.llm import DefaultLLM, LLMModelRegistry
 from holmes.core.tools import Toolset
 from holmes.core.tools_utils.tool_executor import ToolExecutor
@@ -543,7 +543,7 @@ class Config(RobustaBaseConfig):
         msg = f"Model: {model_name} ({context_size} context, {max_response} max response)"
         display_logger.info(msg)
         if on_event is not None:
-            on_event(InitEvent(kind="model_loaded", name=model_name, message=msg))
+            on_event(StatusEvent(kind=StatusEventKind.MODEL_LOADED, name=model_name, message=msg))
         return llm
 
     def get_models_list(self) -> List[str]:

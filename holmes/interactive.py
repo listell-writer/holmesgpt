@@ -43,7 +43,7 @@ from rich.markup import escape
 
 from holmes.config import Config
 from holmes.core.config import config_path_dir
-from holmes.core.init_event import InitEvent
+from holmes.core.init_event import StatusEvent, StatusEventKind, ToolsetStatus
 from holmes.core.feedback import (
     PRIVACY_NOTICE_BANNER,
     Feedback,
@@ -118,7 +118,7 @@ _SLOW_THRESHOLD_SECS = 1.0  # Show a toolset by name if it takes longer than thi
 
 
 class InitProgressRenderer:
-    """Collects InitEvents and renders live progress during initialization.
+    """Collects StatusEvents and renders live progress during initialization.
 
     Uses Rich Live(transient=True) so the detailed progress vanishes when done,
     leaving only a compact summary (plus any errors).
@@ -187,27 +187,27 @@ class InitProgressRenderer:
 
         return display
 
-    def on_event(self, event: "InitEvent") -> None:
+    def on_event(self, event: StatusEvent) -> None:
         """Callback passed as on_event to create_console_toolcalling_llm."""
         with self._lock:
-            if event.kind == "toolset_checking":
+            if event.kind == StatusEventKind.TOOLSET_CHECKING:
                 self._in_flight[event.name] = time.time()
-            elif event.kind == "toolset_ready":
+            elif event.kind == StatusEventKind.TOOLSET_READY:
                 self._in_flight.pop(event.name, None)
-                if event.status == "enabled":
+                if event.status == ToolsetStatus.ENABLED:
                     self._toolsets_ok.append(event.name)
                 else:
                     self._toolsets_failed.append((event.name, event.error))
-            elif event.kind == "toolset_lazy":
-                if event.status == "enabled":
+            elif event.kind == StatusEventKind.TOOLSET_LAZY:
+                if event.status == ToolsetStatus.ENABLED:
                     self._toolsets_ok.append(event.name)
                 else:
                     self._toolsets_failed.append((event.name, event.error))
-            elif event.kind == "refreshing":
+            elif event.kind == StatusEventKind.REFRESHING:
                 self._phase = "Refreshing datasources"
-            elif event.kind == "model_loaded":
+            elif event.kind == StatusEventKind.MODEL_LOADED:
                 self._model_message = event.message
-            elif event.kind == "datasource_count":
+            elif event.kind == StatusEventKind.DATASOURCE_COUNT:
                 pass  # We compute our own count
 
             if self._live is not None:
@@ -273,13 +273,10 @@ def _render_stream_event(
     all_tool_calls: list,
     all_tool_calls_history: list,
 ) -> None:
-    """Render a single stream event to the console, reproducing the original logging output.
-
-    All output lines are prefixed with AAA to identify them as coming from the new stream path.
-    """
+    """Render a single stream event to the console."""
     # Log blank line when a tool batch ends (transition away from TOOL_RESULT)
     if saw_tool_results_ref[0] and event.event != StreamEvents.TOOL_RESULT:
-        console.print("AAA ")
+        console.print()
         saw_tool_results_ref[0] = False
 
     if event.event == StreamEvents.START_TOOL:
@@ -289,7 +286,7 @@ def _render_stream_event(
         all_tool_calls.append(event.data)
         if start_tool_count_ref[0] > 0:
             console.print(
-                f"AAA The AI requested [bold]{start_tool_count_ref[0]}[/bold] tool call(s)."
+                f"The AI requested [bold]{start_tool_count_ref[0]}[/bold] tool call(s)."
             )
             start_tool_count_ref[0] = 0
 
@@ -303,7 +300,7 @@ def _render_stream_event(
         tool_number_str = f"#{tool_number} " if tool_number else ""
 
         console.print(
-            f"AAA Running tool {tool_number_str}[bold]{tool_name}[/bold]: {description}"
+            f"Running tool {tool_number_str}[bold]{tool_name}[/bold]: {description}"
         )
 
         if elapsed is not None:
@@ -311,18 +308,18 @@ def _render_stream_event(
             line_count = output_str.count("\n") + 1 if output_str else 0
             show_hint = f"/show {tool_number}" if tool_number else "/show"
             console.print(
-                f"AAA   [dim]Finished {tool_number_str}in {elapsed:.2f}s, output length: {output_len:,} characters ({line_count:,} lines) - {show_hint} to view contents[/dim]"
+                f"  [dim]Finished {tool_number_str}in {elapsed:.2f}s, output length: {output_len:,} characters ({line_count:,} lines) - {show_hint} to view contents[/dim]"
             )
     elif event.event == StreamEvents.AI_MESSAGE:
         reasoning = event.data.get("reasoning")
         content = event.data.get("content")
         if reasoning:
             console.print(
-                f"AAA [italic dim]AI reasoning:\n\n{reasoning}[/italic dim]\n"
+                f"[italic dim]AI reasoning:\n\n{reasoning}[/italic dim]\n"
             )
         if content and content.strip():
             console.print(
-                f"AAA [bold {AI_COLOR}]AI:[/bold {AI_COLOR}] {content}"
+                f"[bold {AI_COLOR}]AI:[/bold {AI_COLOR}] {content}"
             )
 
 
@@ -1811,6 +1808,15 @@ def run_interactive_loop(
                 ai_thread = threading.Thread(target=_run_ai_stream, daemon=True)
                 ai_thread.start()
 
+                # Start escape listener in a background thread so the main
+                # thread can render events from the queue.
+                escape_thread = threading.Thread(
+                    target=_wait_for_completion_or_escape,
+                    args=(ai_thread, cancel_event, approval_active, terminal_restored),
+                    daemon=True,
+                )
+                escape_thread.start()
+
                 # --- Main thread: render stream events while monitoring for escape ---
                 all_tool_calls_this_turn: list[dict] = []
                 start_tool_count_ref = [0]
@@ -1821,23 +1827,13 @@ def run_interactive_loop(
                 total_num_llm_calls = 0
 
                 while True:
-                    # Check for escape
-                    if _HAS_TERMINAL_CONTROL and sys.stdin.isatty() and not approval_active.is_set():
-                        # Non-blocking check: see if thread finished
-                        try:
-                            item = event_queue.get(timeout=0.05)
-                        except queue.Empty:
-                            # Check for escape key in raw mode briefly
-                            # (reuse existing escape detection pattern)
-                            if cancel_event.is_set():
-                                interrupted = True
-                                break
-                            continue
-                    else:
-                        try:
-                            item = event_queue.get(timeout=0.1)
-                        except queue.Empty:
-                            continue
+                    try:
+                        item = event_queue.get(timeout=0.1)
+                    except queue.Empty:
+                        if cancel_event.is_set():
+                            interrupted = True
+                            break
+                        continue
 
                     if item is _SENTINEL:
                         break
@@ -1859,8 +1855,9 @@ def run_interactive_loop(
                         # Approval is handled inside the background thread
                         pass
 
-                # Wait for the thread to finish
+                # Wait for threads to finish
                 ai_thread.join(timeout=5.0)
+                escape_thread.join(timeout=2.0)
 
                 if interrupted or isinstance(call_error[0], LLMInterruptedError):
                     messages = messages_snapshot
@@ -1910,7 +1907,7 @@ def run_interactive_loop(
                     Markdown(f"{response.result}"),
                     padding=(1, 2),
                     border_style=AI_COLOR,
-                    title=f"AAA [bold {AI_COLOR}]AI Response[/bold {AI_COLOR}]",
+                    title=f"[bold {AI_COLOR}]AI Response[/bold {AI_COLOR}]",
                     title_align="left",
                 )
             )
