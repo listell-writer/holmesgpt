@@ -183,8 +183,8 @@ class TestMCPGeneral:
         """Test that array parameters with items schemas are recursively parsed.
 
         This ensures MCP tools that define array parameters with nested object
-        schemas (e.g., Conviva API filters) have their full structure preserved
-        in the ToolParameter, so the LLM receives accurate type information.
+        schemas have their full structure preserved in the ToolParameter, so
+        the LLM receives accurate type information.
         """
         mcp_tool = Tool(
             name="query_metrics",
@@ -1867,14 +1867,14 @@ class TestParamCoercion:
         )
 
     def test_stringified_array_is_parsed(self):
-        tool = self._make_tool({"metrics": ToolParameter(type="array", required=True)})
-        result = tool._coerce_params({"metrics": '["streaming_performance_index"]'})
-        assert result == {"metrics": ["streaming_performance_index"]}
+        tool = self._make_tool({"tags": ToolParameter(type="array", required=True)})
+        result = tool._coerce_params({"tags": '["cpu_usage", "mem_free"]'})
+        assert result == {"tags": ["cpu_usage", "mem_free"]}
 
     def test_stringified_object_is_parsed(self):
-        tool = self._make_tool({"filters": ToolParameter(type="object", required=True)})
-        result = tool._coerce_params({"filters": '{"country": "Germany"}'})
-        assert result == {"filters": {"country": "Germany"}}
+        tool = self._make_tool({"labels": ToolParameter(type="object", required=True)})
+        result = tool._coerce_params({"labels": '{"env": "production"}'})
+        assert result == {"labels": {"env": "production"}}
 
     def test_stringified_record_is_parsed(self):
         tool = self._make_tool({"filters": ToolParameter(type="record", required=True)})
@@ -1882,15 +1882,15 @@ class TestParamCoercion:
         assert result == {"filters": {"key": "val"}}
 
     def test_null_dropped_for_required_number(self):
-        tool = self._make_tool({"kpiId": ToolParameter(type="number", required=True)})
-        result = tool._coerce_params({"kpiId": None, "other": "keep"})
-        assert "kpiId" not in result
+        tool = self._make_tool({"threshold": ToolParameter(type="number", required=True)})
+        result = tool._coerce_params({"threshold": None, "other": "keep"})
+        assert "threshold" not in result
         assert result["other"] == "keep"
 
     def test_string_null_dropped_for_required_number(self):
-        tool = self._make_tool({"kpiId": ToolParameter(type="number", required=True)})
-        result = tool._coerce_params({"kpiId": "null"})
-        assert "kpiId" not in result
+        tool = self._make_tool({"threshold": ToolParameter(type="number", required=True)})
+        result = tool._coerce_params({"threshold": "null"})
+        assert "threshold" not in result
 
     def test_null_kept_for_nullable_type(self):
         tool = self._make_tool(
@@ -1937,27 +1937,27 @@ class TestParamCoercion:
     def test_full_mcp_scenario(self):
         """End-to-end test: all coercion types combined in one call."""
         tool = self._make_tool({
-            "accountName": ToolParameter(type="string", required=True),
-            "filters": ToolParameter(type="object", required=True),
-            "metrics": ToolParameter(type="array", required=True),
-            "timeRange": ToolParameter(type="object", required=True),
-            "kpiId": ToolParameter(type="number", required=False),
+            "city": ToolParameter(type="string", required=True),
+            "options": ToolParameter(type="object", required=True),
+            "fields": ToolParameter(type="array", required=True),
+            "dateRange": ToolParameter(type="object", required=True),
+            "altitude": ToolParameter(type="number", required=False),
         })
         bad_params = {
-            "accountName": "test-account",
-            "filters": '{"region": "eu-west-1", "device": "mobile"}',
-            "metrics": '["request_latency_p99"]',
-            "timeRange": '{"endDate": "2026-03-14T21:28:00Z", "startDate": "2026-03-14T20:28:00Z"}',
-            "kpiId": "null",
+            "city": "Berlin",
+            "options": '{"units": "metric", "lang": "en"}',
+            "fields": '["temperature", "humidity"]',
+            "dateRange": '{"start": "2026-03-14T00:00:00Z", "end": "2026-03-14T23:59:59Z"}',
+            "altitude": "null",
         }
         result = tool._coerce_params(bad_params)
         assert result == {
-            "accountName": "test-account",
-            "filters": {"region": "eu-west-1", "device": "mobile"},
-            "metrics": ["request_latency_p99"],
-            "timeRange": {
-                "endDate": "2026-03-14T21:28:00Z",
-                "startDate": "2026-03-14T20:28:00Z",
+            "city": "Berlin",
+            "options": {"units": "metric", "lang": "en"},
+            "fields": ["temperature", "humidity"],
+            "dateRange": {
+                "start": "2026-03-14T00:00:00Z",
+                "end": "2026-03-14T23:59:59Z",
             },
-            # kpiId dropped because "null" for non-nullable number
+            # altitude dropped because "null" for non-nullable number
         }
