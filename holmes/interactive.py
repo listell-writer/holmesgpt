@@ -10,7 +10,7 @@ import time
 from collections import defaultdict
 from enum import Enum
 from pathlib import Path
-from typing import DefaultDict, Dict, List, Optional
+from typing import Any, DefaultDict, Dict, List, Optional
 
 try:
     import select as select_module
@@ -267,24 +267,28 @@ class InitProgressRenderer:
 class AgenticProgressRenderer:
     """Renders tool-calling progress using Rich Live.
 
-    While tools are running, a transient live display shows a spinner with
-    tool names and elapsed times.  When the batch completes the live display
-    vanishes and a compact summary line is printed.
+    Starts with a "Thinking..." spinner. When tools begin executing, transitions
+    to show running tools with elapsed times. Completed tools are printed
+    permanently with status icons. The Live display is transient — only in-flight
+    state is shown live; completed state is printed and persists.
 
     AI messages are printed immediately (outside the Live region).
     """
 
-    def __init__(self, console: Console, tool_number_offset: int):
+    def __init__(self, console: Console, tool_number_offset: int, escape_hint: str = ""):
         self._console = console
         self._tool_number_offset = tool_number_offset
+        self._escape_hint = escape_hint
         self._lock = threading.Lock()
 
-        # Completed tools: list of (number, name, description, elapsed, output_len, line_count)
+        # Completed tools: list of (number, name, description, elapsed, output_len, is_error)
         self._completed: List[tuple] = []
-        # In-flight tools: tool_number → (name, description, start_time)
+        # In-flight tools: tool_number → (name, start_time)
         self._in_flight: Dict[int, tuple] = {}
         self._next_tool_number = tool_number_offset + 1
-        self._batch_size = 0  # tools in current batch (from START_TOOL events)
+
+        self._thinking = True  # True until first tool starts or AI message arrives
+        self._start_time = time.time()
 
         self._live: Optional[Any] = None  # Rich Live
         self._timer_stop = threading.Event()
@@ -295,14 +299,25 @@ class AgenticProgressRenderer:
         now = time.time()
         display = Text()
 
-        # Show in-flight tools with elapsed
-        for num, (name, desc, started) in sorted(self._in_flight.items()):
+        if self._thinking and not self._in_flight:
+            elapsed = now - self._start_time
+            display.append("  ◐ ", style=f"bold {AI_COLOR}")
+            display.append("Thinking", style=f"bold {AI_COLOR}")
+            # Animated dots
+            dots = "." * (int(elapsed * 2) % 4)
+            display.append(f"{dots:<4}", style=f"bold {AI_COLOR}")
+            if self._escape_hint:
+                display.append(f" {self._escape_hint}", style="dim")
+            return display
+
+        # Show in-flight tools
+        for num, (name, started) in sorted(self._in_flight.items()):
             elapsed = now - started
-            display.append(f"  Running #{num} ", style="bold")
-            display.append(f"{name}", style="bold cyan")
-            if desc:
-                display.append(f": {desc}", style="dim")
-            display.append(f"  ({elapsed:.0f}s)", style="dim")
+            display.append("  ◐ ", style="bold yellow")
+            display.append(f"#{num} ", style="dim")
+            display.append(f"{name}", style="bold")
+            if elapsed >= 1.0:
+                display.append(f" ({elapsed:.0f}s)", style="dim")
             display.append("\n")
 
         # Remove trailing newline
@@ -312,16 +327,16 @@ class AgenticProgressRenderer:
         return display
 
     def _tick(self) -> None:
-        while not self._timer_stop.wait(1.0):
+        while not self._timer_stop.wait(0.5):
             with self._lock:
-                if self._live is not None and self._in_flight:
+                if self._live is not None:
                     self._live.update(self._build_display())
 
-    def _ensure_live(self) -> None:
-        """Start Live display if not already running."""
-        if self._live is None:
-            from rich.live import Live
+    def start(self) -> None:
+        """Start the Live display with the initial 'Thinking...' spinner."""
+        from rich.live import Live
 
+        try:
             self._live = Live(
                 self._build_display(),
                 console=self._console,
@@ -329,32 +344,48 @@ class AgenticProgressRenderer:
                 refresh_per_second=4,
             )
             self._live.start()
-            self._timer_stop.clear()
-            timer_thread = threading.Thread(target=self._tick, daemon=True)
-            timer_thread.start()
+        except (TypeError, AttributeError):
+            # Console may be a mock in tests — skip live display
+            self._live = None
+            return
+        self._timer_stop.clear()
+        timer_thread = threading.Thread(target=self._tick, daemon=True)
+        timer_thread.start()
 
     def _stop_live(self) -> None:
         """Stop the Live display."""
         self._timer_stop.set()
         if self._live is not None:
-            self._live.stop()
+            try:
+                self._live.stop()
+            except (TypeError, AttributeError):
+                pass
             self._live = None
 
-    def _print_completed_summary(self) -> None:
-        """Print a compact summary of the completed tool batch."""
+    def _print_completed_tools(self) -> None:
+        """Print completed tools permanently with status icons."""
         if not self._completed:
             return
-        for num, name, desc, elapsed, output_len, line_count in self._completed:
-            show_hint = f"/show {num}"
-            if elapsed is not None:
-                self._console.print(
-                    f"  [dim]#{num} [bold]{name}[/bold]: {desc}  "
-                    f"({elapsed:.1f}s, {output_len:,} chars) - {show_hint}[/dim]"
-                )
+        for num, name, desc, elapsed, output_len, is_error in self._completed:
+            show_hint = f"[dim]/show {num}[/dim]"
+            if is_error:
+                icon = "[bold red]✗[/bold red]"
             else:
-                self._console.print(
-                    f"  [dim]#{num} [bold]{name}[/bold]: {desc} - {show_hint}[/dim]"
-                )
+                icon = "[green]✓[/green]"
+
+            elapsed_str = f" ({elapsed:.1f}s)" if elapsed is not None else ""
+            size_str = ""
+            if output_len is not None and output_len > 0:
+                if output_len >= 10000:
+                    size_str = f", {output_len // 1000}K chars"
+                elif output_len >= 1000:
+                    size_str = f", {output_len:,} chars"
+
+            # Build: ✓ #1 tool_name (0.1s, 2K chars) - /show 1
+            self._console.print(
+                f"  {icon} [dim]#{num}[/dim] [bold]{name}[/bold]"
+                f"[dim]{elapsed_str}{size_str}  {show_hint}[/dim]"
+            )
         self._completed.clear()
 
     def handle_event(
@@ -366,13 +397,13 @@ class AgenticProgressRenderer:
         """Process one stream event. Called from the main render thread."""
         with self._lock:
             if event.event == StreamEvents.START_TOOL:
-                self._batch_size += 1
+                self._thinking = False
                 num = self._next_tool_number
                 self._next_tool_number += 1
                 tool_name = event.data.get("tool_name", "...")
-                self._in_flight[num] = (tool_name, "", time.time())
-                self._ensure_live()
-                self._live.update(self._build_display())
+                self._in_flight[num] = (tool_name, time.time())
+                if self._live is not None:
+                    self._live.update(self._build_display())
 
             elif event.event == StreamEvents.TOOL_RESULT:
                 all_tool_calls.append(event.data)
@@ -383,53 +414,47 @@ class AgenticProgressRenderer:
                 output_str = result_data.get("data", "")
                 elapsed = result_data.get("elapsed_seconds")
                 output_len = len(output_str) if output_str else 0
-                line_count = output_str.count("\n") + 1 if output_str else 0
+                is_error = output_len == 0 or result_data.get("error", False)
                 tool_number = self._tool_number_offset + len(all_tool_calls)
 
                 # Remove from in-flight
                 self._in_flight.pop(tool_number, None)
                 # Also try to match by order if number didn't match
                 if not self._in_flight.get(tool_number):
-                    # Find oldest placeholder and remove it
                     for k in sorted(self._in_flight.keys()):
                         self._in_flight.pop(k, None)
                         break
 
                 self._completed.append(
-                    (tool_number, tool_name, description, elapsed, output_len, line_count)
+                    (tool_number, tool_name, description, elapsed, output_len, is_error)
                 )
 
                 # If batch is done (no more in-flight), stop Live and print summary
                 if not self._in_flight:
                     self._stop_live()
-                    batch = self._batch_size
-                    self._batch_size = 0
-                    if batch > 0:
-                        self._console.print(
-                            f"Ran [bold]{batch}[/bold] tool(s):"
-                        )
-                    self._print_completed_summary()
-                    self._console.print()
+                    self._print_completed_tools()
+                    # Restart live for next thinking phase
+                    self._thinking = True
+                    self.start()
                 else:
                     self._live.update(self._build_display())
 
             elif event.event == StreamEvents.AI_MESSAGE:
                 # AI messages print immediately — stop Live first if running
-                if self._in_flight:
-                    self._stop_live()
-                    if self._completed:
-                        self._print_completed_summary()
-                        self._console.print()
+                self._thinking = False
+                self._stop_live()
+                if self._completed:
+                    self._print_completed_tools()
 
                 reasoning = event.data.get("reasoning")
                 content = event.data.get("content")
                 if reasoning:
                     self._console.print(
-                        f"[italic dim]AI reasoning:\n\n{reasoning}[/italic dim]\n"
+                        f"  [italic dim]{reasoning}[/italic dim]"
                     )
                 if content and content.strip():
                     self._console.print(
-                        f"[bold {AI_COLOR}]AI:[/bold {AI_COLOR}] {content}"
+                        f"  [dim]{content}[/dim]"
                     )
 
     def flush(self) -> None:
@@ -437,7 +462,7 @@ class AgenticProgressRenderer:
         with self._lock:
             self._stop_live()
             if self._completed:
-                self._print_completed_summary()
+                self._print_completed_tools()
 
 
 class SlashCommands(Enum):
@@ -1826,13 +1851,11 @@ def run_interactive_loop(
                 messages.append({"role": "user", "content": user_input})
 
             escape_hint = (
-                " [dim](press escape to interrupt)[/dim]"
+                "(press escape to interrupt)"
                 if _HAS_TERMINAL_CONTROL and sys.stdin.isatty()
                 else ""
             )
-            console.print(
-                f"\n[bold {AI_COLOR}]Thinking...[/bold {AI_COLOR}]{escape_hint}\n"
-            )
+            console.print()  # blank line before progress
 
             # Snapshot messages before the call so we can rollback on interrupt
             messages_snapshot = list(messages)
@@ -1935,7 +1958,8 @@ def run_interactive_loop(
                 escape_thread.start()
 
                 # --- Main thread: render stream events while monitoring for escape ---
-                progress = AgenticProgressRenderer(console, tool_number_offset)
+                progress = AgenticProgressRenderer(console, tool_number_offset, escape_hint)
+                progress.start()
                 all_tool_calls_this_turn: list[dict] = []
                 terminal_data = None
                 interrupted = False
