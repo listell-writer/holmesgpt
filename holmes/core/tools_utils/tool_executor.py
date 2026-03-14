@@ -3,6 +3,7 @@ from typing import List, Optional
 
 import sentry_sdk
 
+from holmes.core.init_event import EventCallback, InitEvent
 from holmes.core.tools import (
     Tool,
     Toolset,
@@ -14,7 +15,7 @@ display_logger = logging.getLogger("holmes.display.tool_executor")
 
 
 class ToolExecutor:
-    def __init__(self, toolsets: List[Toolset]):
+    def __init__(self, toolsets: List[Toolset], on_event: EventCallback = None):
         # TODO: expose function for this instead of callers accessing directly
         self.toolsets = toolsets
 
@@ -32,7 +33,10 @@ class ToolExecutor:
         toolsets_by_name: dict[str, Toolset] = {}
         for ts in self.enabled_toolsets:
             if ts.name in toolsets_by_name:
-                display_logger.warning(f"Overriding toolset '{ts.name}'!")
+                msg = f"Overriding toolset '{ts.name}'!"
+                display_logger.warning(msg)
+                if on_event is not None:
+                    on_event(InitEvent(kind="tool_override", name=ts.name, message=msg))
             toolsets_by_name[ts.name] = ts
 
         self.tools_by_name: dict[str, Tool] = {}
@@ -42,9 +46,10 @@ class ToolExecutor:
                 if tool.icon_url is None and ts.icon_url is not None:
                     tool.icon_url = ts.icon_url
                 if tool.name in self.tools_by_name:
-                    display_logger.warning(
-                        f"Overriding existing tool '{tool.name} with new tool from {ts.name} at {ts.path}'!"
-                    )
+                    msg = f"Overriding existing tool '{tool.name} with new tool from {ts.name} at {ts.path}'!"
+                    display_logger.warning(msg)
+                    if on_event is not None:
+                        on_event(InitEvent(kind="tool_override", name=tool.name, message=msg))
                 self.tools_by_name[tool.name] = tool
                 self._tool_to_toolset[tool.name] = ts
 

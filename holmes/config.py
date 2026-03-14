@@ -18,6 +18,7 @@ from pydantic import (
 )
 
 from holmes.common.env_vars import ROBUSTA_CONFIG_PATH
+from holmes.core.init_event import EventCallback, InitEvent
 from holmes.core.llm import DefaultLLM, LLMModelRegistry
 from holmes.core.tools import Toolset
 from holmes.core.tools_utils.tool_executor import ToolExecutor
@@ -250,7 +251,10 @@ class Config(RobustaBaseConfig):
         return runbook_catalog
 
     def create_console_tool_executor(
-        self, dal: Optional["SupabaseDal"], refresh_status: bool = False
+        self,
+        dal: Optional["SupabaseDal"],
+        refresh_status: bool = False,
+        on_event: EventCallback = None,
     ) -> ToolExecutor:
         """
         Creates a ToolExecutor instance configured for CLI usage. This executor manages the available tools
@@ -262,9 +266,9 @@ class Config(RobustaBaseConfig):
         3. Custom toolsets from config files which can not override built-in toolsets
         """
         cli_toolsets = self.toolset_manager.list_console_toolsets(
-            dal=dal, refresh_status=refresh_status
+            dal=dal, refresh_status=refresh_status, on_event=on_event
         )
-        return ToolExecutor(cli_toolsets)
+        return ToolExecutor(cli_toolsets, on_event=on_event)
 
     def create_agui_tool_executor(self, dal: Optional["SupabaseDal"]) -> ToolExecutor:
         """
@@ -327,14 +331,16 @@ class Config(RobustaBaseConfig):
         tracer=None,
         model_name: Optional[str] = None,
         tool_results_dir: Optional[Path] = None,
+        on_event: EventCallback = None,
     ) -> "ToolCallingLLM":
-        tool_executor = self.create_console_tool_executor(dal, refresh_toolsets)
+        tool_executor = self.create_console_tool_executor(dal, refresh_toolsets, on_event=on_event)
         from holmes.core.tool_calling_llm import ToolCallingLLM
 
+        llm = self._get_llm(tracer=tracer, model_key=model_name, on_event=on_event)
         return ToolCallingLLM(
             tool_executor,
             self.max_steps,
-            self._get_llm(tracer=tracer, model_key=model_name),
+            llm,
             tool_results_dir=tool_results_dir,
         )
 
@@ -480,7 +486,12 @@ class Config(RobustaBaseConfig):
         return SlackDestination(self.slack_token.get_secret_value(), self.slack_channel)
 
     # TODO: move this to the llm model registry
-    def _get_llm(self, model_key: Optional[str] = None, tracer=None) -> "DefaultLLM":
+    def _get_llm(
+        self,
+        model_key: Optional[str] = None,
+        tracer=None,
+        on_event: EventCallback = None,
+    ) -> "DefaultLLM":
         sentry_sdk.set_tag("requested_model", model_key)
         model_entry = self.llm_model_registry.get_model_params(model_key)
         model_params = model_entry.model_dump(exclude_none=True)
@@ -516,9 +527,10 @@ class Config(RobustaBaseConfig):
             name=model_name,
             is_robusta_model=is_robusta_model,
         )  # type: ignore
-        display_logger.info(
-            f"Using model: {model_name} ({llm.get_context_window_size():,} total tokens, {llm.get_maximum_output_token():,} output tokens)"
-        )
+        msg = f"Using model: {model_name} ({llm.get_context_window_size():,} total tokens, {llm.get_maximum_output_token():,} output tokens)"
+        display_logger.info(msg)
+        if on_event is not None:
+            on_event(InitEvent(kind="model_loaded", name=model_name, message=msg))
         return llm
 
     def get_models_list(self) -> List[str]:
