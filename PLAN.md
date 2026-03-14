@@ -203,9 +203,12 @@ This matches how the server already handles approval resumption today.
 
 **Duplicate approval prevention:** `call_stream()` yields APPROVAL_REQUIRED for ALL pending tools at once. `_build_approval_decisions()` iterates through them and calls the callback for each. Before calling the callback, it re-checks whether approval is still needed (using `_is_tool_call_already_approved`, same logic as current line 891). If a previous tool in the same batch already saved the prefix to disk, the re-check finds it approved and auto-approves without prompting. This preserves the current UX exactly.
 
-### Approval Event Data: Enrich with full StructuredToolResult
+### Approval Event Data: Include full StructuredToolResult
 
-The `APPROVAL_REQUIRED` event must carry full `StructuredToolResult` objects alongside the existing `pending_approvals`. This provides `invocation` and `params.suggested_prefixes` that the interactive callback needs.
+The `APPROVAL_REQUIRED` event must carry full `StructuredToolResult` objects alongside the existing `pending_approvals`. The interactive approval callback (`interactive.py:742`) reads `tool_result.invocation` to display the command and `tool_result.params.suggested_prefixes` for the "don't ask again" option.
+
+**Why full StructuredToolResult (Option 4) rather than adding fields to PendingToolApproval (Option 1):**
+`StructuredToolResult` is already part of the public streaming API — every `TOOL_RESULT` event contains `result: model_dump()` via `as_streaming_tool_result_response()`. Adding it to `APPROVAL_REQUIRED` events doesn't introduce any new type exposure. Option 1 (adding `invocation` + `suggested_prefixes` to `PendingToolApproval`) would be cleaner if `StructuredToolResult` weren't already public, but since it is, Option 4 is simpler with no downside.
 
 Add `tool_results: dict[str, StructuredToolResult]` (keyed by `tool_call_id`) to the event data. No SSE wire format change — `stream_chat_formatter` only reads `pending_approvals`, `content`, and `messages` from this event.
 
@@ -539,6 +542,15 @@ Delete `messages_call()`. Update its 3 callers to call `call()` directly:
 - Remove `user_prompt` parameter from `call()`. Update `prompt_call()` to stop passing it.
 - `process_tool_decisions()` stays — still called by `call_stream()` on re-invocation.
 
+### Step 5b: Unify tool result serialization
+
+1. Modify `as_tool_result_response()` in `holmes/core/models.py` to emit both `tool_name` and `name` keys (see "Included Cleanup" section for exact code).
+2. Delete `as_streaming_tool_result_response()`.
+3. Replace all callers of `as_streaming_tool_result_response()` with `as_tool_result_response()`:
+   - `tool_calling_llm.py` lines 342, 1142, 1157, 1166
+   - `process_tool_decisions()` in `tool_calling_llm.py`
+4. Update tests: `tests/test_structured_toolcall_result.py` (rename test, assert both keys present), `tests/core/test_tool_output_deduplication.py`.
+
 ### Step 5b: Write Test 6 (post-refactor approval)
 
 Write Test 6. Run green.
@@ -553,13 +565,16 @@ poetry run pytest tests -m "not llm" --no-cov
 
 | File | Change |
 |---|---|
-| `holmes/core/tool_calling_llm.py` | Main refactor: simplify `call_stream()` signature, add params, enrich ANSWER_END + APPROVAL_REQUIRED, `call()` becomes wrapper, add `_build_approval_decisions()` + `_sum_costs()`, delete old loop + `_handle_tool_call_approval()` + `messages_call()`, remove dead `user_prompt` param |
+| `holmes/core/tool_calling_llm.py` | Main refactor: simplify `call_stream()` signature, add params, enrich ANSWER_END + APPROVAL_REQUIRED, `call()` becomes wrapper, add `_build_approval_decisions()` + `_sum_costs()`, delete old loop + `_handle_tool_call_approval()` + `messages_call()`, remove dead `user_prompt` param. Update `as_streaming_tool_result_response()` → `as_tool_result_response()` at 4 call sites. |
+| `holmes/core/models.py` | Unify `as_tool_result_response()` to emit both `tool_name` and `name` keys. Delete `as_streaming_tool_result_response()`. |
 | `tests/test_tool_calling_llm_baseline.py` (NEW) | All tests (1-9) |
+| `tests/test_structured_toolcall_result.py` | Update `test_as_streaming_tool_result_response` → test unified method, assert both keys |
+| `tests/core/test_tool_output_deduplication.py` | Replace `as_streaming_tool_result_response()` with `as_tool_result_response()` |
 | `server.py` | Replace `ai.messages_call(...)` with `ai.call(...)` |
 | `tests/test_cache.py` | Replace `messages_call()` with `call()` |
 | `tests/test_server_endpoints.py` | Replace `messages_call()` with `call()` |
 
-No changes needed to: `main.py`, `interactive.py`, `checks.py`, `experimental/ag-ui/server-agui.py`, `holmes/utils/stream.py`.
+No changes needed to: `main.py`, `interactive.py`, `checks.py`, `experimental/ag-ui/server-agui.py`, `holmes/utils/stream.py`, `holmes/core/tools.py`.
 
 Note: `prompt_call()` is inside `tool_calling_llm.py` — its `user_prompt=user_prompt` kwarg is removed as part of the main file change.
 
@@ -575,27 +590,53 @@ Note: `prompt_call()` is inside `tool_calling_llm.py` — its `user_prompt=user_
 
 5. **`_is_tool_call_already_approved` must work inside `_build_approval_decisions()`**: The re-check reads the bash toolset's current allow list. For CLI, this means re-reading the disk file. For this to catch a prefix saved by a callback earlier in the same batch, the disk write must be flushed before the re-check reads. This is the case — `save_cli_bash_tools_approved_prefixes()` uses `open()/write()/close()` synchronously.
 
-## Follow-up Refactoring (Out of Scope)
+## Included Cleanup: Unify `as_tool_result_response()` / `as_streaming_tool_result_response()`
 
-### Unify `as_tool_result_response()` and `as_streaming_tool_result_response()`
+### Problem
 
-`ToolCallResult` (`holmes/core/models.py:22-64`) has two nearly identical serialization methods:
+`ToolCallResult` (`holmes/core/models.py:22-64`) has two nearly identical serialization methods that differ only in the key used for the tool name:
 
 ```python
-# as_tool_result_response() — used for LLMResult.tool_calls (non-streaming)
+# as_tool_result_response() — uses "tool_name"
 {"tool_call_id": ..., "tool_name": ..., "description": ..., "role": "tool", "result": ...}
 
-# as_streaming_tool_result_response() — used for TOOL_RESULT SSE events (streaming)
+# as_streaming_tool_result_response() — uses "name"
 {"tool_call_id": ..., "name": ..., "description": ..., "role": "tool", "result": ...}
 ```
 
-The only difference is the key for the tool name: `tool_name` vs `name`. This appears to be an accidental divergence, not intentional.
+This appears to be an accidental divergence, not intentional. Clients use both keys.
 
-**Current usage:**
-- `as_tool_result_response()`: Accumulated into `LLMResult.tool_calls` → returned to callers via `ChatResponse.tool_calls` → consumed by frontend. Also used for the repeated-call safeguard list and in `test_safeguards.py` (14 times).
-- `as_streaming_tool_result_response()`: Put into `TOOL_RESULT` SSE event data → consumed by frontend via `stream_chat_formatter()`. Also used in `process_tool_decisions()`.
+### Solution
 
-**Why out of scope:** Changing either format is a wire format change that could break frontend clients. Needs coordinated investigation of client repositories.
+Delete `as_streaming_tool_result_response()`. Modify `as_tool_result_response()` to emit **both** keys:
+
+```python
+def as_tool_result_response(self):
+    result_dump = self.result.model_dump()
+    result_dump["data"] = self.result.get_stringified_data()
+
+    return {
+        "tool_call_id": self.tool_call_id,
+        "tool_name": self.tool_name,
+        "name": self.tool_name,  # backwards compat: streaming consumers read "name"
+        "description": self.description,
+        "role": "tool",
+        "result": result_dump,
+    }
+```
+
+Replace all callers of `as_streaming_tool_result_response()` with `as_tool_result_response()`.
+
+### Rationale
+
+- **Backwards compatible**: Clients reading `tool_name` (non-streaming path) still work. Clients reading `name` (streaming path) still work. No client breaks.
+- **Single source of truth**: One method, one format, one place to maintain.
+- **Intentional redundancy**: Both keys carry the same value. The duplicate key is a deliberate migration bridge — documented with the comment `# backwards compat: streaming consumers read "name"`. This is better than the status quo of two separate functions where nobody realizes they produce different output.
+- **Callers to update**: `tool_calling_llm.py` (3 sites: lines 342, 1142, 1157, 1166), `process_tool_decisions()`, `tests/test_structured_toolcall_result.py`, `tests/core/test_tool_output_deduplication.py`.
+
+### When to drop the duplicate key
+
+Use the investigation prompt below on client repositories. Once all clients are updated to read a single key, remove the other from `as_tool_result_response()`.
 
 **Investigation prompt for client repositories:**
 ```
@@ -614,12 +655,7 @@ Specifically:
 4. Are both "tool_name" and "name" used, or only one? Could they be unified to
    a single key without breaking anything?
 
-Context: HolmesGPT has two serialization methods for ToolCallResult that produce
-nearly identical dicts but use different keys ("tool_name" vs "name"). We want to
-unify them but need to know which key(s) clients actually depend on.
+Context: HolmesGPT has unified its two serialization methods into one that emits
+both "tool_name" and "name" keys with the same value. We want to eventually drop
+one key. Which key(s) does this client actually depend on?
 ```
-
-**Resolution options (for later):**
-- If clients only use one key: delete the other method, use the surviving one everywhere
-- If clients use both: pick one, update all clients, then delete the other method
-- If both keys must stay for backwards compatibility: add an alias (include both keys in a single method)
