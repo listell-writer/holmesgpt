@@ -1,9 +1,9 @@
 """
-Baseline tests for ToolCallingLLM.call() and call_stream() loop mechanics.
+Tests for ToolCallingLLM.call() and call_stream() loop mechanics.
 
-These tests establish behavioral contracts BEFORE the refactor that makes
-call() a thin wrapper around call_stream(). They should pass on the current
-code and continue to pass after the refactor.
+Covers: multi-iteration tool calling, approval flows, cancellation,
+cost accumulation, max_steps enforcement, response_format passthrough,
+parallel tool execution, compaction cost tracking, and message structure.
 
 Mocking strategy:
 - Patch `limit_input_context_window` to avoid its internal LLM/token counting
