@@ -27,5 +27,5 @@ from holmes.core.tools import ToolParameter
 )
 def test_type_to_open_ai_schema(toolset_type, open_ai_type):
     param = ToolParameter(type=toolset_type, required=True)
-    result = type_to_open_ai_schema(param, strict_mode=False)
+    result = type_to_open_ai_schema(param)
     assert result == open_ai_type

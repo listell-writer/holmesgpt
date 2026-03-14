@@ -233,6 +233,7 @@ class RemoteMCPTool(Tool):
             if not self.toolset._mcp_config:
                 raise ValueError("MCP config not initialized")
 
+            params = self._coerce_params(params)
             lock = get_server_lock(str(self.toolset._mcp_config.get_lock_string()))
             with lock:
                 return asyncio.run(self._invoke_async(params, context.request_context))
@@ -338,6 +339,67 @@ class RemoteMCPTool(Tool):
             properties=properties,
             enum=enum,
         )
+
+    def _coerce_params(self, params: Dict) -> Dict:
+        """Coerce LLM-produced arguments to match the MCP tool's schema.
+
+        LLMs sometimes produce stringified JSON for array/object params, or send
+        null/string "null" for numeric fields. This fixes those mismatches before
+        forwarding to the MCP server.
+        """
+        if not params:
+            return params
+
+        coerced = {}
+        for key, value in params.items():
+            schema = self.parameters.get(key)
+            if schema is None:
+                coerced[key] = value
+                continue
+
+            expected_type = schema.type
+            is_nullable = False
+            if isinstance(expected_type, list):
+                # e.g. ["string", "null"] - use first non-null type
+                is_nullable = "null" in expected_type
+                non_null = [t for t in expected_type if t != "null"]
+                expected_type = non_null[0] if non_null else "string"
+
+            coerced_value = self._coerce_value(value, expected_type)
+            # Drop None for non-nullable params (LLM sent null for a required field)
+            if coerced_value is None and not is_nullable:
+                continue
+            coerced[key] = coerced_value
+        return coerced
+
+    @staticmethod
+    def _coerce_value(value: Any, expected_type: str) -> Any:
+        """Coerce a single value to match the expected JSON Schema type."""
+        # Drop null/None for non-nullable types
+        if value is None or value == "null":
+            if expected_type in ("number", "integer", "array", "object"):
+                return None  # will be stripped below
+            return value
+
+        # String → array/object: parse stringified JSON
+        if isinstance(value, str) and expected_type in ("array", "object", "record"):
+            try:
+                parsed = json.loads(value)
+                if expected_type == "array" and isinstance(parsed, list):
+                    return parsed
+                if expected_type in ("object", "record") and isinstance(parsed, dict):
+                    return parsed
+            except (json.JSONDecodeError, TypeError):
+                pass
+
+        # String → number/integer
+        if isinstance(value, str) and expected_type in ("number", "integer"):
+            try:
+                return int(value) if expected_type == "integer" else float(value)
+            except (ValueError, TypeError):
+                pass
+
+        return value
 
     def get_parameterized_one_liner(self, params: Dict) -> str:
         # AWS MCP cli_command

@@ -1850,3 +1850,114 @@ class TestMCPExtraHeadersPreservedDuringEnvResolution:
 
         # regular headers SHOULD be resolved by replace_env_vars_values
         assert config["config"]["headers"]["X-Static"] == "resolved_value"
+
+
+class TestParamCoercion:
+    """Tests for RemoteMCPTool._coerce_params — fixing LLM type mismatches."""
+
+    def _make_tool(self, parameters: dict) -> RemoteMCPTool:
+        mock_toolset = RemoteMCPToolset(
+            name="test", description="test", config={"url": "http://localhost:1234"}
+        )
+        return RemoteMCPTool(
+            name="test_tool",
+            description="test",
+            parameters=parameters,
+            toolset=mock_toolset,
+        )
+
+    def test_stringified_array_is_parsed(self):
+        tool = self._make_tool({"metrics": ToolParameter(type="array", required=True)})
+        result = tool._coerce_params({"metrics": '["streaming_performance_index"]'})
+        assert result == {"metrics": ["streaming_performance_index"]}
+
+    def test_stringified_object_is_parsed(self):
+        tool = self._make_tool({"filters": ToolParameter(type="object", required=True)})
+        result = tool._coerce_params({"filters": '{"country": "Germany"}'})
+        assert result == {"filters": {"country": "Germany"}}
+
+    def test_stringified_record_is_parsed(self):
+        tool = self._make_tool({"filters": ToolParameter(type="record", required=True)})
+        result = tool._coerce_params({"filters": '{"key": "val"}'})
+        assert result == {"filters": {"key": "val"}}
+
+    def test_null_dropped_for_required_number(self):
+        tool = self._make_tool({"kpiId": ToolParameter(type="number", required=True)})
+        result = tool._coerce_params({"kpiId": None, "other": "keep"})
+        assert "kpiId" not in result
+        assert result["other"] == "keep"
+
+    def test_string_null_dropped_for_required_number(self):
+        tool = self._make_tool({"kpiId": ToolParameter(type="number", required=True)})
+        result = tool._coerce_params({"kpiId": "null"})
+        assert "kpiId" not in result
+
+    def test_null_kept_for_nullable_type(self):
+        tool = self._make_tool(
+            {"desc": ToolParameter(type=["string", "null"], required=False)}
+        )
+        result = tool._coerce_params({"desc": None})
+        assert result == {"desc": None}
+
+    def test_string_to_integer(self):
+        tool = self._make_tool({"count": ToolParameter(type="integer", required=True)})
+        result = tool._coerce_params({"count": "42"})
+        assert result == {"count": 42}
+
+    def test_string_to_number(self):
+        tool = self._make_tool({"rate": ToolParameter(type="number", required=True)})
+        result = tool._coerce_params({"rate": "3.14"})
+        assert result == {"rate": 3.14}
+
+    def test_valid_types_pass_through(self):
+        tool = self._make_tool({
+            "name": ToolParameter(type="string", required=True),
+            "count": ToolParameter(type="integer", required=True),
+            "items": ToolParameter(type="array", required=True),
+        })
+        params = {"name": "test", "count": 5, "items": [1, 2, 3]}
+        result = tool._coerce_params(params)
+        assert result == params
+
+    def test_unknown_params_pass_through(self):
+        tool = self._make_tool({"known": ToolParameter(type="string", required=True)})
+        result = tool._coerce_params({"known": "val", "extra": 123})
+        assert result == {"known": "val", "extra": 123}
+
+    def test_invalid_json_string_kept_as_string(self):
+        tool = self._make_tool({"data": ToolParameter(type="array", required=True)})
+        result = tool._coerce_params({"data": "not json at all"})
+        assert result == {"data": "not json at all"}
+
+    def test_empty_params(self):
+        tool = self._make_tool({"x": ToolParameter(type="string", required=True)})
+        assert tool._coerce_params({}) == {}
+        assert tool._coerce_params(None) is None
+
+    def test_full_mcp_scenario(self):
+        """End-to-end test: all coercion types combined in one call."""
+        tool = self._make_tool({
+            "accountName": ToolParameter(type="string", required=True),
+            "filters": ToolParameter(type="object", required=True),
+            "metrics": ToolParameter(type="array", required=True),
+            "timeRange": ToolParameter(type="object", required=True),
+            "kpiId": ToolParameter(type="number", required=False),
+        })
+        bad_params = {
+            "accountName": "test-account",
+            "filters": '{"region": "eu-west-1", "device": "mobile"}',
+            "metrics": '["request_latency_p99"]',
+            "timeRange": '{"endDate": "2026-03-14T21:28:00Z", "startDate": "2026-03-14T20:28:00Z"}',
+            "kpiId": "null",
+        }
+        result = tool._coerce_params(bad_params)
+        assert result == {
+            "accountName": "test-account",
+            "filters": {"region": "eu-west-1", "device": "mobile"},
+            "metrics": ["request_latency_p99"],
+            "timeRange": {
+                "endDate": "2026-03-14T21:28:00Z",
+                "startDate": "2026-03-14T20:28:00Z",
+            },
+            # kpiId dropped because "null" for non-nullable number
+        }

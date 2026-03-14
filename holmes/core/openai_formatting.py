@@ -2,21 +2,18 @@ import re
 from typing import Any, Optional
 
 from holmes.common.env_vars import (
-    LLMS_WITH_STRICT_TOOL_CALLS,
+    DISABLE_STRICT_TOOL_CALLS,
     TOOL_SCHEMA_NO_PARAM_OBJECT_IF_NO_PARAMS,
 )
-from holmes.utils.llms import model_matches_list
 
 # parses both simple types: "int", "array", "string"
 # but also arrays of those simpler types: "array[int]", "array[string]", etc.
 pattern = r"^(array\[(?P<inner_type>\w+)\])|(?P<simple_type>\w+)$"
 
-LLMS_WITH_STRICT_TOOL_CALLS_LIST = [
-    llm.strip() for llm in LLMS_WITH_STRICT_TOOL_CALLS.split(",")
-]
+STRICT_MODE = not DISABLE_STRICT_TOOL_CALLS
 
 
-def type_to_open_ai_schema(param_attributes: Any, strict_mode: bool) -> dict[str, Any]:
+def type_to_open_ai_schema(param_attributes: Any) -> dict[str, Any]:
     # Normalize schema types: MCP servers may emit nullable lists (e.g., ["string", "null"])
     # per JSON Schema spec, while OpenAI expects a primary type with explicit nullability via anyOf.
     raw_type = param_attributes.type
@@ -33,27 +30,27 @@ def type_to_open_ai_schema(param_attributes: Any, strict_mode: bool) -> dict[str
 
     if param_type == "object":
         type_obj = {"type": "object"}
-        if strict_mode:
+        if STRICT_MODE:
             type_obj["additionalProperties"] = False
 
         # Use explicit properties if provided
         if hasattr(param_attributes, "properties") and param_attributes.properties:
             type_obj["properties"] = {
-                name: type_to_open_ai_schema(prop, strict_mode)
+                name: type_to_open_ai_schema(prop)
                 for name, prop in param_attributes.properties.items()
             }
-            if strict_mode:
+            if STRICT_MODE:
                 type_obj["required"] = list(param_attributes.properties.keys())
 
     elif param_type == "array":
         # Handle arrays with explicit item schemas
         if hasattr(param_attributes, "items") and param_attributes.items:
-            items_schema = type_to_open_ai_schema(param_attributes.items, strict_mode)
+            items_schema = type_to_open_ai_schema(param_attributes.items)
             type_obj = {"type": "array", "items": items_schema}
         else:
             # Fallback for arrays without explicit item schema
             type_obj = {"type": "array", "items": {"type": "object"}}
-            if strict_mode:
+            if STRICT_MODE:
                 type_obj["items"]["additionalProperties"] = False
     else:
         match = re.match(pattern, param_type)
@@ -75,22 +72,20 @@ def type_to_open_ai_schema(param_attributes: Any, strict_mode: bool) -> dict[str
     # Add nullability using anyOf per the OpenAI Structured Outputs spec when strict mode
     # requires optional params to accept null, or when the source schema explicitly marks
     # the field as nullable (e.g., MCP ["string", "null"]).
-    if type_obj and (is_nullable_from_schema or (strict_mode and not param_attributes.required)):
+    if type_obj and (is_nullable_from_schema or (STRICT_MODE and not param_attributes.required)):
         type_obj = {"anyOf": [type_obj, {"type": "null"}]}
 
     return type_obj
 
 
 def format_tool_to_open_ai_standard(
-    tool_name: str, tool_description: str, tool_parameters: dict, target_model: str
+    tool_name: str, tool_description: str, tool_parameters: dict
 ):
     tool_properties = {}
 
-    strict_mode = model_matches_list(target_model, LLMS_WITH_STRICT_TOOL_CALLS_LIST)
-
     for param_name, param_attributes in tool_parameters.items():
         tool_properties[param_name] = type_to_open_ai_schema(
-            param_attributes=param_attributes, strict_mode=strict_mode
+            param_attributes=param_attributes
         )
         if param_attributes.description is not None:
             tool_properties[param_name]["description"] = param_attributes.description
@@ -101,7 +96,7 @@ def format_tool_to_open_ai_standard(
             )  # Create a copy to avoid modifying original
             # In strict mode, optional parameters need None in their enum to match the type allowing null
             if (
-                strict_mode
+                STRICT_MODE
                 and not param_attributes.required
                 and None not in enum_values
             ):
@@ -118,16 +113,19 @@ def format_tool_to_open_ai_standard(
                 "required": [
                     param_name
                     for param_name, param_attributes in tool_parameters.items()
-                    if param_attributes.required or strict_mode
+                    if param_attributes.required or STRICT_MODE
                 ],
                 "type": "object",
             },
         },
     }
 
-    if strict_mode and result["function"]:
+    if STRICT_MODE and result["function"]:
         result["function"]["strict"] = True
         result["function"]["parameters"]["additionalProperties"] = False
+        # Also set strict inside parameters for providers like Anthropic where
+        # LiteLLM reads it from input_schema rather than function.strict
+        result["function"]["parameters"]["strict"] = True
 
     # gemini doesnt have parameters object if it is without params
     if TOOL_SCHEMA_NO_PARAM_OBJECT_IF_NO_PARAMS and (
