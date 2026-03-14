@@ -29,6 +29,7 @@ from holmes.utils.header_rendering import render_header_templates
 from holmes.utils.pydantic_utils import ToolsetConfig
 
 logger = logging.getLogger(__name__)
+display_logger = logging.getLogger("holmes.display.mcp_toolset")
 
 
 def _extract_root_error_message(exc: Exception) -> str:
@@ -180,7 +181,7 @@ def _get_mcp_log_file(server_name: str) -> TextIO:
     log_dir = os.path.join(config_path_dir, "logs", "mcp")
     os.makedirs(log_dir, exist_ok=True)
     log_path = os.path.join(log_dir, f"{server_name}.log")
-    logger.info(f"MCP server '{server_name}' logs: {log_path}")
+    display_logger.info(f"MCP server '{server_name}' logs: {log_path}")
     return open(log_path, "w")
 
 

@@ -10,6 +10,8 @@ from holmes.core.tools import (
 )
 from holmes.core.tools_utils.toolset_utils import filter_out_default_logging_toolset
 
+display_logger = logging.getLogger("holmes.display.tool_executor")
+
 
 class ToolExecutor:
     def __init__(self, toolsets: List[Toolset]):
@@ -30,7 +32,7 @@ class ToolExecutor:
         toolsets_by_name: dict[str, Toolset] = {}
         for ts in self.enabled_toolsets:
             if ts.name in toolsets_by_name:
-                logging.warning(f"Overriding toolset '{ts.name}'!")
+                display_logger.warning(f"Overriding toolset '{ts.name}'!")
             toolsets_by_name[ts.name] = ts
 
         self.tools_by_name: dict[str, Tool] = {}
@@ -40,7 +42,7 @@ class ToolExecutor:
                 if tool.icon_url is None and ts.icon_url is not None:
                     tool.icon_url = ts.icon_url
                 if tool.name in self.tools_by_name:
-                    logging.warning(
+                    display_logger.warning(
                         f"Overriding existing tool '{tool.name} with new tool from {ts.name} at {ts.path}'!"
                     )
                 self.tools_by_name[tool.name] = tool

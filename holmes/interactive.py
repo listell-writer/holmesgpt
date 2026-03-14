@@ -94,6 +94,8 @@ DISPLAY_LOGGER_NAMES = [
     "holmes.display.llm",
     "holmes.display.toolset_utils",
     "holmes.display.bash_toolset",
+    "holmes.display.mcp_toolset",
+    "holmes.display.tool_executor",
 ]
 
 _SENTINEL = object()  # marks end of stream on the queue

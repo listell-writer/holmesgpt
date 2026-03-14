@@ -34,7 +34,7 @@ def handle_deprecated_toolset_name(
     if toolset_name in DEPRECATED_TOOLSET_NAMES:
         new_name = DEPRECATED_TOOLSET_NAMES[toolset_name]
         if new_name in builtin_toolset_names:
-            logging.warning(
+            display_logger.warning(
                 f"The toolset name '{toolset_name}' is deprecated. "
                 f"Please use '{new_name}' instead. "
                 "The old name will continue to work but may be removed in a future version."
