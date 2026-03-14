@@ -97,7 +97,7 @@ def test_cached_output(model: str, request):
                     additional_system_prompt=None,
                     runbooks=runbooks,
                 )
-                result = ai.messages_call(messages=messages, trace_span=None)
+                result = ai.call(messages=messages, trace_span=None)
                 assert result is not None
                 assert len(raw_responses) >= iteration + 1
                 conversation_history = messages.copy()
