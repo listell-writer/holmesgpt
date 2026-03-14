@@ -353,6 +353,20 @@ No fast unit tests exist for the core loop mechanics. We must write targeted uni
 - Mock LLM, call with `response_format={"type": "json_object"}`
 - Verify the format is passed through to `litellm.completion()` call args
 
+**Test 10: Mixed batch — successful tools retained across approval round**
+- Mock LLM to request 2 tool calls in one batch: `tool_a` (succeeds) and `tool_b` (requires approval)
+- Set `approval_callback` that approves `tool_b`
+- Call `ai.call(messages)`
+- Verify `LLMResult.tool_calls` contains **both** tools — `tool_a` from the interrupted first round AND `tool_b` from the approval re-invocation
+- This tests the wrapper's TOOL_RESULT accumulation: without it, `tool_a`'s result would be lost when `APPROVAL_REQUIRED` interrupts before `ANSWER_END`
+
+**Test 11: Denied tool preserves user feedback**
+- Mock LLM to return a tool call requiring approval
+- Set `approval_callback` that returns `(False, "try using namespace kube-system instead")`
+- Call `ai.call(messages)`
+- Verify the tool result message sent to the LLM contains `"User feedback: try using namespace kube-system instead"` (not a generic denial message)
+- This tests that `ToolApprovalDecision.feedback` flows through `process_tool_decisions()` correctly
+
 ### Post-enrichment test (after Step 2)
 
 **Test 2: Equivalence**
@@ -393,22 +407,6 @@ Add new parameters:
 ### Step 2: Enrich `call_stream()` internals and ANSWER_END
 
 1. Add `all_tool_calls: list[dict] = []` accumulation using `as_tool_result_response()` format. Append to `all_tool_calls` in the same `else` branch (line 1160-1167) where successful results are appended to `tool_calls` and `messages`. When `process_tool_decisions()` returns events at the top of `call_stream()` (re-invocation with `tool_decisions`), extract tool call info from those TOOL_RESULT events and append to `all_tool_calls` before entering the main loop. This ensures approved tools from the previous round appear in `LLMResult.tool_calls`.
-
-    **Carry forward completed tools across approval rounds:** When `APPROVAL_REQUIRED` fires, successful tools from the interrupted batch are already in `all_tool_calls` inside `call_stream()` but are lost when the generator exits (no `ANSWER_END` is yielded). Include `all_tool_calls` in the `APPROVAL_REQUIRED` event data so the `call()` wrapper can accumulate them:
-    ```python
-    # In call_stream() APPROVAL_REQUIRED event:
-    data={
-        ...
-        "tool_calls": all_tool_calls,  # completed tools from this round
-    }
-    ```
-    The `call()` wrapper accumulates these before re-invoking:
-    ```python
-    elif event.event == StreamEvents.APPROVAL_REQUIRED:
-        all_tool_calls.extend(event.data.get("tool_calls", []))
-        ...
-    ```
-    Without this, a mixed batch (e.g., `kubectl get pods` succeeds, `rm -rf /tmp/foo` needs approval) would lose the successful tool's result from `LLMResult.tool_calls`.
 
 2. Enrich ANSWER_END (line 1073-1080):
 ```python
@@ -470,6 +468,11 @@ def call(self, messages, response_format=None,
                 start_tool_count += 1
             elif event.event == StreamEvents.TOOL_RESULT:
                 tool_number_offset += 1
+                # Accumulate tool results as they stream by.
+                # This captures ALL tools (successful + approval-required)
+                # across all rounds, so LLMResult.tool_calls is complete
+                # even when an APPROVAL_REQUIRED interrupts before ANSWER_END.
+                all_tool_calls.append(event.data)
                 if start_tool_count > 0:
                     logging.info(
                         f"The AI requested [bold]{start_tool_count}[/bold] tool call(s)."
@@ -497,7 +500,9 @@ def call(self, messages, response_format=None,
 
         if answer_data:
             total_num_llm_calls += answer_data.get("num_llm_calls", 0)
-            all_tool_calls.extend(answer_data.get("tool_calls", []))
+            # Note: all_tool_calls already accumulated from TOOL_RESULT events above.
+            # ANSWER_END's tool_calls field exists for streaming clients that don't
+            # track TOOL_RESULT events; the wrapper doesn't need it.
             round_costs = answer_data.get("costs", {})
             accumulated_costs = _sum_costs(accumulated_costs, round_costs)
             cost_fields = {k: v for k, v in accumulated_costs.items() if k in LLMCosts.model_fields}
@@ -580,9 +585,9 @@ Delete `messages_call()`. Update its 4 callers to call `call()` directly:
    - `process_tool_decisions()` in `tool_calling_llm.py`
 4. Update tests: `tests/test_structured_toolcall_result.py` (rename test, assert both keys present), `tests/core/test_tool_output_deduplication.py`.
 
-### Step 5c: Write Test 6 (post-refactor approval)
+### Step 5c: Write Tests 6, 10, 11 (post-refactor approval edge cases)
 
-Write Test 6. Run green.
+Write Tests 6, 10, 11. Run green.
 
 ### Step 6: Run all tests
 
