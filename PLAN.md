@@ -504,7 +504,19 @@ def call(self, messages, response_format=None,
 **`_build_approval_decisions()`**: For each pending approval:
 1. Re-check if approval is still needed via `_is_tool_call_already_approved()` (a previous tool in the same batch may have just saved the prefix to disk). If already approved, auto-approve without prompting.
 2. Otherwise, call `self.approval_callback(tool_result)` with the full `StructuredToolResult` from the event data.
-3. Return list of `ToolApprovalDecision`. Does NOT populate `save_prefixes` — CLI saves to disk via callback; server gets `save_prefixes` from client directly.
+3. Return list of `ToolApprovalDecision`. Does NOT populate `save_prefixes` — CLI saves to disk via callback; server gets `save_prefixes` from client directly. **Does** populate `feedback` from the callback's second return value when denied — this preserves the user's corrective guidance for the LLM (see below).
+
+**Preserve user denial feedback in approval decisions:**
+
+Currently, when a user denies a tool and provides corrective guidance (e.g., "try a different namespace"), `_handle_tool_call_approval()` (line 929) includes that feedback in the error message sent to the LLM: `"User denied command execution. User feedback: try a different namespace"`. However, `process_tool_decisions()` (line 335) uses a hardcoded generic `"Tool execution was denied by the user."` — the feedback is lost because `ToolApprovalDecision` has no field for it.
+
+Fix: Add `feedback: Optional[str] = None` to `ToolApprovalDecision` in `models.py`. Update `process_tool_decisions()` denial branch (line 328-337) to include feedback when present:
+```python
+feedback_text = f" User feedback: {decision.feedback}" if decision and decision.feedback else ""
+error=f"Tool execution was denied by the user.{feedback_text}"
+```
+
+This is a pre-existing bug in the server path (server clients could never send feedback on denial), but becomes critical for the CLI path once `call()` routes through `process_tool_decisions()`.
 
 **`_sum_costs()`**: Module-level function.
 ```python
@@ -565,8 +577,8 @@ poetry run pytest tests -m "not llm" --no-cov
 
 | File | Change |
 |---|---|
-| `holmes/core/tool_calling_llm.py` | Main refactor: simplify `call_stream()` signature, add params, enrich ANSWER_END + APPROVAL_REQUIRED, `call()` becomes wrapper, add `_build_approval_decisions()` + `_sum_costs()`, delete old loop + `_handle_tool_call_approval()` + `messages_call()`, remove dead `user_prompt` param. Update `as_streaming_tool_result_response()` → `as_tool_result_response()` at 4 call sites. |
-| `holmes/core/models.py` | Unify `as_tool_result_response()` to emit both `tool_name` and `name` keys. Delete `as_streaming_tool_result_response()`. |
+| `holmes/core/tool_calling_llm.py` | Main refactor: simplify `call_stream()` signature, add params, enrich ANSWER_END + APPROVAL_REQUIRED, `call()` becomes wrapper, add `_build_approval_decisions()` + `_sum_costs()`, delete old loop + `_handle_tool_call_approval()` + `messages_call()`, remove dead `user_prompt` param. Update `as_streaming_tool_result_response()` → `as_tool_result_response()` at 4 call sites. Fix `process_tool_decisions()` denial branch to include user feedback from `ToolApprovalDecision.feedback`. |
+| `holmes/core/models.py` | Unify `as_tool_result_response()` to emit both `tool_name` and `name` keys. Delete `as_streaming_tool_result_response()`. Add `feedback: Optional[str] = None` to `ToolApprovalDecision`. |
 | `tests/test_tool_calling_llm_baseline.py` (NEW) | All tests (1-9) |
 | `tests/test_structured_toolcall_result.py` | Update `test_as_streaming_tool_result_response` → test unified method, assert both keys |
 | `tests/core/test_tool_output_deduplication.py` | Replace `as_streaming_tool_result_response()` with `as_tool_result_response()` |
