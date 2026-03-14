@@ -568,6 +568,8 @@ class ToolCallingLLM:
         if trace_span is None:
             trace_span = DummySpan()
         with trace_span.start_span(type="tool") as tool_span:
+            # ChatCompletionMessageToolCall is a union of FunctionToolCall (has 'function')
+            # and CustomToolCall (has 'custom'). We only support function tool calls.
             if not hasattr(tool_to_call, "function"):
                 logging.error(f"Unsupported custom tool call: {tool_to_call}")
                 tool_call_result = ToolCallResult(
