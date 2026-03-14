@@ -40,6 +40,7 @@ from pygments.lexers import guess_lexer
 from rich.console import Console
 from rich.markdown import Markdown, Panel
 from rich.markup import escape
+from rich.table import Table
 
 from holmes.config import Config
 from holmes.core.config import config_path_dir
@@ -323,6 +324,10 @@ class AgenticProgressRenderer:
     AI messages are printed immediately (outside the Live region).
     """
 
+    _DATA_FEED_MAX_LINES = 8  # Max lines shown in data pane
+    _DATA_FEED_SNIPPET_LEN = 60  # Max chars per snippet line
+    _DATA_FEED_MAX_ITEMS = 20  # Max items kept in buffer
+
     def __init__(self, console: Console, tool_number_offset: int, escape_hint: str = ""):
         self._console = console
         self._tool_number_offset = tool_number_offset
@@ -345,22 +350,106 @@ class AgenticProgressRenderer:
         # Track last printed task statuses to avoid reprinting identical panels
         self._last_task_statuses: Optional[str] = None
 
-    def _build_display(self) -> "Text":
+        # Data feed: recent tool output snippets for the right pane
+        # Each item: (tool_name, snippet_lines, timestamp)
+        self._data_feed: List[tuple] = []
+        # Latest tasks for live display
+        self._live_tasks: Optional[list] = None
+
+    @staticmethod
+    def _extract_snippets(output: str, max_lines: int = 4, max_len: int = 60) -> List[str]:
+        """Extract interesting snippet lines from tool output."""
+        if not output:
+            return []
+        lines = output.strip().splitlines()
+        snippets = []
+        for line in lines:
+            line = line.strip()
+            if not line or len(line) < 5:
+                continue
+            # Truncate long lines
+            if len(line) > max_len:
+                line = line[:max_len - 1] + "…"
+            snippets.append(line)
+            if len(snippets) >= max_lines:
+                break
+        return snippets
+
+    def _build_data_pane(self) -> "Text":
+        """Build the right-side data feed pane content."""
+        from rich.text import Text
+
+        now = time.time()
+        pane = Text()
+
+        if not self._data_feed:
+            pane.append("  Waiting for data…", style="dim italic")
+            return pane
+
+        # Show most recent items, up to _DATA_FEED_MAX_LINES total lines
+        lines_left = self._DATA_FEED_MAX_LINES
+        # Iterate from most recent
+        for tool_name, snippets, ts in reversed(self._data_feed):
+            if lines_left <= 0:
+                break
+            age = now - ts
+            # Fade older entries
+            if age > 10:
+                style = "dim"
+                header_style = "dim"
+            elif age > 5:
+                style = ""
+                header_style = "dim cyan"
+            else:
+                style = ""
+                header_style = "bold cyan"
+
+            pane.append(f"  {tool_name}", style=header_style)
+            pane.append("\n")
+            lines_left -= 1
+            for s in snippets:
+                if lines_left <= 0:
+                    break
+                pane.append(f"  {s}\n", style=style)
+                lines_left -= 1
+
+        # Remove trailing newline
+        plain = pane.plain
+        if plain.endswith("\n"):
+            pane.right_crop(1)
+
+        return pane
+
+    def _build_left_pane(self) -> "Text":
+        """Build the left-side status pane (tasks + in-flight tools)."""
         from rich.text import Text
 
         now = time.time()
         display = Text()
 
-        if self._thinking and not self._in_flight:
-            elapsed = now - self._start_time
-            display.append("  ◐ ", style=f"bold {AI_COLOR}")
-            display.append("Thinking", style=f"bold {AI_COLOR}")
-            # Animated dots
-            dots = "." * (int(elapsed * 2) % 4)
-            display.append(f"{dots:<4}", style=f"bold {AI_COLOR}")
-            if self._escape_hint:
-                display.append(f" {self._escape_hint}", style="dim")
-            return display
+        # Show tasks if we have them
+        if self._live_tasks:
+            for task in self._live_tasks:
+                status = task.get("status", "pending")
+                tc = task.get("content", "")
+                if status == "completed":
+                    display.append(" ☑ ", style="green")
+                    display.append(tc, style="dim strike")
+                elif status == "in_progress":
+                    display.append(" ☐ ", style="bold yellow")
+                    display.append(tc, style="bold")
+                    display.append(" ◀", style="bold yellow")
+                elif status == "failed":
+                    display.append(" ☒ ", style="bold red")
+                    display.append(tc, style="red")
+                else:
+                    display.append(" ☐ ", style="dim")
+                    display.append(tc, style="dim")
+                display.append("\n")
+
+            # Separator between tasks and tools
+            if self._in_flight:
+                display.append("\n")
 
         # Show in-flight tools
         spinner_frames = "⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏"
@@ -368,7 +457,6 @@ class AgenticProgressRenderer:
         for num, (name, started) in sorted(self._in_flight.items()):
             elapsed = now - started
             display.append(f"  {frame} ", style="bold magenta")
-            display.append(f"#{num} ", style="dim")
             display.append(f"{name}", style="bold")
             if elapsed >= 1.0:
                 display.append(f" ({elapsed:.0f}s)", style="dim")
@@ -379,6 +467,35 @@ class AgenticProgressRenderer:
             display.right_crop(1)
 
         return display
+
+    def _build_display(self) -> Any:
+        from rich.text import Text
+
+        now = time.time()
+
+        if self._thinking and not self._in_flight:
+            display = Text()
+            elapsed = now - self._start_time
+            display.append("  ◐ ", style=f"bold {AI_COLOR}")
+            display.append("Thinking", style=f"bold {AI_COLOR}")
+            dots = "." * (int(elapsed * 2) % 4)
+            display.append(f"{dots:<4}", style=f"bold {AI_COLOR}")
+            if self._escape_hint:
+                display.append(f" {self._escape_hint}", style="dim")
+            return display
+
+        left = self._build_left_pane()
+        right = self._build_data_pane()
+
+        # Use a table for side-by-side layout
+        table = Table.grid(padding=(0, 2))
+        table.add_column("status", ratio=1)
+        table.add_column("data", ratio=1)
+        table.add_row(
+            Panel(left, title="[bold]Status[/bold]", title_align="left", border_style="blue", padding=(0, 1)),
+            Panel(right, title="[bold]Data[/bold]", title_align="left", border_style="dim", padding=(0, 1)),
+        )
+        return table
 
     def _tick(self) -> None:
         while not self._timer_stop.wait(0.5):
@@ -438,7 +555,6 @@ class AgenticProgressRenderer:
 
         # Print regular tools
         for num, name, desc, elapsed, output_len, is_error, _extra in regular_tools:
-            show_hint = f"/show {num}"
             if is_error:
                 icon = "[bold red]⚠[/bold red]"
             else:
@@ -448,7 +564,6 @@ class AgenticProgressRenderer:
             time_bar = ""
             if elapsed is not None:
                 elapsed_str = f" {elapsed:.1f}s"
-                # Subtle visual time bar: each ▪ = ~1 second, max 10
                 bar_len = min(int(elapsed + 0.5), 10) if elapsed >= 0.5 else 0
                 if bar_len > 0:
                     time_bar = f" [dim yellow]{'▪' * bar_len}[/dim yellow]"
@@ -461,9 +576,8 @@ class AgenticProgressRenderer:
                     size_str = f" {output_len:,}"
 
             self._console.print(
-                f"  {icon} [dim]#{num}[/dim] [bold]{escape(name)}[/bold]"
+                f"  {icon} [bold]{escape(name)}[/bold]"
                 f"[dim]{elapsed_str}{size_str}[/dim]{time_bar}"
-                f"  [dim]{show_hint}[/dim]"
             )
 
         # Print task panel if tasks changed
@@ -514,6 +628,16 @@ class AgenticProgressRenderer:
                     todos = params.get("todos")
                     if isinstance(todos, list):
                         extra = todos
+                        self._live_tasks = todos
+
+                # Feed data snippets into right pane (skip TodoWrite)
+                if tool_name != _TODO_WRITE_TOOL_NAME and output_str:
+                    snippets = self._extract_snippets(output_str)
+                    if snippets:
+                        self._data_feed.append((tool_name, snippets, time.time()))
+                        # Trim buffer
+                        if len(self._data_feed) > self._DATA_FEED_MAX_ITEMS:
+                            self._data_feed = self._data_feed[-self._DATA_FEED_MAX_ITEMS:]
 
                 # Remove from in-flight
                 self._in_flight.pop(tool_number, None)
@@ -561,6 +685,9 @@ class AgenticProgressRenderer:
             self._stop_live()
             if self._completed:
                 self._print_completed_tools()
+            # Reset data feed for next invocation
+            self._data_feed.clear()
+            self._live_tasks = None
 
 
 class SlashCommands(Enum):
