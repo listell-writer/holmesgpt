@@ -11,8 +11,11 @@ Schema complexity traps:
    - facility_rates (monthly per facility) → products.warehouse_id (join through facility assignment)
    - order_adjustments (returns/credits, type='return', linked by order_line_id)
 
-2. Red herring tables:
-   - financial_summary: pre-computed "profit" numbers that are WRONG (uses outdated cost basis)
+2. Stale summary table (fair challenge - staleness is visible):
+   - financial_summary: pre-computed profits using FY2024 cost model, last_updated=2024-06-30,
+     notes say "Projected from prior year actuals". A careful analyst should notice these
+     signals and verify against raw transactional data.
+   Red herring tables (not directly relevant):
    - budget_forecast: planning numbers, not actuals
    - cost_allocations: corporate overhead, not product costs
 
@@ -203,7 +206,10 @@ def seed():
         FOREIGN KEY (order_line_id) REFERENCES order_lines(line_id)
     )""")
 
-    # -- RED HERRING: financial_summary (pre-computed but WRONG numbers) --
+    # -- financial_summary: pre-computed but STALE numbers (uses outdated 2024 cost basis) --
+    # The table has clear staleness signals: last_updated is mid-2024, cost_basis
+    # references "FY2024 Standard Cost Model", and notes say "Projected".
+    # A careful analyst should notice these signals and verify against raw data.
     c.execute("""
     CREATE TABLE financial_summary (
         summary_id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -213,18 +219,21 @@ def seed():
         total_cost REAL NOT NULL,
         gross_profit REAL NOT NULL,
         profit_margin REAL NOT NULL,
+        cost_basis TEXT NOT NULL,
+        last_updated TEXT NOT NULL,
         notes TEXT
     )""")
 
-    # Deliberately WRONG profit numbers (uses outdated cost basis from 2024)
+    # WRONG profit numbers — uses outdated cost basis from 2024.
+    # The staleness is visible: last_updated=2024-06-30, cost_basis references FY2024.
     wrong_summaries = [
-        ("Widgets", "Q1-2025", 32000, 11000, 21000, 0.656, "Based on 2024 standard costs"),
-        ("Gadgets", "Q1-2025", 225000, 125000, 100000, 0.444, "Based on 2024 standard costs"),
-        ("Sensors", "Q1-2025", 144000, 50000, 94000, 0.653, "Based on 2024 standard costs"),
-        ("Electronics", "Q1-2025", 95000, 40000, 55000, 0.579, "Based on 2024 standard costs"),
-        ("Accessories", "Q1-2025", 24000, 11000, 13000, 0.542, "Based on 2024 standard costs"),
+        ("Widgets", "Q1-2025", 32000, 11000, 21000, 0.656, "FY2024 Standard Cost Model", "2024-06-30", "Projected from prior year actuals"),
+        ("Gadgets", "Q1-2025", 225000, 125000, 100000, 0.444, "FY2024 Standard Cost Model", "2024-06-30", "Projected from prior year actuals"),
+        ("Sensors", "Q1-2025", 144000, 50000, 94000, 0.653, "FY2024 Standard Cost Model", "2024-06-30", "Projected from prior year actuals"),
+        ("Electronics", "Q1-2025", 95000, 40000, 55000, 0.579, "FY2024 Standard Cost Model", "2024-06-30", "Projected from prior year actuals"),
+        ("Accessories", "Q1-2025", 24000, 11000, 13000, 0.542, "FY2024 Standard Cost Model", "2024-06-30", "Projected from prior year actuals"),
     ]
-    c.executemany("INSERT INTO financial_summary (category, period, total_revenue, total_cost, gross_profit, profit_margin, notes) VALUES (?,?,?,?,?,?,?)",
+    c.executemany("INSERT INTO financial_summary (category, period, total_revenue, total_cost, gross_profit, profit_margin, cost_basis, last_updated, notes) VALUES (?,?,?,?,?,?,?,?,?)",
                   wrong_summaries)
 
     # -- RED HERRING: budget_forecast --
@@ -484,11 +493,11 @@ def seed():
         print(f"  Gross Profit: ${gross_profit:>12,.2f}  ({margin:.1f}% margin)")
         print()
 
-    # Show the WRONG financial_summary for comparison
-    print("=== RED HERRING: financial_summary (WRONG NUMBERS) ===")
-    c.execute("SELECT category, gross_profit, profit_margin, notes FROM financial_summary")
+    # Show the STALE financial_summary for comparison
+    print("=== STALE: financial_summary (OUTDATED NUMBERS) ===")
+    c.execute("SELECT category, gross_profit, profit_margin, cost_basis, last_updated, notes FROM financial_summary")
     for row in c.fetchall():
-        print(f"  {row[0]}: profit=${row[1]:,.0f}, margin={row[2]:.1%} ({row[3]})")
+        print(f"  {row[0]}: profit=${row[1]:,.0f}, margin={row[2]:.1%} (basis={row[3]}, updated={row[4]}, {row[5]})")
 
     conn.close()
     print(f"\nDB: {DB_PATH}")
