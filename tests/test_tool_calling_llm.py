@@ -190,13 +190,12 @@ def mock_tool_executor():
 @pytest.fixture
 def make_ai(mock_llm, mock_tool_executor):
     """Factory that returns a ToolCallingLLM with default mocks."""
-    def _make(max_steps=10, approval_callback=None):
+    def _make(max_steps=10):
         ai = ToolCallingLLM(
             tool_executor=mock_tool_executor,
             max_steps=max_steps,
             llm=mock_llm,
             tool_results_dir=None,
-            approval_callback=approval_callback,
         )
         return ai
     return _make
@@ -302,7 +301,7 @@ class TestApprovalCallbackFlow:
         mock_llm.completion.side_effect = [resp_with_tool, resp_final]
 
         callback = MagicMock(return_value=(True, None))
-        ai = make_ai(approval_callback=callback)
+        ai = make_ai()
 
         # First invocation of _invoke_llm_tool_call returns APPROVAL_REQUIRED
         approval_result = _make_tool_call_result_approval(
@@ -318,7 +317,7 @@ class TestApprovalCallbackFlow:
         ai._is_tool_call_already_approved = MagicMock(return_value=False)
 
         messages = [{"role": "user", "content": "Delete the pod"}]
-        result = ai.call(messages)
+        result = ai.call(messages, approval_callback=callback)
 
         # Callback was invoked with the StructuredToolResult
         callback.assert_called_once()
@@ -345,7 +344,7 @@ class TestApprovalCallbackFlow:
         mock_llm.completion.side_effect = [resp_with_tool, resp_final]
 
         callback = MagicMock(return_value=(False, "try using namespace kube-system instead"))
-        ai = make_ai(approval_callback=callback)
+        ai = make_ai()
 
         approval_result = _make_tool_call_result_approval(
             tool_call_id="tc_del", tool_name="kubectl_delete"
@@ -354,7 +353,7 @@ class TestApprovalCallbackFlow:
         ai._is_tool_call_already_approved = MagicMock(return_value=False)
 
         messages = [{"role": "user", "content": "Delete the pod"}]
-        result = ai.call(messages)
+        result = ai.call(messages, approval_callback=callback)
 
         # Callback invoked
         callback.assert_called_once()
@@ -1077,7 +1076,7 @@ class TestApprovalViaReinvocation:
         mock_llm.completion.side_effect = [resp_with_tools, resp_final]
 
         callback = MagicMock(return_value=(True, None))
-        ai = make_ai(approval_callback=callback)
+        ai = make_ai()
 
         ok_result = _make_tool_call_result(tool_call_id="tc_ok", data="pods listed")
         approval_result = _make_tool_call_result_approval(
@@ -1103,7 +1102,7 @@ class TestApprovalViaReinvocation:
         ai._invoke_llm_tool_call = MagicMock(side_effect=_route_tool_call)
         ai._is_tool_call_already_approved = MagicMock(return_value=False)
 
-        result = ai.call([{"role": "user", "content": "Get pods and delete one"}])
+        result = ai.call([{"role": "user", "content": "Get pods and delete one"}], approval_callback=callback)
 
         assert result.result == "Done"
         # Both tools should appear exactly once (deduplicated)

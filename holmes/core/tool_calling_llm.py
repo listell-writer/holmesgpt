@@ -162,24 +162,14 @@ class ToolCallingLLM:
         llm: LLM,
         tool_results_dir: Optional[Path],
         tracer=None,
-        approval_callback: Optional[ApprovalCallback] = None,
     ):
         self.tool_executor = tool_executor
         self.max_steps = max_steps
         self.tracer = tracer
         self.llm = llm
         self.tool_results_dir = tool_results_dir
-        self._approval_callback = approval_callback
 
         self._runbook_in_use: bool = False
-
-    @property
-    def approval_callback(self) -> Optional[ApprovalCallback]:
-        return self._approval_callback
-
-    @approval_callback.setter
-    def approval_callback(self, value: Optional[ApprovalCallback]) -> None:
-        self._approval_callback = value
 
     def reset_interaction_state(self) -> None:
         """
@@ -266,6 +256,7 @@ class ToolCallingLLM:
                     user_approved=True,
                     session_approved_prefixes=session_prefixes,
                     request_context=request_context,
+                    enable_tool_approval=True,  # always True when processing decisions
                 )
             else:
                 # Tool was rejected or no decision found, add rejection message
@@ -330,6 +321,7 @@ class ToolCallingLLM:
         tool_number_offset: int = 0,
         request_context: Optional[Dict[str, Any]] = None,
         cancel_event: Optional[threading.Event] = None,
+        approval_callback: Optional[ApprovalCallback] = None,
     ) -> LLMResult:
         """Synchronous wrapper around call_stream(). Drains the generator
         and reconstructs an LLMResult."""
@@ -343,7 +335,7 @@ class ToolCallingLLM:
             stream = self.call_stream(
                 msgs=messages,
                 response_format=response_format,
-                enable_tool_approval=self.approval_callback is not None,
+                enable_tool_approval=approval_callback is not None,
                 tool_decisions=tool_decisions,
                 trace_span=trace_span,
                 cancel_event=cancel_event,
@@ -400,7 +392,8 @@ class ToolCallingLLM:
             if terminal_event == StreamEvents.APPROVAL_REQUIRED:
                 messages = terminal_data["messages"]
                 tool_decisions = self._build_approval_decisions(
-                    terminal_data["pending_approvals"], terminal_data["tool_results"]
+                    terminal_data["pending_approvals"], terminal_data["tool_results"],
+                    approval_callback,
                 )
                 continue
 
@@ -421,6 +414,7 @@ class ToolCallingLLM:
         self,
         pending_approvals: List[dict],
         tool_results_map: Dict[str, StructuredToolResult],
+        approval_callback: Optional[ApprovalCallback] = None,
     ) -> List[ToolApprovalDecision]:
         """Build approval decisions by calling the approval callback for each pending tool."""
         decisions: List[ToolApprovalDecision] = []
@@ -438,14 +432,14 @@ class ToolCallingLLM:
                 ))
                 continue
 
-            if not self.approval_callback or not tool_result:
+            if not approval_callback or not tool_result:
                 decisions.append(ToolApprovalDecision(
                     tool_call_id=tool_call_id,
                     approved=False,
                 ))
                 continue
 
-            approved, feedback = self.approval_callback(tool_result)
+            approved, feedback = approval_callback(tool_result)
             decisions.append(ToolApprovalDecision(
                 tool_call_id=tool_call_id,
                 approved=approved,
@@ -563,6 +557,7 @@ class ToolCallingLLM:
         user_approved: bool = False,
         session_approved_prefixes: Optional[List[str]] = None,
         request_context: Optional[Dict[str, Any]] = None,
+        enable_tool_approval: bool = False,
     ) -> ToolCallResult:
         if trace_span is None:
             trace_span = DummySpan()
@@ -579,7 +574,7 @@ class ToolCallingLLM:
                         params=None,
                     ),
                 )
-                ToolCallingLLM._log_tool_call_result(tool_span, tool_call_result, self.approval_callback is not None)
+                ToolCallingLLM._log_tool_call_result(tool_span, tool_call_result, enable_tool_approval)
                 return tool_call_result
 
             tool_name = tool_to_call.function.name
@@ -634,7 +629,7 @@ class ToolCallingLLM:
             ToolCallingLLM._log_tool_call_result(
                 tool_span,
                 tool_call_result,
-                self.approval_callback is not None,
+                enable_tool_approval,
                 original_token_count,
             )
             return tool_call_result
@@ -857,6 +852,7 @@ class ToolCallingLLM:
                         tool_number=tool_number,
                         session_approved_prefixes=session_prefixes,
                         request_context=request_context,
+                        enable_tool_approval=enable_tool_approval,
                     )
                     futures.append(future)
                     yield StreamMessage(

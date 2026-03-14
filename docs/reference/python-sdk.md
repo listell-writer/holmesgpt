@@ -282,7 +282,7 @@ Core AI engine for tool-calling interactions (`holmes.core.tool_calling_llm.Tool
 
 | Method | Returns | Description |
 |--------|---------|-------------|
-| `call(messages)` | `LLMResult` | Run a tool-calling conversation with a full message list. |
+| `call(messages, approval_callback=None)` | `LLMResult` | Run a tool-calling conversation with a full message list. |
 | `call_stream(msgs)` | `Generator[StreamMessage]` | Streaming version that yields events between iterations. |
 
 ### `LLMResult`
