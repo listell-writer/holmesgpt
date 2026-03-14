@@ -12,23 +12,20 @@ from openai.types.chat.chat_completion_message_tool_call import (
     ChatCompletionMessageToolCall,
 )
 from pydantic import BaseModel, Field
-from rich.console import Console
 
 from holmes.common.env_vars import (
     LOG_LLM_USAGE_RESPONSE,
     RESET_REPEATED_TOOL_CALL_CHECK_AFTER_COMPACTION,
     TEMPERATURE,
 )
-from holmes.core.issue import Issue
 from holmes.core.llm import LLM
-from holmes.core.llm_usage import RequestStats, extract_usage_from_response
+from holmes.core.llm_usage import RequestStats
 
 from holmes.core.models import (
     PendingToolApproval,
     ToolApprovalDecision,
     ToolCallResult,
 )
-from holmes.core.prompt import generate_user_prompt
 from holmes.core.safeguards import prevent_overly_repeated_tool_call
 from holmes.core.tools import (
     StructuredToolResult,
@@ -253,7 +250,6 @@ class ToolCallingLLM:
         session_prefixes = extract_bash_session_prefixes(messages)
 
         for tool_call_with_decision in pending_tool_calls:
-            tool_call_message: dict
             tool_call = tool_call_with_decision.tool_call
             decision = tool_call_with_decision.decision
             tool_result: Optional[ToolCallResult] = None
@@ -588,16 +584,10 @@ class ToolCallingLLM:
             trace_span = DummySpan()
         with trace_span.start_span(type="tool") as tool_span:
             if not hasattr(tool_to_call, "function"):
-                # Handle the union type - ChatCompletionMessageToolCall can be either
-                # ChatCompletionMessageFunctionToolCall (with 'function' field and type='function')
-                # or ChatCompletionMessageCustomToolCall (with 'custom' field and type='custom').
-                # We use hasattr to check for the 'function' attribute as it's more flexible
-                # and doesn't require importing the specific type.
-                tool_name = "Unknown_Custom_Tool"
                 logging.error(f"Unsupported custom tool call: {tool_to_call}")
                 tool_call_result = ToolCallResult(
                     tool_call_id=tool_to_call.id,
-                    tool_name=tool_name,
+                    tool_name="Unknown_Custom_Tool",
                     description="NA",
                     result=StructuredToolResult(
                         status=StructuredToolResultStatus.ERROR,
@@ -605,47 +595,49 @@ class ToolCallingLLM:
                         params=None,
                     ),
                 )
-            else:
-                tool_name = tool_to_call.function.name
-                tool_arguments = tool_to_call.function.arguments
-                tool_id = tool_to_call.id
+                ToolCallingLLM._log_tool_call_result(tool_span, tool_call_result, self.approval_callback is not None)
+                return tool_call_result
 
-                tool_params = {}
-                try:
-                    tool_params = json.loads(tool_arguments)
-                except Exception:
-                    logging.warning(
-                        f"Failed to parse arguments for tool: {tool_name}. args: {tool_arguments}"
-                    )
+            tool_name = tool_to_call.function.name
+            tool_arguments = tool_to_call.function.arguments
+            tool_id = tool_to_call.id
 
-                tool_response = None
-                if not user_approved:
-                    tool_response = prevent_overly_repeated_tool_call(
-                        tool_name=tool_name,
-                        tool_params=tool_params,
-                        tool_calls=previous_tool_calls,
-                    )
-
-                if not tool_response:
-                    tool_response = self._directly_invoke_tool_call(
-                        tool_name=tool_name,
-                        tool_params=tool_params,
-                        user_approved=user_approved,
-                        tool_number=tool_number,
-                        tool_call_id=tool_id,
-                        session_approved_prefixes=session_approved_prefixes,
-                        request_context=request_context,
-                    )
-
-                tool = self.tool_executor.get_tool_by_name(tool_name)
-                tool_call_result = ToolCallResult(
-                    tool_call_id=tool_id,
-                    tool_name=tool_name,
-                    description=str(tool.get_parameterized_one_liner(tool_params))
-                    if tool
-                    else "",
-                    result=tool_response,
+            tool_params = {}
+            try:
+                tool_params = json.loads(tool_arguments)
+            except Exception:
+                logging.warning(
+                    f"Failed to parse arguments for tool: {tool_name}. args: {tool_arguments}"
                 )
+
+            tool_response = None
+            if not user_approved:
+                tool_response = prevent_overly_repeated_tool_call(
+                    tool_name=tool_name,
+                    tool_params=tool_params,
+                    tool_calls=previous_tool_calls,
+                )
+
+            if not tool_response:
+                tool_response = self._directly_invoke_tool_call(
+                    tool_name=tool_name,
+                    tool_params=tool_params,
+                    user_approved=user_approved,
+                    tool_number=tool_number,
+                    tool_call_id=tool_id,
+                    session_approved_prefixes=session_approved_prefixes,
+                    request_context=request_context,
+                )
+
+            tool = self.tool_executor.get_tool_by_name(tool_name)
+            tool_call_result = ToolCallResult(
+                tool_call_id=tool_id,
+                tool_name=tool_name,
+                description=str(tool.get_parameterized_one_liner(tool_params))
+                if tool
+                else "",
+                result=tool_response,
+            )
 
             original_token_count = prevent_overly_big_tool_response(
                 tool_call_result=tool_call_result,
@@ -675,6 +667,27 @@ class ToolCallingLLM:
         )
         approval = tool.requires_approval(params, context)
         return not approval or not approval.needs_approval
+
+    def _emit_token_count(
+        self,
+        messages: list[dict],
+        tools: Optional[list],
+        full_response: Any,
+        limit_result: Any,
+        metadata: Dict[Any, Any],
+        stats: RequestStats,
+    ) -> StreamMessage:
+        """Build a TOKEN_COUNT event with current token usage and costs."""
+        tokens = self.llm.count_tokens(messages=messages, tools=tools)
+        add_token_count_to_metadata(
+            tokens=tokens,
+            full_llm_response=full_response,
+            max_context_size=limit_result.max_context_size,
+            maximum_output_token=limit_result.maximum_output_token,
+            metadata=metadata,
+        )
+        metadata["costs"] = stats.model_dump()
+        return build_stream_event_token_count(metadata=metadata)
 
     def call_stream(
         self,
@@ -810,16 +823,7 @@ class ToolCallingLLM:
                 )
             )
 
-            tokens = self.llm.count_tokens(messages=messages, tools=tools)
-            add_token_count_to_metadata(
-                tokens=tokens,
-                full_llm_response=full_response,
-                max_context_size=limit_result.max_context_size,
-                maximum_output_token=limit_result.maximum_output_token,
-                metadata=metadata,
-            )
-            metadata["costs"] = stats.model_dump()
-            yield build_stream_event_token_count(metadata=metadata)
+            yield self._emit_token_count(messages, tools, full_response, limit_result, metadata, stats)
 
             tools_to_call = getattr(response_message, "tool_calls", None)
             if not tools_to_call:
@@ -933,16 +937,7 @@ class ToolCallingLLM:
                         )
 
                 # Emit updated token counts after tool results
-                tokens = self.llm.count_tokens(messages=messages, tools=tools)
-                add_token_count_to_metadata(
-                    tokens=tokens,
-                    full_llm_response=full_response,
-                    max_context_size=limit_result.max_context_size,
-                    maximum_output_token=limit_result.maximum_output_token,
-                    metadata=metadata,
-                )
-                metadata["costs"] = stats.model_dump()
-                yield build_stream_event_token_count(metadata=metadata)
+                yield self._emit_token_count(messages, tools, full_response, limit_result, metadata, stats)
 
                 # If we have approval required tools, end the stream with pending approvals
                 if pending_approvals:
