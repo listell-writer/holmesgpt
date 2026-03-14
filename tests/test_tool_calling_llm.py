@@ -331,9 +331,12 @@ class TestApprovalCallbackFlow:
         # Tool was re-executed via process_tool_decisions (second _invoke_llm_tool_call call)
         assert ai._invoke_llm_tool_call.call_count == 2
 
-        # Final result includes the approved tool
+        # Final result includes the approved tool, deduplicated
         assert result.result == "Pod deleted"
-        assert len(result.tool_calls) >= 1
+        tool_call_ids = [tc.tool_call_id for tc in result.tool_calls]
+        assert len(tool_call_ids) == len(set(tool_call_ids)), "Duplicate tool_call_id in result"
+        assert "tc_del" in tool_call_ids
+        assert len(result.tool_calls) == 1
 
     @patch(LIMIT_PATCH, side_effect=_make_context_limiter_passthrough)
     def test_approval_denied_with_feedback(self, _mock_limit, make_ai, mock_llm):
@@ -1105,7 +1108,10 @@ class TestApprovalViaReinvocation:
         result = ai.call([{"role": "user", "content": "Get pods and delete one"}])
 
         assert result.result == "Done"
-        # Both tools should appear in tool_calls
+        # Both tools should appear exactly once (deduplicated)
+        tool_call_ids = [tc.tool_call_id for tc in result.tool_calls]
+        assert len(tool_call_ids) == len(set(tool_call_ids)), "Duplicate tool_call_id in result"
+        assert set(tool_call_ids) == {"tc_ok", "tc_del"}
         tool_names = [tc.tool_name for tc in result.tool_calls]
         assert "kubectl_get" in tool_names
         assert "kubectl_delete" in tool_names
