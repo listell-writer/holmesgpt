@@ -607,9 +607,9 @@ class AgenticProgressRenderer:
             display.append("Thinking", style=f"bold {AI_COLOR}")
             dots = "." * (int(elapsed * 2) % 4)
             display.append(f"{dots:<4}", style=f"bold {AI_COLOR}")
-            display.append("\n")  # Blank line so panels don't run into the spinner
             if self._escape_hint:
-                display.append(f"  {self._escape_hint}", style="dim")
+                display.append(f"    {self._escape_hint}", style="dim")
+            display.append("\n")  # Blank line so errors don't run into the spinner
             return display
 
         left = self._build_left_pane(
