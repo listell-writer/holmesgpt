@@ -118,41 +118,93 @@ The toolset provides instructions that tell the LLM:
 - Include authentication in the `headers` parameter — ask the user for credentials if not provided
 - Use `jq` and `max_depth` to keep responses manageable
 
-## Approval Protocol
+## Approval Protocol — Current State
 
-### How Tool Approval Works After Refactoring
+> **Last updated after merging master (PR #1765, 2026-03-15).** The `call()` / `call_stream()` refactoring is now on master. This section reflects the actual code, not the pre-refactoring state.
 
-> **Context:** The `call()` / `call_stream()` refactoring (branch `claude/refactor-tool-calling-streaming-thzaD`) unified the two independent agentic loops. `call_stream()` is now the single source of truth; `call()` is a thin wrapper that drains the stream. This eliminated `_handle_tool_call_approval()` and `messages_call()`. Both CLI and server now follow the same event-driven approval path.
+### Architecture
 
-**Single approval path (both CLI and server):**
-1. Tool returns `APPROVAL_REQUIRED` status during tool execution inside `call_stream()`
-2. `call_stream()` emits `APPROVAL_REQUIRED` event with `PendingToolApproval` data + `tool_results` map (full `StructuredToolResult` objects, keyed by `tool_call_id`)
-3. Stream **stops**
+`call_stream()` is the single agentic loop. `call()` is a thin wrapper that drains the stream. Both CLI and server use the same event-driven approval path.
 
-**Server path:** Client makes a new POST request with `ToolApprovalDecision` list.
+**Key types:**
 
-**CLI path:** `call()` wrapper catches the `APPROVAL_REQUIRED` event, calls `_build_approval_decisions()` which invokes `self.approval_callback(tool_result)` for each pending tool, then re-invokes `call_stream()` with the resulting `tool_decisions`. This is transparent — the `while True` loop in `call()` handles the round-trip.
-
-Both paths converge on `process_tool_decisions()` which executes approved tools and inserts results into the message history.
-
-**`ToolApprovalDecision`** now has a `feedback` field:
 ```python
+# tool_calling_llm.py:137 — callback signature
+ApprovalCallback = Callable[[PendingToolApproval], tuple[bool, Optional[str]]]
+
+# models.py:83-89 — what the callback receives
+class PendingToolApproval(BaseModel):
+    tool_call_id: str
+    tool_name: str
+    description: str       # parameterized one-liner from tool
+    params: Dict[str, Any] # the tool's params (contains suggested_prefixes for bash)
+
+# models.py:92-98 — what the user sends back
 class ToolApprovalDecision(BaseModel):
     tool_call_id: str
     approved: bool
-    save_prefixes: Optional[List[str]] = None
-    feedback: Optional[str] = None  # User feedback when denying
+    save_prefixes: Optional[List[str]] = None  # server-path bash session memory
+    feedback: Optional[str] = None             # user feedback when denying
 ```
 
-### What's Still Bash-Specific in the Framework
+**Approval callback receives `PendingToolApproval`, not `StructuredToolResult`.** This was changed in the master merge. The callback no longer has access to `tool_result.invocation` directly — it uses `pending_approval.description` (which is `tool.get_parameterized_one_liner(params)`) and `pending_approval.params` for display.
 
-Despite the refactoring, the framework (`tool_calling_llm.py`) still has bash-specific code at these sites:
+### How `call()` handles approval (CLI path)
 
-1. **`extract_bash_session_prefixes(messages)`** — called at line 326 in `process_tool_decisions()` and line 964 in `call_stream()`'s main loop
-2. **`session_approved_prefixes` parameter threading** — passed through 4 layers: `call_stream()` → `_invoke_llm_tool_call()` → `_get_tool_call_result()` → `_directly_invoke_tool_call()` → `ToolInvokeContext`
-3. **`save_prefixes` storage** — `process_tool_decisions()` line 365-371 checks `decision.save_prefixes` and writes `bash_session_approved_prefixes` into message metadata
+```python
+# tool_calling_llm.py:316-411 — call() is a while-True loop
+def call(self, messages, ..., approval_callback=None) -> LLMResult:
+    while True:
+        stream = self.call_stream(msgs=messages, enable_tool_approval=approval_callback is not None, ...)
+        for event in stream:
+            if event.event == StreamEvents.APPROVAL_REQUIRED:
+                messages = event.data["messages"]
+                tool_decisions = self._prompt_for_approval_decisions(
+                    event.data["pending_approvals"], approval_callback
+                )
+                break  # → loops back, re-invokes call_stream with tool_decisions
+            elif event.event == StreamEvents.ANSWER_END:
+                return LLMResult(...)
+```
 
-Adding HTTP ad-hoc would mean duplicating all of this. The solution remains the same as originally planned: give tools access to conversation history and let them manage their own session state.
+`_prompt_for_approval_decisions()` (line 413-452):
+1. Wraps each `pending_approvals` dict as `PendingToolApproval`
+2. Re-checks if approval is still needed via `_is_tool_call_already_approved(tool_name, params)` — reads bash allow list from disk
+3. Calls `approval_callback(approval)` → blocks, user picks Yes/No
+4. Returns `List[ToolApprovalDecision]`
+
+**Key change from pre-merge:** `approval_callback` is now a **parameter** of `call()`, not an attribute of `self`. It's also not passed to `call_stream()` — only `enable_tool_approval: bool` is. The callback lives entirely in the `call()` wrapper layer.
+
+### How `call_stream()` handles approval (server path)
+
+`call_stream()` emits `APPROVAL_REQUIRED` and returns. Client makes a new request with `tool_decisions`. On re-entry, `call_stream()` calls `_execute_tool_decisions()` (formerly `process_tool_decisions()`).
+
+The `APPROVAL_REQUIRED` event no longer carries `tool_results` (the `StructuredToolResult` map). It only carries:
+```python
+{
+    "content": None,
+    "messages": messages,
+    "pending_approvals": [approval.model_dump() for approval in pending_approvals],
+    "requires_approval": True,
+    "num_llm_calls": i,
+    "costs": stats.model_dump(),
+}
+```
+
+### What's Bash-Specific in the Framework
+
+The framework (`tool_calling_llm.py`) still has bash-specific code:
+
+1. **`extract_bash_session_prefixes(messages)`** (line 93-133) — called at line 244 in `_execute_tool_decisions()` and line 869 in `call_stream()`'s main loop
+2. **`session_approved_prefixes` parameter threading** — passed through 3 layers: `_invoke_llm_tool_call()` (line 561) → `_directly_invoke_tool_call()` (line 461) → `ToolInvokeContext` (line 492). Note: `_get_tool_call_result()` was inlined into `_invoke_llm_tool_call()` in the master merge.
+3. **`save_prefixes` storage** — `_execute_tool_decisions()` lines 282-289 checks `decision.save_prefixes` and writes `bash_session_approved_prefixes` into message metadata
+4. **`_is_tool_call_already_approved()`** (line 642-664) — constructs a `ToolInvokeContext` with `session_approved_prefixes` to re-check
+
+### The `suggested_prefixes` Mutation
+
+When `Tool.invoke()` (tools.py:287-301) gets `ApprovalRequirement` back with `prefixes_to_save`, it **overwrites** `params["suggested_prefixes"]` with only the prefixes that need approval (removing already-allowed ones). This narrowed list then appears in `PendingToolApproval.params.suggested_prefixes` — which is what the CLI shows ("don't ask again for X commands") and what the server client can send back as `save_prefixes`.
+
+The mutation serves two purposes: (1) display only what's new, (2) save only what's new. But it conflates the tool's validation input with the approval UI data by reusing the same field.
 
 ### How Non-Bash Approval Works Today (MCP, Remediation)
 
@@ -178,7 +230,7 @@ In short: non-bash tools get one-time approval only. There is no session persist
 
 **`PendingToolApproval`** — no changes. It already carries `tool_name` and `params`, which is tool-agnostic. For `http_adhoc_request`, `params` contains `url`, `method`, `suggested_endpoint`, etc. The client renders the approval UI based on `tool_name`.
 
-**`ToolApprovalDecision`** — no changes needed for HTTP ad-hoc. The `feedback` field (added by the refactoring) already covers denial feedback.
+**`ToolApprovalDecision`** — no changes needed for HTTP ad-hoc. The `feedback` field already covers denial feedback.
 
 **`ApprovalRequirement`** — no changes. Stays as `needs_approval: bool` + `reason: str`. Tool-specific save data (prefixes, endpoints) is **not** on this model — each tool manages its own session persistence.
 
@@ -252,7 +304,7 @@ Clean, tool-agnostic.
 
 ### How Session State Flows (CLI Path)
 
-Same as server. The `call()` wrapper's `while True` loop handles the `APPROVAL_REQUIRED` → `_build_approval_decisions()` → re-invoke `call_stream(tool_decisions=...)` round-trip automatically. The tool can additionally persist to a file (`~/.holmes/http_approved_endpoints.yaml`) for cross-session memory. This is done inside the tool — the framework doesn't know about it. Same pattern as bash's `cli_prefixes.py`.
+Same as server. The `call()` wrapper's `while True` loop handles the `APPROVAL_REQUIRED` → `_prompt_for_approval_decisions()` → re-invoke `call_stream(tool_decisions=...)` round-trip automatically. The tool can additionally persist to a file (`~/.holmes/http_approved_endpoints.yaml`) for cross-session memory. This is done inside the tool — the framework doesn't know about it. Same pattern as bash's `cli_prefixes.py`.
 
 ### Existing Client Compatibility
 
@@ -268,7 +320,7 @@ The plan proposes `session_metadata` on `StructuredToolResult` as the tool-agnos
 
 **Option A: Migrate bash to session_metadata now (as part of this PR)**
 - Remove `extract_bash_session_prefixes()` from framework, move into bash tool
-- Remove `save_prefixes` handling from `process_tool_decisions()` — bash tool writes its own `session_metadata`
+- Remove `save_prefixes` handling from `_execute_tool_decisions()` — bash tool writes its own `session_metadata`
 - Remove `session_approved_prefixes` from `ToolInvokeContext` — bash reads from `context.messages`
 - Remove `prefixes_to_save` from `ApprovalRequirement` — bash handles param rewriting in `requires_approval()`
 - **Pro:** Clean cut. Framework becomes fully tool-agnostic in one PR. No two parallel mechanisms.
@@ -292,7 +344,7 @@ The plan proposes `session_metadata` on `StructuredToolResult` as the tool-agnos
 The server API currently accepts `save_prefixes` from clients. If bash migrates to `session_metadata`, clients sending `save_prefixes` would have no effect.
 
 **Option A: Keep accepting, ignore silently**
-- `process_tool_decisions()` stops writing `bash_session_approved_prefixes` to metadata from `save_prefixes`
+- `_execute_tool_decisions()` stops writing `bash_session_approved_prefixes` to metadata from `save_prefixes`
 - Old clients still work — approval succeeds, session memory works via `session_metadata` from the tool
 - **Pro:** No breaking change.
 - **Con:** Silent behavior change — client thinks it's saving prefixes but the tool is doing it.
@@ -314,48 +366,74 @@ The server API currently accepts `save_prefixes` from clients. If bash migrates 
 
 ### Decision 3: CLI approval UI — generic or tool-specific rendering?
 
-The `handle_tool_approval()` function in `interactive.py` currently shows a bash-specific prompt. With HTTP ad-hoc, it needs to handle a second tool type.
+The `handle_tool_approval()` function in `interactive.py` currently receives a `PendingToolApproval` (changed from `StructuredToolResult` in the master merge). It shows a bash-specific prompt. With HTTP ad-hoc, it needs to handle a second tool type.
 
 **Option A: Tool provides its own approval display text**
-- Add a method like `get_approval_display(params) -> str` to `Tool` base class
-- `handle_tool_approval()` calls it and renders the string
+- Add a method like `get_approval_display(params) -> ApprovalDisplayInfo` to `Tool` base class, returning structured display data (title, description, save_option_label)
+- `handle_tool_approval()` calls it and renders generically
 - Each tool controls its own presentation
 - **Pro:** Fully extensible. Adding a new approval-aware tool requires zero changes to `interactive.py`.
-- **Con:** Couples display logic to tool classes. Bash tool needs to implement it too.
+- **Con:** Need a way for `handle_tool_approval()` to look up the tool object from `tool_name`. Currently it only receives `PendingToolApproval`, not the tool instance.
 
 **Option B: Switch on tool_name in handle_tool_approval**
 - `if tool_name == "bash": ...bash UI... elif tool_name == "http_adhoc_request": ...http UI...`
 - **Pro:** Simple, explicit. Two tools = two branches.
 - **Con:** Doesn't scale. But we only have two tools.
 
-**Option C: Generic display from params**
-- Show tool name + all params as a formatted dict. No tool-specific rendering.
-- **Pro:** Zero per-tool work.
-- **Con:** Ugly for users. `suggested_endpoint` as raw JSON is hard to read.
+**Option C: Generic display from PendingToolApproval fields**
+- Show `pending_approval.description` (already the parameterized one-liner) + tool_name
+- For the "remember" option: always show it if `params` has keys the tool wants to save
+- **Pro:** Zero per-tool work. Uses data already on `PendingToolApproval`.
+- **Con:** Less polished. "Bash command" header becomes just the tool name.
 
-**Recommendation:** Option A. The refactoring made `_build_approval_decisions()` generic — it calls `self.approval_callback(tool_result)` regardless of tool type. The callback receives a `StructuredToolResult` which has `invocation` and `params`. The tool can provide a formatted string via a method, keeping `interactive.py` tool-agnostic.
+**Recommendation:** Option B for now. Two tools, two branches. Migrate to Option A if a third approval-aware tool appears.
 
-### Decision 4: Should `_build_approval_decisions` pass messages to the re-check?
+### Decision 4: Should `_prompt_for_approval_decisions` pass messages to the re-check?
 
-Currently `_build_approval_decisions()` (line 510-552) re-checks approval via `_is_tool_call_already_approved()`. This method reads the bash toolset's allow list from disk. After the migration, the re-check would need to scan `messages` for `session_metadata` instead.
+Currently `_prompt_for_approval_decisions()` (line 413-452) re-checks approval via `_is_tool_call_already_approved(tool_name, params)`. This constructs a `ToolInvokeContext` with empty `session_approved_prefixes` — it only checks disk state (config allow list + CLI-saved prefixes file). It does NOT check message-based session state.
+
+After adding `messages` to `ToolInvokeContext`, the re-check could also pass messages so tools can check their own session state.
 
 **Option A: Pass messages to _is_tool_call_already_approved**
-- The method checks both disk state and message-based session state
-- **Pro:** Correct for both bash (disk) and HTTP ad-hoc (messages).
-- **Con:** `_is_tool_call_already_approved` gets more complex.
+- Add `messages` parameter, pass to `ToolInvokeContext`
+- Tools check both disk state and message-based session state
+- **Pro:** Correct for both bash (disk + messages) and HTTP ad-hoc (messages only).
+- **Con:** Need to thread `messages` from `call()` into `_prompt_for_approval_decisions`. Currently `call()` has `messages` (line 393) but doesn't pass it through.
 
-**Option B: Remove the re-check, let process_tool_decisions handle it**
-- `_build_approval_decisions` always prompts. `process_tool_decisions` invokes with `user_approved=True`, tool's own `_invoke` can skip the request if it wants.
-- **Pro:** Simpler. The re-check is an optimization for batch approval (tool A approves a prefix that tool B also needs).
-- **Con:** Extra approval prompts in batch scenarios. Rare but annoying.
+**Option B: Remove the re-check entirely**
+- `_prompt_for_approval_decisions` always prompts. The re-check is an optimization for batch approval (tool A approves a prefix that tool B also needs in the same batch).
+- **Pro:** Simplest. The re-check only matters for same-batch prefix overlap, which is rare.
+- **Con:** Extra approval prompts in batch scenarios.
 
-**Option C: Let the tool itself decide during _build_approval_decisions**
-- Call `tool.requires_approval(params, context_with_messages)` again in the re-check
-- The tool knows its own session state best
-- **Pro:** Clean separation. Framework delegates to tool.
-- **Con:** Need to construct a `ToolInvokeContext` with current messages. More plumbing.
+**Option C: Pass messages, let the tool decide**
+- `_is_tool_call_already_approved` constructs a `ToolInvokeContext` with messages, calls `tool.requires_approval(params, context)` — the tool checks its own session state
+- **Pro:** Clean separation. Already how it works, just needs `messages` added to the context.
+- **Con:** Minimal additional complexity.
 
-**Recommendation:** Option C aligns best with the "tools manage their own state" principle. But Option A is simpler for now if we want to ship faster.
+**Recommendation:** Option C. It's already doing `tool.requires_approval(params, context)` — just add `messages` to the context so the tool has full state.
+
+### Decision 5: How does the `suggested_prefixes` param mutation work after migration?
+
+Currently `Tool.invoke()` (tools.py:293-295) mutates `params["suggested_prefixes"]` using `ApprovalRequirement.prefixes_to_save`. If we remove `prefixes_to_save` from `ApprovalRequirement`, the mutation needs to move somewhere.
+
+**Option A: Move mutation into bash's `requires_approval()`**
+- `requires_approval()` already computes the filtered list. Instead of returning it on `ApprovalRequirement`, it directly mutates `params["suggested_prefixes"]` before returning.
+- **Pro:** Self-contained in bash tool. `ApprovalRequirement` becomes tool-agnostic.
+- **Con:** `requires_approval()` currently doesn't mutate params — it's a query method. Making it mutate is a subtle contract change.
+
+**Option B: Bash tool filters in `_invoke()` instead**
+- When `_invoke()` runs after approval (`context.user_approved=True`), it writes `session_metadata` with only the new prefixes. The pre-approval filtering was just for display — the tool can figure out what's new at execution time.
+- The "don't ask again for X" label in the CLI uses whatever is in `params["suggested_prefixes"]` — which would be the full unfiltered list.
+- **Pro:** No mutation anywhere. Clean data flow.
+- **Con:** CLI shows "don't ask again for kubectl get, grep" even though `kubectl get` is already allowed. Confusing UX.
+
+**Option C: Keep `prefixes_to_save` on `ApprovalRequirement` but rename it**
+- Rename to something generic like `approval_display_data: Optional[Dict]` or `save_hint: Optional[Any]`
+- `Tool.invoke()` passes it through to `StructuredToolResult.params` under a generic key
+- **Pro:** Mutation stays in the base class. Works for any tool.
+- **Con:** Still couples the base class to the concept of "things to save."
+
+**Recommendation:** Option A. `requires_approval()` is already tool-specific — bash's override computes the filtered list. Having it mutate `params` before returning is pragmatic and keeps the display correct. The method name doesn't imply it's pure.
 
 ## Alternatives Considered
 
@@ -399,7 +477,7 @@ Currently `_build_approval_decisions()` (line 510-552) re-checks approval via `_
 
 **Idea:** Add `session_approved_endpoints` to `ToolInvokeContext` and `endpoints_to_save` to `ApprovalRequirement`, mirroring how bash uses `session_approved_prefixes` and `prefixes_to_save`.
 
-**Why not:** This makes the framework aware of every approval-aware tool's session format. The framework currently has bash-specific extraction (`extract_bash_session_prefixes`), threading (`session_approved_prefixes` parameter through 4-5 call layers), and storage (`save_prefixes` → `bash_session_approved_prefixes` in metadata) — all in `tool_calling_llm.py`. Adding HTTP ad-hoc would duplicate all of this. Every future approval-aware tool would need more framework changes.
+**Why not:** This makes the framework aware of every approval-aware tool's session format. The framework currently has bash-specific extraction (`extract_bash_session_prefixes`), threading (`session_approved_prefixes` parameter through 3 call layers), and storage (`save_prefixes` → `bash_session_approved_prefixes` in metadata) — all in `tool_calling_llm.py`. Adding HTTP ad-hoc would duplicate all of this. Every future approval-aware tool would need more framework changes.
 
 Instead, pass the conversation `messages` on `ToolInvokeContext` and let each tool extract its own session data. Add `session_metadata` on `StructuredToolResult` for tools to pass opaque session data back. The framework passes it through without understanding it. This is a small refactor of the bash tool but eliminates all tool-specific code from the framework.
 
@@ -419,19 +497,19 @@ These changes decouple session state from the framework. They're needed regardle
    - `ToolInvokeContext`: add `messages: List[Dict[str, Any]] = []` (conversation history)
    - `StructuredToolResult`: add `session_metadata: Optional[Dict[str, Any]] = None`
    - `ApprovalRequirement`: remove `prefixes_to_save` (Decision 1A/C only; keep if 1B)
-   - `Tool.invoke()`: remove `prefixes_to_save` handling at lines 293-295 (Decision 1A/C only). Bash tool handles param rewriting in its own `requires_approval()`.
+   - `Tool.invoke()`: remove `prefixes_to_save` handling at lines 293-295 (Decision 1A/C only). Bash tool handles param rewriting in its own `requires_approval()` (Decision 5A).
 
 2. **`holmes/core/models.py`**
-   - `format_tool_result_data()`: pass through `session_metadata` from `StructuredToolResult` into `tool_call_metadata`
+   - `format_tool_result_data()`: if `tool_result.session_metadata` is not None, merge it into `tool_call_metadata`
 
-3. **`holmes/core/tool_calling_llm.py`** — pass `messages` to `ToolInvokeContext`
-   - `_directly_invoke_tool_call()` (line 585): add `messages` parameter, pass to `ToolInvokeContext`
-   - `_get_tool_call_result()` (line 617): thread `messages` through
-   - `_invoke_llm_tool_call()` (line 714): thread `messages` through
-   - `call_stream()` main loop (line 966): pass `messages` to `_invoke_llm_tool_call()`
-   - `process_tool_decisions()` (line 334): pass `messages` to `_invoke_llm_tool_call()`
+3. **`holmes/core/tool_calling_llm.py`** — pass `messages` to tool invocation chain
+   - `_directly_invoke_tool_call()` (line 454): add `messages` parameter, pass to `ToolInvokeContext` constructor (line 485)
+   - `_invoke_llm_tool_call()` (line 554): add `messages` parameter, thread to `_directly_invoke_tool_call()` (line 606)
+   - `call_stream()` main loop (line 877): pass `messages` to `_invoke_llm_tool_call()`
+   - `_execute_tool_decisions()` (line 251): pass `messages` to `_invoke_llm_tool_call()`
+   - `_is_tool_call_already_approved()` (line 642): add optional `messages` parameter, pass to `ToolInvokeContext` (Decision 4C)
 
-   **If Decision 1A:** Also remove `extract_bash_session_prefixes` calls (lines 326, 964), remove `session_approved_prefixes` parameter from the 4-layer chain, remove `save_prefixes` handling in `process_tool_decisions` (lines 363-371).
+   **If Decision 1A:** Also remove `extract_bash_session_prefixes` calls (lines 244, 869), remove `session_approved_prefixes` parameter from the invocation chain, remove `save_prefixes` handling in `_execute_tool_decisions` (lines 282-289).
 
    **If Decision 1B/C:** Keep existing bash code, add `messages` alongside `session_approved_prefixes`.
 
@@ -439,7 +517,7 @@ These changes decouple session state from the framework. They're needed regardle
 
 4. **`holmes/plugins/toolsets/bash/bash_toolset.py`**
    - `requires_approval()`: extract session prefixes from `context.messages` instead of `context.session_approved_prefixes`
-   - `requires_approval()`: handle `suggested_prefixes` param rewriting internally (moved from base `Tool.invoke()`)
+   - `requires_approval()`: mutate `params["suggested_prefixes"]` with filtered list (moved from base `Tool.invoke()`, Decision 5A)
    - `_invoke()`: on successful execution after approval, set `result.session_metadata = {"bash_session_approved_prefixes": [...]}`
 
 5. **Update bash tests**
@@ -469,9 +547,10 @@ These changes decouple session state from the framework. They're needed regardle
 
 ### Phase 4: CLI Approval UI
 
-9. **`holmes/interactive.py`** (depends on Decision 3)
-   - **If 3A:** Add `get_approval_display()` method to `Tool` base class. `handle_tool_approval()` calls it. Bash and HTTP ad-hoc each implement their own rendering.
-   - **If 3B:** Add `elif tool_name == "http_adhoc_request"` branch to `handle_tool_approval()`.
+9. **`holmes/interactive.py`** (Decision 3B)
+   - Add `elif pending_approval.tool_name == "http_adhoc_request"` branch in `handle_tool_approval()`
+   - Show: host, path patterns, methods from `pending_approval.params["suggested_endpoint"]`
+   - Two options only: Yes / No+feedback (no "remember" option — HTTP ad-hoc always remembers)
 
 ### Phase 5: Registration + Tests
 
