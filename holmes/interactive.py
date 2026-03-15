@@ -444,15 +444,12 @@ class AgenticProgressRenderer:
         for i, idx in enumerate(range(start, end)):
             line = self._data_lines[idx]
 
-            # Gradient: top lines dim, center bright, bottom dim
-            row_in_window = i
-            dist_from_center = abs(row_in_window - visible // 2)
-            if dist_from_center <= 1:
-                style = "bold"
-            elif dist_from_center <= 3:
-                style = ""
-            else:
+            # Edge fade: dim top/bottom 2 lines to hint at more content
+            rows_in_window = end - start
+            if i <= 1 or i >= rows_in_window - 2:
                 style = "dim"
+            else:
+                style = ""
 
             pane.append(f" {line}", style=style)
             if i < end - start - 1:
@@ -694,6 +691,8 @@ class AgenticProgressRenderer:
                 tools_text.append("\n")
             if tools_text.plain.endswith("\n"):
                 tools_text.right_crop(1)
+            tools_text.append("\n")
+            tools_text.append("  /show <number> to view full output", style="dim italic")
             tool_count = len(self._tool_history)
             self._console.print(
                 Panel(tools_text, title=f"[bold]Tools[/bold] [dim]{tool_count}[/dim]",
