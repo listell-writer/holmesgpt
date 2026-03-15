@@ -120,9 +120,7 @@ class TestMCPGeneral:
             "qty": ToolParameter(
                 type="integer", required=True, description="example for description"
             ),
-            "side": ToolParameter(
-                type="string", required=True, enum=["buy", "sell"]
-            ),
+            "side": ToolParameter(type="string", required=True, enum=["buy", "sell"]),
             "limit_price": ToolParameter(type="number", required=False),
         }
 
@@ -290,6 +288,119 @@ class TestMCPGeneral:
         assert config_param.properties["name"].required is True
         assert config_param.properties["enabled"].type == "boolean"
         assert config_param.properties["enabled"].required is False
+
+    @pytest.mark.usefixtures("suppress_migration_warnings")
+    def test_schema_with_refs_and_anyof_parsed_correctly(self) -> None:
+        """Test that schema with $ref and anyOf is parsed correctly."""
+        mcp_tool = Tool(
+            name="get_incident",
+            inputSchema={
+                "$defs": {
+                    "GetIncidentQuery": {
+                        "description": "Query model for retrieving a specific incident with optional parameters.",
+                        "properties": {
+                            "include": {
+                                "anyOf": [
+                                    {"items": {"type": "string"}, "type": "array"},
+                                    {"type": "null"},
+                                ],
+                                "default": None,
+                                "description": "List of additional information to include in the response. Available options: 'users', 'services', 'assignments', 'acknowledgers', 'custom_fields', 'teams', 'escalation_policies', 'notes', 'urgencies', 'priorities'",
+                            }
+                        },
+                        "type": "object",
+                    }
+                },
+                "properties": {
+                    "incident_id": {"type": "string"},
+                    "query_model": {
+                        "anyOf": [
+                            {"$ref": "#/$defs/GetIncidentQuery"},
+                            {"type": "null"},
+                        ],
+                        "default": None,
+                    },
+                },
+                "required": ["incident_id"],
+                "type": "object",
+            },
+            description="Get incident details",
+            annotations=None,
+        )
+        expected_schema = {
+            "incident_id": ToolParameter(type="string", required=True),
+            "query_model": ToolParameter(
+                type="object",
+                required=False,
+                description="Query model for retrieving a specific incident with optional parameters.",
+                properties={
+                    "include": ToolParameter(
+                        type="array",
+                        description="List of additional information to include in the response. Available options: 'users', 'services', 'assignments', 'acknowledgers', 'custom_fields', 'teams', 'escalation_policies', 'notes', 'urgencies', 'priorities'",
+                        required=False, items=ToolParameter(type="string", required=True, description=None)
+                    ),
+                },
+            ),
+        }
+        mock_toolset = RemoteMCPToolset(
+            name="test_toolset",
+            description="Test toolset",
+            config={"url": "http://localhost:1234"},
+        )
+        tool = RemoteMCPTool.create(mcp_tool, mock_toolset)
+        assert tool.parameters == expected_schema
+
+    @pytest.mark.usefixtures("suppress_migration_warnings")
+    def test_schema_with_allof_parsed_correctly(self) -> None:
+        """Test that schema with allOf merges sub-schemas correctly."""
+        mcp_tool = Tool(
+            name="update_user",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "user_data": {
+                        "allOf": [
+                            {
+                                "type": "object",
+                                "properties": {
+                                    "id": {"type": "string", "description": "The ID of the user"},
+                                    "name": {"type": "string", "description": "The name of the user"}
+                                },
+                                "required": ["id"]
+                            },
+                            {
+                                "type": "object",
+                                "properties": {
+                                    "email": {"type": "string", "description": "The email of the user"},
+                                    "age": {"type": "integer", "description": "The age of the user"}
+                                },
+                                "required": ["email"]
+                            }
+                        ]
+                    }
+                },
+                "required": ["user_data"]
+            },
+            description="Update user data",
+            annotations=None,
+        )
+
+        expected_schema = {
+            "user_data": ToolParameter(type="object", required=True, properties={
+                "id": ToolParameter(type="string", required=True, description="The ID of the user"),
+                "name": ToolParameter(type="string", required=False, description="The name of the user"),
+                "email": ToolParameter(type="string", required=True, description="The email of the user"),
+                "age": ToolParameter(type="integer", required=False, description="The age of the user"),
+            }),
+        }
+
+        mock_toolset = RemoteMCPToolset(
+            name="test_toolset",
+            description="Test toolset",
+            config={"url": "http://localhost:1234"},
+        )
+        tool = RemoteMCPTool.create(mcp_tool, mock_toolset)
+        assert tool.parameters == expected_schema
 
     def test_unreachable_server_returns_error(self, suppress_migration_warnings):
         mcp_toolset = RemoteMCPToolset(
@@ -1799,7 +1910,7 @@ class TestRequestContextPassthrough:
 class TestMCPExtraHeadersPreservedDuringEnvResolution:
     """Verify that load_toolsets_from_config does NOT resolve extra_headers templates.
 
-    extra_headers use Jinja2 templates like {{ env.AUTO_GENERATED_GITHUB_TOKEN }}
+    extra_headers use Jinja2 templates like {{ env.SOME_DYNAMIC_TOKEN }}
     that must be rendered at request time (so they pick up refreshed tokens).
     replace_env_vars_values uses the same {{ env.X }} syntax and would bake in
     stale values at config-load time if extra_headers were not excluded.
@@ -1809,22 +1920,22 @@ class TestMCPExtraHeadersPreservedDuringEnvResolution:
         "os.environ",
         {
             "MY_STATIC_VAR": "resolved_value",
-            "AUTO_GENERATED_GITHUB_TOKEN": "ghs_initial",
+            "SOME_DYNAMIC_TOKEN": "initial_token",
         },
     )
     def test_extra_headers_templates_not_resolved(self):
         toolsets_config = {
-            "github": {
+            "my_mcp": {
                 "type": "mcp",
-                "description": "GitHub MCP",
+                "description": "Test MCP",
                 "config": {
-                    "url": "https://api.githubcopilot.com/mcp",
+                    "url": "https://example.com/mcp",
                     "mode": "streamable-http",
                     "headers": {
                         "X-Static": "{{ env.MY_STATIC_VAR }}",
                     },
                     "extra_headers": {
-                        "Authorization": "Bearer {{ env.AUTO_GENERATED_GITHUB_TOKEN }}",
+                        "Authorization": "Bearer {{ env.SOME_DYNAMIC_TOKEN }}",
                     },
                 },
             }
@@ -1833,7 +1944,7 @@ class TestMCPExtraHeadersPreservedDuringEnvResolution:
         # load_toolsets_from_config will fail to connect to the MCP server,
         # but we only care about the config resolution, not the connection.
         # Catch the validation error and inspect the config dict directly.
-        config = copy.deepcopy(toolsets_config["github"])
+        config = copy.deepcopy(toolsets_config["my_mcp"])
 
         # Simulate the pop/restore logic from load_toolsets_from_config
         saved_extra_headers = config["config"].pop("extra_headers", None)
@@ -1845,7 +1956,7 @@ class TestMCPExtraHeadersPreservedDuringEnvResolution:
         # extra_headers should still have the raw template (NOT resolved)
         assert (
             config["config"]["extra_headers"]["Authorization"]
-            == "Bearer {{ env.AUTO_GENERATED_GITHUB_TOKEN }}"
+            == "Bearer {{ env.SOME_DYNAMIC_TOKEN }}"
         )
 
         # regular headers SHOULD be resolved by replace_env_vars_values
