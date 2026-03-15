@@ -53,6 +53,7 @@ class SupportedTicketSources(str, Enum):
 
 class Config(RobustaBaseConfig):
     model: Optional[str] = None
+    _model_source: Optional[str] = None  # tracks where the model was set from
     api_key: Optional[SecretStr] = (
         None  # if None, read from OPENAI_API_KEY or AZURE_OPENAI_ENDPOINT env var
     )
@@ -183,10 +184,18 @@ class Config(RobustaBaseConfig):
         if config_file is not None and config_file.exists():
             result._config_file_path = config_file
 
+        # Track where the model setting came from
+        if "model" in cli_options:
+            pass  # CLI --model flag: no source label needed (user just typed it)
+        elif config_from_file is not None and config_from_file.model is not None:
+            result._model_source = f"defined in {config_file}"
+        # Fall through to env var check below
+
         if result.model is None:
             model_from_env = os.environ.get("MODEL")
             if model_from_env and model_from_env.strip():
                 result.model = model_from_env
+                result._model_source = "defined in $MODEL"
 
         result.log_useful_info()
         return result
@@ -222,6 +231,8 @@ class Config(RobustaBaseConfig):
         kwargs["cluster_name"] = Config.__get_cluster_name()
         kwargs["should_try_robusta_ai"] = True
         result = cls(**kwargs)
+        if "model" in kwargs:
+            result._model_source = "defined in $MODEL"
         result.log_useful_info()
         return result
 
@@ -541,7 +552,8 @@ class Config(RobustaBaseConfig):
         )  # type: ignore
         context_size = self._format_token_count(llm.get_context_window_size())
         max_response = self._format_token_count(llm.get_maximum_output_token())
-        msg = f"Model: {model_name} ({context_size} context, {max_response} max response)"
+        source_label = f" ({self._model_source})" if self._model_source else ""
+        msg = f"Model: {model_name}{source_label} ({context_size} context, {max_response} max response)"
         display_logger.info(msg)
         if on_event is not None:
             on_event(StatusEvent(kind=StatusEventKind.MODEL_LOADED, name=model_name, message=msg))

@@ -580,7 +580,8 @@ class LLMModelRegistry:
         # so we need to check if the user has set an OPENAI_API_KEY to load the config model.
         has_openai_key = os.environ.get("OPENAI_API_KEY")
         if has_openai_key:
-            self.config.model = "gpt-4.1"
+            self.config.model = "gpt-5.4"
+            self.config._model_source = "default"
             return True
 
         return False

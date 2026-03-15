@@ -189,7 +189,7 @@ For the complete eval CLI reference (flags, env vars, model comparison, debuggin
 **Config File Location**: `~/.holmes/config.yaml`
 
 **Key Configuration Sections**:
-- `model`: LLM model to use (default: gpt-4.1)
+- `model`: LLM model to use (default: gpt-5.4)
 - `api_key`: LLM API key (or use environment variables)
 - `custom_toolsets`: Override or add toolsets
 - `custom_runbooks`: Add investigation runbooks
