@@ -444,9 +444,9 @@ class AgenticProgressRenderer:
         for i, idx in enumerate(range(start, end)):
             line = self._data_lines[idx]
 
-            # Edge fade: dim top/bottom 2 lines to hint at more content
+            # Edge fade: dim bottom 2 lines to hint at more content below
             rows_in_window = end - start
-            if i <= 1 or i >= rows_in_window - 2:
+            if i >= rows_in_window - 2:
                 style = "dim"
             else:
                 style = ""
@@ -678,11 +678,12 @@ class AgenticProgressRenderer:
         # Print the tools list
         if self._tool_history:
             tools_text = Text()
-            for name, elapsed, output_len, is_error in self._tool_history:
+            for idx, (name, elapsed, output_len, is_error) in enumerate(self._tool_history):
+                tool_num = self._tool_number_offset + idx + 1
                 if is_error:
-                    tools_text.append("  ⚠ ", style="bold red")
+                    tools_text.append(f"  {tool_num}. ", style="bold red")
                 else:
-                    tools_text.append("  → ", style="dim")
+                    tools_text.append(f"  {tool_num}. ", style="dim")
                 tools_text.append(name, style="bold" if is_error else "")
                 if elapsed is not None:
                     tools_text.append(f" {elapsed:.1f}s", style="dim")
