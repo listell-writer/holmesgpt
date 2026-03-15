@@ -269,7 +269,7 @@ toolsets:
                 - Keep output actionable and focused on anomalies
 
       - name: "kubernetes_count"
-        user_description: "kubectl get {{kind}} | jq '{{jq_expr}}' | count"
+        user_description: "count: kubectl get {{kind}} | jq '{{jq_expr}}'"
         description: >
           Use kubectl to apply a jq filter and then count the results.
           Use this whenever asked to count kubernetes resources.

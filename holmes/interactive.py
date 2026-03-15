@@ -466,29 +466,47 @@ class AgenticProgressRenderer:
         # Width of line number gutter based on total lines
         gutter_w = len(str(total))
 
-        for i, idx in enumerate(range(start, end)):
-            line = self._data_lines[idx]
-            line_num = idx + 1  # 1-based
+        # Find the most recent tool header at or before the scroll position
+        # and pin it at the top so the user always knows which tool's output they're viewing
+        pinned_header = None
+        for scan_idx in range(start, -1, -1):
+            if self._data_lines[scan_idx].startswith(self._TOOL_HEADER_PREFIX):
+                pinned_header = self._data_lines[scan_idx][len(self._TOOL_HEADER_PREFIX):]
+                break
 
-            # Tool header lines get special styling (no line number)
+        rows_rendered = 0
+        if pinned_header:
+            pane.append(f" {'':>{gutter_w}} ", style="dim")
+            pane.append(f"── {pinned_header}", style=f"bold {TOOLS_COLOR}")
+            pane.append("\n")
+            rows_rendered += 1
+
+        for i, idx in enumerate(range(start, end)):
+            if rows_rendered >= visible:
+                break
+            line = self._data_lines[idx]
+
+            # Skip header lines in the scroll — we pin them at top instead
             if line.startswith(self._TOOL_HEADER_PREFIX):
-                header = line[len(self._TOOL_HEADER_PREFIX):]
+                # Update pinned header for next section
+                pinned_header = line[len(self._TOOL_HEADER_PREFIX):]
                 pane.append(f" {'':>{gutter_w}} ", style="dim")
-                pane.append(f"── {header}", style=f"bold {TOOLS_COLOR}")
-                if i < end - start - 1:
-                    pane.append("\n")
+                pane.append(f"── {pinned_header}", style=f"bold {TOOLS_COLOR}")
+                pane.append("\n")
+                rows_rendered += 1
                 continue
 
             # Edge fade: dim bottom 2 lines to hint at more content below
-            rows_in_window = end - start
-            if i >= rows_in_window - 2:
+            remaining = visible - rows_rendered
+            if remaining <= 2:
                 style = "dim"
             else:
                 style = ""
 
-            pane.append(f" {line_num:>{gutter_w}} ", style="dim")
+            pane.append(f" {idx + 1:>{gutter_w}} ", style="dim")
             pane.append(line, style=style)
-            if i < end - start - 1:
+            rows_rendered += 1
+            if rows_rendered < visible:
                 pane.append("\n")
 
         return pane
@@ -554,17 +572,16 @@ class AgenticProgressRenderer:
             label_budget = max(pane_width - 2 - 2 - 4, 30)
 
             for name, desc, toolset, elapsed, output_len, is_error in self._tool_history:
-                if is_error:
-                    tools_text.append("  ⚠ ", style="bold red")
-                else:
-                    tools_text.append("  → ", style="dim")
+                tools_text.append("  → ", style="dim")
                 # Build suffix first so we know how much space the label gets
                 suffix = ""
                 if toolset:
                     suffix += f" [{toolset}]"
                 if elapsed is not None:
                     suffix += f" {elapsed:.1f}s"
-                if output_len > 0:
+                if is_error:
+                    suffix += " (error)"
+                elif output_len > 0:
                     suffix += f" {_format_size(output_len)}"
                 max_label = label_budget - len(suffix)
                 label = desc if desc else name
@@ -575,7 +592,9 @@ class AgenticProgressRenderer:
                     tools_text.append(f" [{toolset}]", style="dim")
                 if elapsed is not None:
                     tools_text.append(f" {elapsed:.1f}s", style="dim")
-                if output_len > 0:
+                if is_error:
+                    tools_text.append(" (error)", style="dim red")
+                elif output_len > 0:
                     tools_text.append(f" {_format_size(output_len)}", style="dim cyan")
                 tools_text.append("\n")
 
@@ -750,17 +769,16 @@ class AgenticProgressRenderer:
                 term_width = 120
             for idx, (name, desc, toolset, elapsed, output_len, is_error) in enumerate(self._tool_history):
                 tool_num = self._tool_number_offset + idx + 1
-                if is_error:
-                    tools_text.append(f"  {tool_num}. ", style="bold red")
-                else:
-                    tools_text.append(f"  {tool_num}. ", style="dim")
+                tools_text.append(f"  {tool_num}. ", style="dim")
                 # Build suffix first so we know how much space the label gets
                 suffix = ""
                 if toolset:
                     suffix += f" [{toolset}]"
                 if elapsed is not None:
                     suffix += f" {elapsed:.1f}s"
-                if output_len > 0:
+                if is_error:
+                    suffix += " (error)"
+                elif output_len > 0:
                     suffix += f" {_format_size(output_len)}"
                 # panel border(2) + padding(2) + number prefix(~6)
                 prefix_len = 2 + 2 + len(f"  {tool_num}. ")
@@ -773,7 +791,9 @@ class AgenticProgressRenderer:
                     tools_text.append(f" [{toolset}]", style="dim")
                 if elapsed is not None:
                     tools_text.append(f" {elapsed:.1f}s", style="dim")
-                if output_len > 0:
+                if is_error:
+                    tools_text.append(" (error)", style="dim red")
+                elif output_len > 0:
                     tools_text.append(f" {_format_size(output_len)}", style="dim cyan")
                 tools_text.append("\n")
             if tools_text.plain.endswith("\n"):
