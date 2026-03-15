@@ -292,15 +292,21 @@ def _task_spinner_frame() -> str:
     return _SPINNER_FRAMES[int(time.time() * 8) % len(_SPINNER_FRAMES)]
 
 
+def _chars_to_tokens(n: int) -> int:
+    """Approximate token count from character count (~4 chars per token)."""
+    return max(1, n // 4) if n > 0 else 0
+
+
 def _format_size(n: int) -> str:
-    """Format a char count as a human-readable string with units."""
-    if n >= 1_000_000:
-        return f"{n / 1_000_000:.1f}M chars"
-    if n >= 10_000:
-        return f"{n // 1000}K chars"
-    if n >= 1_000:
-        return f"{n:,} chars"
-    return f"{n} chars"
+    """Format a char count as an approximate token count string."""
+    tokens = _chars_to_tokens(n)
+    if tokens >= 1_000_000:
+        return f"{tokens / 1_000_000:.1f}M tokens"
+    if tokens >= 10_000:
+        return f"{tokens // 1000}K tokens"
+    if tokens >= 1_000:
+        return f"{tokens:,} tokens"
+    return f"{tokens} tokens"
 
 
 def _size_bar(output_len: int, max_width: int = 12) -> str:
@@ -313,8 +319,9 @@ def _size_bar(output_len: int, max_width: int = 12) -> str:
 
     if not output_len or output_len <= 0:
         return ""
-    # log scale: 100 chars → 1 block, 100K → max blocks
-    filled = min(max_width, max(1, int(math.log10(max(output_len, 1)) * (max_width / 5))))
+    # log scale: 100 tokens → 1 block, 100K → max blocks
+    tokens = _chars_to_tokens(output_len)
+    filled = min(max_width, max(1, int(math.log10(max(tokens, 1)) * (max_width / 5))))
     size_str = _format_size(output_len)
     return f"{'▰' * filled} {size_str}"
 
@@ -474,12 +481,13 @@ class AgenticProgressRenderer:
         """Build the stats string for the data pane title."""
         if self._total_bytes == 0:
             return ""
-        if self._total_bytes >= 1_000_000:
-            size = f"{self._total_bytes / 1_000_000:.1f}M"
-        elif self._total_bytes >= 1_000:
-            size = f"{self._total_bytes / 1_000:.1f}K"
+        tokens = _chars_to_tokens(self._total_bytes)
+        if tokens >= 1_000_000:
+            size = f"{tokens / 1_000_000:.1f}M tokens"
+        elif tokens >= 1_000:
+            size = f"{tokens / 1_000:.1f}K tokens"
         else:
-            size = f"{self._total_bytes}"
+            size = f"{tokens} tokens"
         return f" [dim]{size} across {self._total_queries} queries[/dim]"
 
     def _build_left_pane(self, show_analyzing: bool = False) -> Any:
