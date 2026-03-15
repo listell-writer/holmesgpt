@@ -11,6 +11,7 @@ from tests.llm.utils.braintrust_history import (
     BenchmarkMetrics,
     HistoricalComparison,
     HistoricalComparisonDetails,
+    _build_test_id_index,
     compare_with_benchmark,
     get_benchmark_baseline,
 )
@@ -54,6 +55,9 @@ def _generate_comparison_tables(
     """
     lines: List[str] = []
 
+    # Build a test_id-only index for cross-model fallback matching
+    test_id_index = _build_test_id_index(benchmark)
+
     # Build rows with data for all metrics
     rows: List[dict] = []
     for result in sorted_results:
@@ -61,10 +65,13 @@ def _generate_comparison_tables(
         model = result.get("model", "")
         key = f"{test_name}:{model}"
         comparison = comparison_map.get(key)
-        baseline = benchmark.get(key)
+        exact_baseline = benchmark.get(key)
+        baseline = exact_baseline or test_id_index.get(test_name)
+        is_cross_model = baseline is not None and exact_baseline is None
 
         rows.append({
             "name": f"{test_name} ({model})" if model else test_name,
+            "baseline_model": baseline.model if is_cross_model and baseline else None,
             "current_time": result.get("holmes_duration"),
             "baseline_time": baseline.duration if baseline else None,
             "current_cost": result.get("cost"),
@@ -143,6 +150,15 @@ def _generate_comparison_tables(
 
     if not lines:
         lines.append("\n_No benchmark data available for comparison._\n")
+
+    # Note cross-model comparison if applicable
+    cross_model_rows = [r for r in rows if r.get("baseline_model")]
+    if cross_model_rows:
+        baseline_models = sorted({r["baseline_model"] for r in cross_model_rows})
+        lines.append(
+            f"_Note: Baseline uses different model(s) ({', '.join(baseline_models)}). "
+            "Metrics are cross-model approximations._\n"
+        )
 
     # Note missing tables
     missing = []

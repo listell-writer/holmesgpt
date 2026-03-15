@@ -354,11 +354,32 @@ def get_benchmark_baseline() -> (
         return {}, details
 
 
+def _build_test_id_index(
+    benchmark: Dict[str, BenchmarkMetrics],
+) -> Dict[str, BenchmarkMetrics]:
+    """Build a test_id-only index from benchmark data for cross-model fallback.
+
+    When the regression run uses a different model than the benchmark (e.g.,
+    regression uses gpt-4.1 but benchmark uses gpt-5.4), we still want to
+    compare metrics like duration and pass/fail. This index maps each test_id
+    to its benchmark metrics, picking the first one found per test_id.
+    """
+    test_id_index: Dict[str, BenchmarkMetrics] = {}
+    for key, metrics in benchmark.items():
+        if metrics.test_id not in test_id_index:
+            test_id_index[metrics.test_id] = metrics
+    return test_id_index
+
+
 def compare_with_benchmark(
     current_results: List[Dict[str, Any]],
     benchmark: Dict[str, BenchmarkMetrics],
 ) -> Dict[str, HistoricalComparison]:
     """Compare current test results with benchmark baseline.
+
+    Uses exact test_id:model matching first, then falls back to test_id-only
+    matching for cross-model comparison (e.g., when regression uses gpt-4.1
+    but benchmark ran with gpt-5.4).
 
     Args:
         current_results: List of current test result dictionaries
@@ -368,6 +389,7 @@ def compare_with_benchmark(
         Dict mapping "test_id:model" to HistoricalComparison
     """
     comparisons: Dict[str, HistoricalComparison] = {}
+    test_id_index = _build_test_id_index(benchmark)
 
     for result in current_results:
         if result is None:
@@ -379,7 +401,8 @@ def compare_with_benchmark(
             continue
 
         key = f"{test_id}:{model}"
-        baseline = benchmark.get(key)
+        # Try exact match first, then fall back to test_id-only match
+        baseline = benchmark.get(key) or test_id_index.get(test_id)
 
         comparison = HistoricalComparison(
             test_id=test_id,
