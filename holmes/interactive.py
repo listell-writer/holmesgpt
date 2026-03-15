@@ -652,6 +652,12 @@ class AgenticProgressRenderer:
             show_analyzing=self._thinking and not self._in_flight
         )
 
+        # Only show the two-pane layout when there's actual data to display.
+        # Before any tool output arrives, just show the left pane content
+        # (status indicator, tasks, tools) without a wasteful empty data panel.
+        if not self._data_lines:
+            return left
+
         right = self._build_data_pane()
 
         # Use a table for side-by-side layout — data pane is wider
