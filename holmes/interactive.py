@@ -249,13 +249,15 @@ class InitProgressRenderer:
         failed = len(self._toolsets_failed)
         elapsed = time.time() - self._start_time
 
+        # Model gets its own prominent line
+        if self._model_message:
+            self._console.print(f"[bold]{self._model_message}[/bold]")
+
         parts = []
         parts.append(f"[bold green]{ok}[/bold green] datasources loaded")
         if failed:
             parts.append(f"[bold red]{failed} failed[/bold red]")
         parts.append(f"[dim]{elapsed:.1f}s[/dim]")
-        if self._model_message:
-            parts.append(self._model_message)
         self._console.print(" | ".join(parts))
 
         # Show failed toolsets with their error messages
@@ -369,8 +371,7 @@ class AgenticProgressRenderer:
         self._escape_hint = escape_hint
         self._lock = threading.Lock()
 
-        # Completed tools: list of (number, name, description, elapsed, output_len, is_error, extra)
-        # extra is None for normal tools, or a list of task dicts for TodoWrite
+        # Pending completed tools to absorb into left pane
         self._completed: List[tuple] = []
         # In-flight tools: tool_number → (name, start_time)
         self._in_flight: Dict[int, tuple] = {}
@@ -382,11 +383,12 @@ class AgenticProgressRenderer:
         self._live: Optional[Any] = None  # Rich Live
         self._timer_stop = threading.Event()
 
-        # Track last printed task statuses to avoid reprinting identical panels
-        self._last_task_statuses: Optional[str] = None
+        # Accumulated completed tools for the left pane history
+        # Each: (name, elapsed, output_len, is_error)
+        self._tool_history: List[tuple] = []
 
         # Data feed: all raw output lines for the scrolling right pane
-        self._data_lines: List[str] = []  # (line_text,) — flat buffer of all lines
+        self._data_lines: List[str] = []
         self._scroll_offset = 0  # Current scroll position
         self._total_bytes = 0  # Total bytes processed
         self._total_queries = 0  # Total tool calls completed
@@ -429,15 +431,17 @@ class AgenticProgressRenderer:
         total = len(self._data_lines)
         visible = self._DATA_PANE_LINES
 
-        # Scroll offset wraps around for continuous scrolling
-        start = self._scroll_offset % total if total > 0 else 0
+        # Clamp scroll to valid range — no wrapping, stops at the end
+        max_start = max(0, total - visible)
+        start = min(self._scroll_offset, max_start)
+        end = min(start + visible, total)
 
-        for i in range(visible):
-            idx = (start + i) % total
+        for i, idx in enumerate(range(start, end)):
             line = self._data_lines[idx]
 
-            # Gradient: top lines dim, middle bright, bottom dim — creates depth
-            dist_from_center = abs(i - visible // 2)
+            # Gradient: top lines dim, center bright, bottom dim
+            row_in_window = i
+            dist_from_center = abs(row_in_window - visible // 2)
             if dist_from_center <= 1:
                 style = "bold"
             elif dist_from_center <= 3:
@@ -446,7 +450,7 @@ class AgenticProgressRenderer:
                 style = "dim"
 
             pane.append(f" {line}", style=style)
-            if i < visible - 1:
+            if i < end - start - 1:
                 pane.append("\n")
 
         return pane
@@ -464,7 +468,7 @@ class AgenticProgressRenderer:
         return f" [dim]{size} across {self._total_queries} queries[/dim]"
 
     def _build_left_pane(self) -> "Text":
-        """Build the left-side status pane (tasks + in-flight tools)."""
+        """Build the left-side status pane (tasks + completed tools + in-flight tools)."""
         from rich.text import Text
 
         now = time.time()
@@ -490,14 +494,25 @@ class AgenticProgressRenderer:
                     display.append(tc, style="dim")
                 display.append("\n")
 
-            # Separator between tasks and tools
-            if self._in_flight:
+            if self._tool_history or self._in_flight:
                 display.append("\n")
 
+        # Show completed tool history
+        for name, elapsed, output_len, is_error in self._tool_history:
+            if is_error:
+                display.append("  ⚠ ", style="bold red")
+            else:
+                display.append("  → ", style="dim")
+            display.append(name, style="bold" if is_error else "")
+            if elapsed is not None:
+                display.append(f" {elapsed:.1f}s", style="dim")
+            if output_len > 0:
+                display.append(f" {_format_size(output_len)}", style="dim cyan")
+            display.append("\n")
+
         # Show in-flight tools
-        spinner_frames = "⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏"
-        frame = spinner_frames[int(now * 8) % len(spinner_frames)]
-        for num, (name, started) in sorted(self._in_flight.items()):
+        frame = _SPINNER_FRAMES[int(now * 8) % len(_SPINNER_FRAMES)]
+        for _num, (name, started) in sorted(self._in_flight.items()):
             elapsed = now - started
             display.append(f"  {frame} ", style="bold magenta")
             display.append(f"{name}", style="bold")
@@ -562,9 +577,13 @@ class AgenticProgressRenderer:
         while not self._timer_stop.wait(0.15):
             with self._lock:
                 if self._live is not None:
-                    # Keep scrolling whenever we have data (tools running or thinking)
+                    # Scroll forward if there's more data below the current view
                     if self._data_lines:
-                        self._scroll_offset += self._SCROLL_SPEED
+                        max_start = max(0, len(self._data_lines) - self._DATA_PANE_LINES)
+                        if self._scroll_offset < max_start:
+                            self._scroll_offset = min(
+                                self._scroll_offset + self._SCROLL_SPEED, max_start
+                            )
                     self._live.update(self._build_display())
 
     def start(self) -> None:
@@ -597,54 +616,17 @@ class AgenticProgressRenderer:
                 pass
             self._live = None
 
-    def _print_completed_tools(self) -> None:
-        """Print completed tools permanently with status icons.
-
-        TodoWrite results are rendered as a bordered panel. Regular tools
-        are shown as compact lines with elapsed time bars.
-        """
+    def _absorb_completed(self) -> None:
+        """Absorb completed tools into the left pane history (no printing)."""
         if not self._completed:
             return
 
-        # Separate TodoWrite results from regular tools
-        regular_tools: List[tuple] = []
-        latest_tasks: Optional[list] = None
-
         for item in self._completed:
-            num, name, desc, elapsed, output_len, is_error, extra = item
+            _num, name, _desc, elapsed, output_len, is_error, extra = item
             if name == _TODO_WRITE_TOOL_NAME and extra:
-                latest_tasks = extra
+                self._live_tasks = extra
             else:
-                regular_tools.append(item)
-
-        # Print regular tools with size bars
-        for num, name, desc, elapsed, output_len, is_error, _extra in regular_tools:
-            if is_error:
-                icon = "[bold red]⚠[/bold red]"
-            else:
-                icon = "[dim]→[/dim]"
-
-            elapsed_str = ""
-            if elapsed is not None:
-                elapsed_str = f" {elapsed:.1f}s"
-
-            bar = _size_bar(output_len or 0)
-            bar_str = f" [dim cyan]{bar}[/dim cyan]" if bar else ""
-
-            self._console.print(
-                f"  {icon} [bold]{escape(name)}[/bold]"
-                f"[dim]{elapsed_str}[/dim]{bar_str}"
-            )
-
-        # Print task panel if tasks changed
-        if latest_tasks is not None:
-            # Build a fingerprint of task statuses to avoid reprinting identical panels
-            fingerprint = "|".join(
-                f"{t.get('id', i)}:{t.get('status', '?')}" for i, t in enumerate(latest_tasks)
-            )
-            if fingerprint != self._last_task_statuses:
-                self._last_task_statuses = fingerprint
-                self._console.print(_build_task_panel(latest_tasks))
+                self._tool_history.append((name, elapsed, output_len or 0, is_error))
 
         self._completed.clear()
 
@@ -705,22 +687,21 @@ class AgenticProgressRenderer:
                     (tool_number, tool_name, description, elapsed, output_len, is_error, extra)
                 )
 
-                # If batch is done (no more in-flight), stop Live and print summary
+                # Absorb into live pane state (no printing)
+                self._absorb_completed()
+
                 if not self._in_flight:
-                    self._stop_live()
-                    self._print_completed_tools()
-                    # Restart live for next thinking phase
+                    # Batch done — switch to thinking mode, keep Live running
                     self._thinking = True
-                    self.start()
-                elif self._live is not None:
+                if self._live is not None:
                     self._live.update(self._build_display())
 
             elif event.event == StreamEvents.AI_MESSAGE:
                 # AI messages print immediately — stop Live first if running
                 self._thinking = False
-                self._stop_live()
                 if self._completed:
-                    self._print_completed_tools()
+                    self._absorb_completed()
+                self._stop_live()
 
                 reasoning = event.data.get("reasoning")
                 content = event.data.get("content")
@@ -736,11 +717,12 @@ class AgenticProgressRenderer:
     def flush(self) -> None:
         """Ensure any remaining in-flight display is cleaned up."""
         with self._lock:
-            self._stop_live()
             if self._completed:
-                self._print_completed_tools()
-            # Reset data feed for next invocation
+                self._absorb_completed()
+            self._stop_live()
+            # Reset all state for next invocation
             self._data_lines.clear()
+            self._tool_history.clear()
             self._scroll_offset = 0
             self._total_bytes = 0
             self._total_queries = 0
