@@ -1062,7 +1062,7 @@ class TestRendererEndToEnd(unittest.TestCase):
 
     def test_error_tool_shows_token_count(self):
         """Error tools with output should show both token count and (error)."""
-        console = Console(width=100, force_terminal=True, color_system=None)
+        console = Console(width=120, force_terminal=True, color_system=None)
         renderer = AgenticProgressRenderer(console, tool_number_offset=0)
         all_tool_calls = []
 

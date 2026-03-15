@@ -489,8 +489,8 @@ class AgenticProgressRenderer:
                 tw = 120
         except (TypeError, ValueError, AttributeError):
             tw = 120
-        # Left pane is fixed ~52 chars; data pane gets the rest minus borders/padding (~7 chars)
-        left_width = min(52, int(tw) // 2)
+        # 50/50 split; data pane gets half minus borders/padding (~7 chars)
+        left_width = (int(tw) - 3) // 2
         data_width = int(tw) - left_width - 7
         return max(40, min(data_width, self._DATA_LINE_MAX))
 
@@ -783,16 +783,16 @@ class AgenticProgressRenderer:
         else:
             right = self._build_data_pane()
 
-        # Side-by-side layout: left pane has a fixed width,
-        # data pane gets all remaining terminal width.
+        # Side-by-side layout: 50/50 split between left and right panes.
         try:
             tw = self._console.width or 120
             if not isinstance(tw, (int, float)):
                 tw = 120
         except (TypeError, ValueError, AttributeError):
             tw = 120
-        left_width = min(52, tw // 2)  # fixed ~52 chars, but never more than half
-        right_width = max(tw - left_width - 3, 40)  # -3 for padding/borders
+        half = (tw - 3) // 2  # -3 for padding/borders between columns
+        left_width = max(half, 30)
+        right_width = max(tw - left_width - 3, 30)
         table = Table.grid(padding=(0, 1))
         table.add_column("status", min_width=left_width)
         table.add_column("data", min_width=right_width)
