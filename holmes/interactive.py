@@ -471,6 +471,7 @@ class AgenticProgressRenderer:
 
         # Approval state: when True, everything dims and scrolling stops
         self._approval_pending = False
+        self._pending_approval_descriptions: List[str] = []
 
         # Log buffering: capture log messages during Live display to prevent
         # them from breaking the transient rendering (duplicate frames, garbled output)
@@ -879,6 +880,29 @@ class AgenticProgressRenderer:
                         handler.emit(record)
             self._log_buffer.clear()
 
+    def _resume_live(self) -> None:
+        """Restart the Live display (e.g. after approval completes)."""
+        if self._live is not None:
+            return  # already running
+        for handler in logging.getLogger().handlers:
+            handler.addFilter(self._log_filter)
+        try:
+            self._live = _make_live(
+                self._build_display(),
+                console=self._console,
+                transient=True,
+                refresh_per_second=8,
+            )
+            self._live.start()
+        except (TypeError, AttributeError):
+            self._live = None
+            for handler in logging.getLogger().handlers:
+                handler.removeFilter(self._log_filter)
+            return
+        self._timer_stop.clear()
+        timer_thread = threading.Thread(target=self._tick, daemon=True)
+        timer_thread.start()
+
     def _process_completed(self) -> None:
         """Absorb completed tools into live state (tool history + tasks)."""
         if not self._completed:
@@ -970,7 +994,11 @@ class AgenticProgressRenderer:
         with self._lock:
             if event.event == StreamEvents.START_TOOL:
                 self._thinking = False
-                self._approval_pending = False
+                # Resume Live if it was stopped for approval
+                if self._approval_pending:
+                    self._approval_pending = False
+                    self._pending_approval_descriptions = []
+                    self._resume_live()
                 num = self._next_tool_number
                 self._next_tool_number += 1
                 tool_name = event.data.get("tool_name", "...")
@@ -1026,8 +1054,13 @@ class AgenticProgressRenderer:
             elif event.event == StreamEvents.APPROVAL_REQUIRED:
                 self._approval_pending = True
                 self._thinking = False
-                if self._live is not None:
-                    self._live.update(self._build_display())
+                # Store pending approval descriptions for display
+                pending = event.data.get("pending_approvals", [])
+                self._pending_approval_descriptions = [
+                    a.get("description", a.get("tool_name", "unknown")) for a in pending
+                ]
+                # Stop Live so the interactive approval prompt renders cleanly below
+                self._stop_live()
 
             elif event.event == StreamEvents.AI_MESSAGE:
                 self._thinking = False
@@ -1735,10 +1768,17 @@ def handle_tool_approval(
     else:
         prefixes_display = "<command>"
 
-    # Print header
-    console.print("\n[bold yellow]Bash command[/bold yellow]")
-    console.print(f"\n  {command or 'unknown'}")
-    console.print("\n[bold]Do you want to proceed?[/bold]")
+    # Show command in a yellow-bordered panel to draw attention
+    console.print()
+    console.print(
+        Panel(
+            f"  {command or 'unknown'}",
+            title="[bold]Approve bash command?[/bold]",
+            title_align="left",
+            border_style="bold yellow",
+            padding=(1, 1),
+        )
+    )
 
     # Show inline menu
     options = [
