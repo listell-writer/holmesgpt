@@ -227,7 +227,6 @@ class InitProgressRenderer:
         # Show model after datasources
         if self._model_message:
             display.append(f"\n  {self._model_message}", style="bold")
-            display.append(f"  {_MODEL_HINT}", style="dim")
 
         return display
 
