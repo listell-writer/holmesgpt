@@ -269,7 +269,10 @@ class InitProgressRenderer:
 
         # Model info after datasources
         if self._model_message:
-            self._console.print(f"[bold]{self._model_message}[/bold]")
+            self._console.print(
+                f"[bold]{self._model_message}[/bold]"
+                "  [dim]change with --model, see https://holmesgpt.dev/ai-providers[/dim]"
+            )
         self._console.rule(style="dim")
 
 
