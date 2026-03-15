@@ -52,52 +52,29 @@ def init_logging(verbose_flags: Optional[List[bool]] = None, log_costs: bool = F
         cost_logger.setLevel(logging.DEBUG)
 
     if verbosity == Verbosity.VERY_VERBOSE:
-        logging.basicConfig(
-            force=True,
-            level=logging.DEBUG,
-            format="%(message)s",
-            handlers=[
-                RichHandler(
-                    show_level=False,
-                    markup=True,
-                    show_time=False,
-                    show_path=False,
-                    console=Console(width=None),
-                )
-            ],
-        )
+        console_level = logging.DEBUG
     elif verbosity == Verbosity.VERBOSE:
-        logging.basicConfig(
-            force=True,
-            level=logging.INFO,
-            format="%(message)s",
-            handlers=[
-                RichHandler(
-                    show_level=False,
-                    markup=True,
-                    show_time=False,
-                    show_path=False,
-                    console=Console(width=None),
-                )
-            ],
-        )
-        logging.getLogger().setLevel(logging.DEBUG)
-        suppress_noisy_logs()
+        console_level = logging.DEBUG
     else:
-        logging.basicConfig(
-            force=True,
-            level=logging.INFO,
-            format="%(message)s",
-            handlers=[
-                RichHandler(
-                    show_level=False,
-                    markup=True,
-                    show_time=False,
-                    show_path=False,
-                    console=Console(width=None),
-                )
-            ],
-        )
+        console_level = logging.INFO
+
+    console_handler = RichHandler(
+        show_level=False,
+        markup=True,
+        show_time=False,
+        show_path=False,
+        console=Console(width=None),
+        level=console_level,
+    )
+
+    logging.basicConfig(
+        force=True,
+        level=console_level,
+        format="%(message)s",
+        handlers=[console_handler],
+    )
+
+    if verbosity < Verbosity.VERY_VERBOSE:
         suppress_noisy_logs()
 
     # Always add a debug file handler to ~/.holmes/debug.log for diagnostics
