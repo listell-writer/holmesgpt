@@ -903,6 +903,10 @@ class AgenticProgressRenderer:
     def restart_after_approval(self) -> None:
         """Restart Live after the approval prompt has finished."""
         with self._lock:
+            # Clear approval state so the restarted Live shows normal UI,
+            # not the "Approve bash command?" panel again.
+            self._approval_pending = False
+            self._pending_approval_descriptions = []
             if self._live is not None:
                 return  # already running
             try:
