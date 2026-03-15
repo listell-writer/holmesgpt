@@ -886,45 +886,6 @@ class AgenticProgressRenderer:
                         handler.emit(record)
             self._log_buffer.clear()
 
-    def stop_for_approval(self) -> None:
-        """Pause Live so the interactive approval prompt can use the terminal.
-
-        Unlike ``_stop_live``, this does **not** replay buffered log messages
-        (we only pause temporarily and will restart).
-        """
-        with self._lock:
-            self._timer_stop.set()
-            if self._live is not None:
-                try:
-                    self._live.stop()
-                except (TypeError, AttributeError):
-                    pass
-                self._live = None
-
-    def restart_after_approval(self) -> None:
-        """Restart Live after the approval prompt has finished."""
-        with self._lock:
-            # Clear approval state so the restarted Live shows normal UI,
-            # not the "Approve bash command?" panel again.
-            self._approval_pending = False
-            self._pending_approval_descriptions = []
-            if self._live is not None:
-                return  # already running
-            try:
-                self._live = _make_live(
-                    self._build_display(),
-                    console=self._console,
-                    transient=True,
-                    refresh_per_second=8,
-                )
-                self._live.start()
-            except (TypeError, AttributeError):
-                self._live = None
-                return
-            self._timer_stop.clear()
-            timer_thread = threading.Thread(target=self._tick, daemon=True)
-            timer_thread.start()
-
     def _process_completed(self) -> None:
         """Absorb completed tools into live state (tool history + tasks)."""
         if not self._completed:
@@ -2165,14 +2126,15 @@ def save_conversation_to_file(
 def _wait_for_completion_or_escape(
     thread: threading.Thread,
     cancel_event: threading.Event,
-    approval_active: threading.Event,
-    terminal_restored: threading.Event,
+    stop_event: threading.Event,
     poll_interval: float = 0.1,
 ) -> bool:
-    """Monitor stdin for Escape while thread runs. Returns True if interrupted."""
+    """Monitor stdin for Escape while thread runs. Returns True if interrupted.
+
+    The ``stop_event`` can be set by the main thread to cleanly stop this
+    listener (e.g. before showing an approval prompt or at the end of a turn).
+    """
     if not _HAS_TERMINAL_CONTROL or not sys.stdin.isatty():
-        # Terminal is already in normal mode; signal so approval UI won't block.
-        terminal_restored.set()
         thread.join()
         return False
 
@@ -2180,19 +2142,7 @@ def _wait_for_completion_or_escape(
     old_settings = termios.tcgetattr(fd)
     try:
         tty.setcbreak(fd)
-        while thread.is_alive():
-            # If approval UI is active, restore terminal and wait for it to finish
-            if approval_active.is_set():
-                termios.tcsetattr(fd, termios.TCSADRAIN, old_settings)
-                terminal_restored.set()
-                while approval_active.is_set() and thread.is_alive():
-                    time.sleep(poll_interval)
-                terminal_restored.clear()
-                if not thread.is_alive():
-                    break
-                tty.setcbreak(fd)
-                continue
-
+        while thread.is_alive() and not stop_event.is_set():
             ready, _, _ = select_module.select([sys.stdin], [], [], poll_interval)
             if ready:
                 ch = sys.stdin.read(1)
@@ -2221,7 +2171,6 @@ def _wait_for_completion_or_escape(
         return False
     finally:
         termios.tcsetattr(fd, termios.TCSADRAIN, old_settings)
-        terminal_restored.set()
 
 
 def run_interactive_loop(
@@ -2540,38 +2489,15 @@ def run_interactive_loop(
             messages_snapshot = list(messages)
 
             cancel_event = threading.Event()
-            approval_active = threading.Event()
-            terminal_restored = threading.Event()
 
-            # Wrap approval callback to coordinate terminal access with escape listener
-            call_approval_callback = approval_callback
-            # Mutable container so the closure can access the renderer created later
-            progress_ref: List[Optional[AgenticProgressRenderer]] = [None]
-            if approval_callback:
-
-                def _wrapped_approval(
-                    pending_approval: PendingToolApproval,
-                    _orig=approval_callback,
-                    _approval_active=approval_active,
-                    _terminal_restored=terminal_restored,
-                    _progress_ref=progress_ref,
-                ) -> tuple[bool, Optional[str]]:
-                    _approval_active.set()
-                    # Wait for the escape listener to restore the terminal
-                    # from cbreak mode before launching the prompt_toolkit UI.
-                    _terminal_restored.wait(timeout=2.0)
-                    # Stop the Live display so the interactive prompt renders cleanly
-                    renderer = _progress_ref[0]
-                    if renderer is not None:
-                        renderer.stop_for_approval()
-                    try:
-                        return _orig(pending_approval)
-                    finally:
-                        if renderer is not None:
-                            renderer.restart_after_approval()
-                        _approval_active.clear()
-
-                call_approval_callback = _wrapped_approval
+            # Approval coordination: background thread stores pending approvals
+            # and blocks; main thread runs the interactive prompt and sends back
+            # the decisions.  This avoids terminal conflicts between Rich Live
+            # (main thread) and prompt_toolkit (also needs the main thread).
+            approval_pending_event = threading.Event()  # bg → main: "I need approval"
+            approval_done_event = threading.Event()     # main → bg: "decisions ready"
+            approval_data: List[Optional[List[dict]]] = [None]  # pending_approvals list
+            approval_decisions: List[Optional[List["ToolApprovalDecision"]]] = [None]
 
             # --- Stream-based AI call ---
             # The background thread drains call_stream() and pushes events to a queue.
@@ -2593,7 +2519,7 @@ def run_interactive_loop(
                     _messages=messages,
                     _trace_span=trace_span,
                     _cancel_event=cancel_event,
-                    _approval_callback=call_approval_callback,
+                    _has_approval=approval_callback is not None,
                     _tool_number_offset=tool_number_offset,
                 ) -> None:
                     try:
@@ -2602,7 +2528,7 @@ def run_interactive_loop(
                         while True:
                             stream = ai.call_stream(
                                 msgs=_messages,
-                                enable_tool_approval=_approval_callback is not None,
+                                enable_tool_approval=_has_approval,
                                 tool_decisions=tool_decisions,
                                 trace_span=_trace_span,
                                 cancel_event=_cancel_event,
@@ -2618,12 +2544,17 @@ def run_interactive_loop(
 
                             # Check if we got an approval-required event
                             if event.event == StreamEvents.APPROVAL_REQUIRED:
-                                terminal_data = event.data
-                                _messages[:] = terminal_data["messages"]
-                                tool_decisions = ai._prompt_for_approval_decisions(
-                                    terminal_data["pending_approvals"],
-                                    _approval_callback,
-                                )
+                                td = event.data
+                                _messages[:] = td["messages"]
+                                # Hand off to main thread for interactive prompt
+                                approval_data[0] = td["pending_approvals"]
+                                approval_done_event.clear()
+                                approval_pending_event.set()
+                                # Block until main thread fills in decisions
+                                approval_done_event.wait()
+                                tool_decisions = approval_decisions[0]
+                                approval_decisions[0] = None
+                                approval_data[0] = None
                                 continue
                             else:
                                 # ANSWER_END — done
@@ -2638,16 +2569,16 @@ def run_interactive_loop(
 
                 # Start escape listener in a background thread so the main
                 # thread can render events from the queue.
+                escape_stop = threading.Event()
                 escape_thread = threading.Thread(
                     target=_wait_for_completion_or_escape,
-                    args=(ai_thread, cancel_event, approval_active, terminal_restored),
+                    args=(ai_thread, cancel_event, escape_stop),
                     daemon=True,
                 )
                 escape_thread.start()
 
                 # --- Main thread: render stream events while monitoring for escape ---
                 progress = AgenticProgressRenderer(console, tool_number_offset, escape_hint)
-                progress_ref[0] = progress
                 progress.start()
                 all_tool_calls_this_turn: list[dict] = []
                 terminal_data = None
@@ -2679,10 +2610,40 @@ def run_interactive_loop(
                         total_num_llm_calls += terminal_data.get("num_llm_calls", 0)
                         accumulated_stats += RequestStats(**terminal_data.get("costs", {}))
                     elif event.event == StreamEvents.APPROVAL_REQUIRED:
-                        # Approval is handled inside the background thread
-                        pass
+                        # Wait for bg thread to signal it's ready
+                        approval_pending_event.wait(timeout=5.0)
+                        approval_pending_event.clear()
+
+                        # 1. Stop Live display permanently
+                        progress.flush()
+
+                        # 2. Stop escape listener (it holds terminal in cbreak)
+                        escape_stop.set()
+                        escape_thread.join(timeout=2.0)
+
+                        # 3. Run approval prompt on main thread
+                        pending = approval_data[0] or []
+                        decisions = ai._prompt_for_approval_decisions(
+                            pending, approval_callback
+                        )
+                        approval_decisions[0] = decisions
+                        approval_done_event.set()
+
+                        # 4. Restart progress renderer and escape listener
+                        current_offset = len(all_tool_calls_history) + len(all_tool_calls_this_turn)
+                        progress = AgenticProgressRenderer(console, current_offset, escape_hint)
+                        progress.start()
+
+                        escape_stop = threading.Event()
+                        escape_thread = threading.Thread(
+                            target=_wait_for_completion_or_escape,
+                            args=(ai_thread, cancel_event, escape_stop),
+                            daemon=True,
+                        )
+                        escape_thread.start()
 
                 # Clean up live display and wait for threads
+                escape_stop.set()
                 progress.flush()
                 ai_thread.join(timeout=5.0)
                 escape_thread.join(timeout=2.0)
