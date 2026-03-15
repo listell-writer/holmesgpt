@@ -284,14 +284,14 @@ def _task_spinner_frame() -> str:
 
 
 def _format_size(n: int) -> str:
-    """Format a byte/char count as a human-readable string."""
+    """Format a char count as a human-readable string with units."""
     if n >= 1_000_000:
-        return f"{n / 1_000_000:.1f}M"
+        return f"{n / 1_000_000:.1f}M chars"
     if n >= 10_000:
-        return f"{n // 1000}K"
+        return f"{n // 1000}K chars"
     if n >= 1_000:
-        return f"{n:,}"
-    return str(n)
+        return f"{n:,} chars"
+    return f"{n} chars"
 
 
 def _size_bar(output_len: int, max_width: int = 12) -> str:
@@ -375,7 +375,7 @@ class AgenticProgressRenderer:
         self._escape_hint = escape_hint
         self._lock = threading.Lock()
 
-        # Pending completed tools to absorb into left pane
+        # Pending completed tools to process
         self._completed: List[tuple] = []
         # In-flight tools: tool_number → (name, start_time)
         self._in_flight: Dict[int, tuple] = {}
@@ -386,6 +386,9 @@ class AgenticProgressRenderer:
 
         self._live: Optional[Any] = None  # Rich Live
         self._timer_stop = threading.Event()
+
+        # Completed tool history for left pane: (name, elapsed, output_len, is_error)
+        self._tool_history: List[tuple] = []
 
         # Data feed: all raw output lines for the scrolling right pane
         self._data_lines: List[str] = []
@@ -470,7 +473,7 @@ class AgenticProgressRenderer:
         return f" [dim]{size} across {self._total_queries} queries[/dim]"
 
     def _build_left_pane(self) -> "Text":
-        """Build the left-side status pane (tasks + completed tools + in-flight tools)."""
+        """Build the left-side status pane (tasks + tool history + in-flight tools)."""
         from rich.text import Text
 
         now = time.time()
@@ -496,8 +499,22 @@ class AgenticProgressRenderer:
                     display.append(tc, style="dim")
                 display.append("\n")
 
-            if self._in_flight:
-                display.append("\n")
+        # Separator
+        if self._live_tasks and (self._tool_history or self._in_flight):
+            display.append("\n")
+
+        # Show completed tool history
+        for name, elapsed, output_len, is_error in self._tool_history:
+            if is_error:
+                display.append("  ⚠ ", style="bold red")
+            else:
+                display.append("  → ", style="dim")
+            display.append(name, style="bold" if is_error else "")
+            if elapsed is not None:
+                display.append(f" {elapsed:.1f}s", style="dim")
+            if output_len > 0:
+                display.append(f" {_format_size(output_len)}", style="dim cyan")
+            display.append("\n")
 
         # Show in-flight tools
         frame = _SPINNER_FRAMES[int(now * 8) % len(_SPINNER_FRAMES)]
@@ -516,8 +533,8 @@ class AgenticProgressRenderer:
         return display
 
     def _has_investigation_context(self) -> bool:
-        """True if we have tasks or data to show in the two-pane layout."""
-        return bool(self._live_tasks or self._data_lines)
+        """True if we have any investigation state to show in the two-pane layout."""
+        return bool(self._live_tasks or self._data_lines or self._tool_history or self._in_flight)
 
     def _build_display(self) -> Any:
         from rich.text import Text
@@ -614,7 +631,7 @@ class AgenticProgressRenderer:
             self._live = None
 
     def _process_completed(self) -> None:
-        """Process completed tools: print tool lines permanently, update live tasks."""
+        """Absorb completed tools into live state (tool history + tasks)."""
         if not self._completed:
             return
 
@@ -622,49 +639,26 @@ class AgenticProgressRenderer:
             _num, name, _desc, elapsed, output_len, is_error, extra = item
             if name == _TODO_WRITE_TOOL_NAME and extra:
                 self._live_tasks = extra
-                continue
-
-            # Print tool line permanently
-            if is_error:
-                icon = "[bold red]⚠[/bold red]"
             else:
-                icon = "[dim]→[/dim]"
-
-            elapsed_str = ""
-            if elapsed is not None:
-                elapsed_str = f" {elapsed:.1f}s"
-
-            bar = _size_bar(output_len or 0)
-            bar_str = f" [dim cyan]{bar}[/dim cyan]" if bar else ""
-
-            self._console.print(
-                f"  {icon} [bold]{escape(name)}[/bold]"
-                f"[dim]{elapsed_str}[/dim]{bar_str}"
-            )
+                self._tool_history.append((name, elapsed, output_len or 0, is_error))
 
         self._completed.clear()
 
     def _print_investigation_summary(self) -> None:
-        """Print a final snapshot of tasks + stats before the answer."""
-        if not self._live_tasks and self._total_bytes == 0:
+        """Print full task list + stats as a permanent record before the answer."""
+        if not self._live_tasks and not self._tool_history:
             return
 
-        from rich.text import Text
-
-        summary = Text()
+        # Print the task list
         if self._live_tasks:
-            completed = sum(1 for t in self._live_tasks if t.get("status") == "completed")
-            total = len(self._live_tasks)
-            summary.append(f"  ☑ {completed}/{total} tasks", style="green")
+            self._console.print(_build_task_panel(self._live_tasks))
 
+        # Print stats line
         if self._total_bytes > 0:
-            if summary.plain:
-                summary.append("  ·  ", style="dim")
             stats = _format_size(self._total_bytes)
-            summary.append(f"Analyzed {stats} across {self._total_queries} queries", style="dim")
-
-        if summary.plain:
-            self._console.print(summary)
+            self._console.print(
+                f"  [dim]Analyzed {stats} across {self._total_queries} queries[/dim]"
+            )
 
     def handle_event(
         self,
@@ -728,23 +722,18 @@ class AgenticProgressRenderer:
                     (tool_number, tool_name, description, elapsed, output_len, is_error, extra)
                 )
 
-                # Stop Live, print tool lines permanently, restart Live
-                self._stop_live()
                 self._process_completed()
 
                 if not self._in_flight:
                     self._thinking = True
-                self.start()
+                if self._live is not None:
+                    self._live.update(self._build_display())
 
             elif event.event == StreamEvents.AI_MESSAGE:
-                # AI messages print immediately — stop Live first if running
                 self._thinking = False
                 if self._completed:
-                    self._stop_live()
                     self._process_completed()
-                else:
-                    self._stop_live()
-                # Print final investigation summary before the answer
+                self._stop_live()
                 self._print_investigation_summary()
 
                 reasoning = event.data.get("reasoning")
@@ -762,12 +751,11 @@ class AgenticProgressRenderer:
         """Ensure any remaining in-flight display is cleaned up."""
         with self._lock:
             if self._completed:
-                self._stop_live()
                 self._process_completed()
-            else:
-                self._stop_live()
+            self._stop_live()
             # Reset all state for next invocation
             self._data_lines.clear()
+            self._tool_history.clear()
             self._scroll_offset = 0
             self._scroll_direction = 1
             self._scroll_pause = 0
