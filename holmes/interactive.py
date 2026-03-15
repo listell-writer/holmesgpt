@@ -488,8 +488,9 @@ class AgenticProgressRenderer:
                 tw = 120
         except (TypeError, ValueError, AttributeError):
             tw = 120
-        # Data pane gets ~60% of terminal width minus panel border/padding (~4 chars)
-        data_width = int(tw * 0.6) - 4
+        # Left pane is fixed ~52 chars; data pane gets the rest minus borders/padding (~7 chars)
+        left_width = min(52, int(tw) // 2)
+        data_width = int(tw) - left_width - 7
         return max(40, min(data_width, self._DATA_LINE_MAX))
 
     def _ingest_output(self, tool_name: str, output: str, description: str = "") -> None:
@@ -665,12 +666,16 @@ class AgenticProgressRenderer:
         # --- Tools section ---
         has_tools = self._tool_history or self._in_flight
         if has_tools:
-            tools_text = Text()
+            tools_text = Text(no_wrap=True, overflow="ellipsis")
             # Compute available width for tool labels.
-            # The left pane gets ratio=1 out of 2 total columns (50%),
-            # minus panel border (2) and padding (2) and prefix (4 = "  → ").
-            term_width = self._console.width or 120
-            pane_width = term_width // 2
+            # Left pane is fixed ~52 chars, minus border (2) + padding (2) + prefix (4).
+            try:
+                term_width = self._console.width or 120
+                if not isinstance(term_width, (int, float)):
+                    term_width = 120
+            except (TypeError, ValueError, AttributeError):
+                term_width = 120
+            pane_width = min(52, int(term_width) // 2)
             label_budget = max(pane_width - 2 - 2 - 4, 30)
 
             for name, desc, toolset, elapsed, output_len, is_error in self._tool_history:
@@ -775,13 +780,15 @@ class AgenticProgressRenderer:
         else:
             right = self._build_data_pane()
 
-        # Side-by-side layout: left pane (status/tools) is narrower,
-        # data pane gets the majority of terminal width.
+        # Side-by-side layout: left pane has a fixed width,
+        # data pane gets all remaining terminal width.
         try:
             tw = self._console.width or 120
-        except (TypeError, ValueError):
+            if not isinstance(tw, (int, float)):
+                tw = 120
+        except (TypeError, ValueError, AttributeError):
             tw = 120
-        left_width = max(int(tw * 0.38), 30)
+        left_width = min(52, tw // 2)  # fixed ~52 chars, but never more than half
         right_width = max(tw - left_width - 3, 40)  # -3 for padding/borders
         table = Table.grid(padding=(0, 1))
         table.add_column("status", min_width=left_width)
@@ -806,28 +813,24 @@ class AgenticProgressRenderer:
                     if self._approval_pending:
                         self._live.update(self._build_display())
                         continue
-                    # Scroll logic: follow tail when new data arrives,
-                    # then slowly scroll backward through history when idle
+                    # Scroll logic: modulo-forward through buffer.
+                    # When new data arrives (_follow_tail), jump to end.
+                    # Otherwise scroll forward from 0, wrapping at end.
                     if self._data_lines and len(self._data_lines) > self._DATA_PANE_LINES:
                         max_start = len(self._data_lines) - self._DATA_PANE_LINES
                         if self._follow_tail:
-                            # Snap to the latest data
+                            # New data: snap to the end
                             self._scroll_offset = max_start
                             self._follow_tail = False
-                            self._scroll_pause = 20  # ~3s pause before scrolling back
+                            self._scroll_pause = 20  # ~3s pause at end before scrolling
                         elif self._scroll_pause > 0:
                             self._scroll_pause -= 1
                         else:
-                            # Idle: slowly scroll backward through history
-                            if self._scroll_offset > 0:
-                                self._scroll_offset = max(0, self._scroll_offset - self._SCROLL_SPEED)
-                                if self._scroll_offset == 0:
-                                    self._scroll_pause = 10  # ~1.5s pause at top
-                            else:
-                                # Reached top — scroll forward back to tail
-                                self._scroll_offset = min(self._scroll_offset + self._SCROLL_SPEED, max_start)
-                                if self._scroll_offset >= max_start:
-                                    self._scroll_pause = 10  # ~1.5s pause at bottom
+                            # Idle: scroll forward, wrap to 0 at the end
+                            self._scroll_offset += self._SCROLL_SPEED
+                            if self._scroll_offset >= max_start:
+                                self._scroll_offset = 0
+                                self._scroll_pause = 6  # ~1s pause at wrap
                     self._live.update(self._build_display())
 
     def start(self) -> None:

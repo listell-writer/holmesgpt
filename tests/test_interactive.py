@@ -1602,7 +1602,7 @@ class TestDataPaneScrollAndWidth(unittest.TestCase):
         r._follow_tail = True
         r._scroll_offset = 0
 
-        # Simulate one tick iteration (without the Live update)
+        # Simulate tick logic
         max_start = len(r._data_lines) - r._DATA_PANE_LINES
         if r._follow_tail:
             r._scroll_offset = max_start
@@ -1613,21 +1613,39 @@ class TestDataPaneScrollAndWidth(unittest.TestCase):
         self.assertFalse(r._follow_tail)
         self.assertEqual(r._scroll_pause, 20)
 
-    def test_new_data_jumps_past_old_scroll(self):
-        """After slow-scroll moves back, new data should jump to tail again."""
+    def test_idle_scroll_wraps_to_zero(self):
+        """When idle scroll reaches end, it wraps to 0 (modulo behavior)."""
         r = self._make_renderer()
-        # Fill buffer
+        for i in range(30):
+            r._data_lines.append(f"line {i}")
+        max_start = len(r._data_lines) - r._DATA_PANE_LINES
+        r._scroll_offset = max_start  # at the end
+        r._follow_tail = False
+        r._scroll_pause = 0
+
+        # Simulate one tick: offset + SCROLL_SPEED >= max_start → wraps to 0
+        r._scroll_offset += r._SCROLL_SPEED
+        if r._scroll_offset >= max_start:
+            r._scroll_offset = 0
+            r._scroll_pause = 6
+
+        self.assertEqual(r._scroll_offset, 0)
+        self.assertEqual(r._scroll_pause, 6)
+
+    def test_new_data_interrupts_idle_scroll(self):
+        """New data arriving sets follow_tail, which overrides idle scroll."""
+        r = self._make_renderer()
         for i in range(50):
             r._data_lines.append(f"line {i}")
-        r._scroll_offset = 5  # pretend we scrolled back
+        r._scroll_offset = 5  # mid-scroll
         r._follow_tail = False
 
         # New data arrives
         r._ingest_output("tool2", "new output\nmore output")
         self.assertTrue(r._follow_tail)
-        # After tick processes it, should be at tail
+
+        # After tick, should be at tail
         max_start = len(r._data_lines) - r._DATA_PANE_LINES
-        # Simulate tick
         r._scroll_offset = max_start
         r._follow_tail = False
         self.assertEqual(r._scroll_offset, max_start)
@@ -1656,9 +1674,9 @@ class TestDataPaneScrollAndWidth(unittest.TestCase):
         self.assertTrue(data_lines[0].endswith("…"))
 
     def test_layout_data_pane_wider_than_left(self):
-        """Data pane column should be wider than the left pane."""
+        """Data pane column should be wider than the left pane on wide terminals."""
         r = self._make_renderer(width=120)
         tw = 120
-        left_width = max(int(tw * 0.38), 30)
+        left_width = min(52, tw // 2)
         right_width = max(tw - left_width - 3, 40)
         self.assertGreater(right_width, left_width)
