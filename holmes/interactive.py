@@ -190,6 +190,7 @@ class InitProgressRenderer:
         # Show model after datasources
         if self._model_message:
             display.append(f"\n  {self._model_message}", style="bold")
+            display.append(f"  {_MODEL_HINT}", style="dim")
 
         return display
 
@@ -269,11 +270,16 @@ class InitProgressRenderer:
 
         # Model info after datasources
         if self._model_message:
-            self._console.print(
-                f"[bold]{self._model_message}[/bold]"
-                "  [dim]change with --model, see https://holmesgpt.dev/ai-providers[/dim]"
-            )
+            self._console.print(format_model_info_rich(self._model_message))
         self._console.rule(style="dim")
+
+
+_MODEL_HINT = "change with --model, see https://holmesgpt.dev/ai-providers"
+
+
+def format_model_info_rich(model_message: str) -> str:
+    """Return a Rich-formatted model info string with the --model hint."""
+    return f"[bold]{model_message}[/bold]  [dim]{_MODEL_HINT}[/dim]"
 
 
 _TODO_WRITE_TOOL_NAME = "TodoWrite"
@@ -516,12 +522,30 @@ class AgenticProgressRenderer:
         has_tools = self._tool_history or self._in_flight
         if has_tools:
             tools_text = Text()
+            # Compute available width for tool labels.
+            # The left pane gets ratio=2 out of 5 total columns,
+            # minus panel border (2) and padding (2) and prefix (4 = "  → ").
+            term_width = self._console.width or 120
+            pane_width = int(term_width * 2 / 5)
+            label_budget = max(pane_width - 2 - 2 - 4, 30)
+
             for name, desc, toolset, elapsed, output_len, is_error in self._tool_history:
                 if is_error:
                     tools_text.append("  ⚠ ", style="bold red")
                 else:
                     tools_text.append("  → ", style="dim")
+                # Build suffix first so we know how much space the label gets
+                suffix = ""
+                if toolset:
+                    suffix += f" [{toolset}]"
+                if elapsed is not None:
+                    suffix += f" {elapsed:.1f}s"
+                if output_len > 0:
+                    suffix += f" {_format_size(output_len)}"
+                max_label = label_budget - len(suffix)
                 label = desc if desc else name
+                if max_label > 6 and len(label) > max_label:
+                    label = label[: max_label - 1] + "…"
                 tools_text.append(label, style="bold" if is_error else "")
                 if toolset:
                     tools_text.append(f" [{toolset}]", style="dim")
@@ -583,9 +607,9 @@ class AgenticProgressRenderer:
             display.append("Thinking", style=f"bold {AI_COLOR}")
             dots = "." * (int(elapsed * 2) % 4)
             display.append(f"{dots:<4}", style=f"bold {AI_COLOR}")
+            display.append("\n")  # Blank line so panels don't run into the spinner
             if self._escape_hint:
-                display.append(f"    {self._escape_hint}", style="dim")
-            display.append("\n")  # Blank line so errors don't run into the spinner
+                display.append(f"  {self._escape_hint}", style="dim")
             return display
 
         left = self._build_left_pane(
@@ -604,6 +628,11 @@ class AgenticProgressRenderer:
             left,
             Panel(right, title=f"[bold]Data[/bold]{stats}", title_align="left", border_style="dim", padding=(0, 0)),
         )
+
+        if self._escape_hint:
+            from rich.console import Group
+            hint = Text(f"  {self._escape_hint}", style="dim")
+            return Group(table, hint)
         return table
 
     def _tick(self) -> None:
