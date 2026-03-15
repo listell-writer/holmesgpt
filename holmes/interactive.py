@@ -664,13 +664,37 @@ class AgenticProgressRenderer:
         self._completed.clear()
 
     def _print_investigation_summary(self) -> None:
-        """Print full task list + stats as a permanent record before the answer."""
+        """Print full task list + tools as a permanent record before the answer."""
+        from rich.text import Text
+
         if not self._live_tasks and not self._tool_history:
             return
 
         # Print the task list
         if self._live_tasks:
             self._console.print(_build_task_panel(self._live_tasks))
+
+        # Print the tools list
+        if self._tool_history:
+            tools_text = Text()
+            for name, elapsed, output_len, is_error in self._tool_history:
+                if is_error:
+                    tools_text.append("  ⚠ ", style="bold red")
+                else:
+                    tools_text.append("  → ", style="dim")
+                tools_text.append(name, style="bold" if is_error else "")
+                if elapsed is not None:
+                    tools_text.append(f" {elapsed:.1f}s", style="dim")
+                if output_len > 0:
+                    tools_text.append(f" {_format_size(output_len)}", style="dim cyan")
+                tools_text.append("\n")
+            if tools_text.plain.endswith("\n"):
+                tools_text.right_crop(1)
+            tool_count = len(self._tool_history)
+            self._console.print(
+                Panel(tools_text, title=f"[bold]Tools[/bold] [dim]{tool_count}[/dim]",
+                      title_align="left", border_style="dim", padding=(0, 1))
+            )
 
         # Print stats line
         if self._total_bytes > 0:
