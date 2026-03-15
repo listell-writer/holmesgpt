@@ -433,6 +433,9 @@ class AgenticProgressRenderer:
         self._live_tasks: Optional[list] = None
         self._summary_printed = False
 
+        # Approval state: when True, everything dims and scrolling stops
+        self._approval_pending = False
+
         # Log buffering: capture log messages during Live display to prevent
         # them from breaking the transient rendering (duplicate frames, garbled output)
         self._log_buffer: List[logging.LogRecord] = []
@@ -578,7 +581,12 @@ class AgenticProgressRenderer:
             for task in self._live_tasks:
                 status = task.get("status", "pending")
                 tc = task.get("content", "")
-                if status == "completed":
+                if self._approval_pending:
+                    # All tasks dim when waiting for approval
+                    icon = " ☑ " if status == "completed" else " ☒ " if status == "failed" else " ☐ "
+                    tasks_text.append(icon, style="dim")
+                    tasks_text.append(tc, style="dim")
+                elif status == "completed":
                     tasks_text.append(" ☑ ", style="green")
                     tasks_text.append(tc, style="dim strike")
                 elif status == "in_progress":
@@ -594,9 +602,11 @@ class AgenticProgressRenderer:
             # Remove trailing newline
             if tasks_text.plain.endswith("\n"):
                 tasks_text.right_crop(1)
+            task_border = "dim" if self._approval_pending else "blue"
+            task_title = f"[dim]Tasks {completed}/{total}[/dim]" if self._approval_pending else f"[bold]Tasks[/bold] [dim]{completed}/{total}[/dim]"
             sections.append(
-                Panel(tasks_text, title=f"[bold]Tasks[/bold] [dim]{completed}/{total}[/dim]",
-                      title_align="left", border_style="blue", padding=(0, 1))
+                Panel(tasks_text, title=task_title,
+                      title_align="left", border_style=task_border, padding=(0, 1))
             )
 
         # --- Tools section ---
@@ -650,13 +660,21 @@ class AgenticProgressRenderer:
                 tools_text.right_crop(1)
 
             tool_count = len(self._tool_history) + len(self._in_flight)
+            tool_title = f"[dim]Tools {tool_count}[/dim]" if self._approval_pending else f"[bold]Tools[/bold] [dim]{tool_count}[/dim]"
             sections.append(
-                Panel(tools_text, title=f"[bold]Tools[/bold] [dim]{tool_count}[/dim]",
+                Panel(tools_text, title=tool_title,
                       title_align="left", border_style="dim", padding=(0, 1))
             )
 
-        # Add status spinner when thinking between tool batches or gathering data
-        if show_analyzing or self._in_flight:
+        # Status line: static when approval pending, animated otherwise
+        if self._approval_pending:
+            status_text = Text()
+            status_text.append("  ⏸ ", style="dim")
+            status_text.append("Approval required", style="dim")
+            if self._escape_hint:
+                status_text.append(f"  {self._escape_hint}", style="dim")
+            sections.append(status_text)
+        elif show_analyzing or self._in_flight:
             status_text = Text()
             elapsed = now - self._start_time
             frame = _SPINNER_FRAMES[int(now * 8) % len(_SPINNER_FRAMES)]
@@ -678,16 +696,31 @@ class AgenticProgressRenderer:
         from rich.console import Group
         return Group(*sections)
 
+    def _build_approval_data_pane(self) -> "Text":
+        """Build a dim data pane with centered 'Waiting for approval' message."""
+        from rich.text import Text
+
+        pane = Text()
+        # Fill with blank lines then center the message
+        half = self._DATA_PANE_LINES // 2
+        for _ in range(half - 1):
+            pane.append("\n")
+        pane.append("  ⏸ Waiting for approval…", style="dim italic")
+        pane.append("\n")
+        return pane
+
     def _build_display(self) -> Any:
-        left = self._build_left_pane(
-            show_analyzing=self._thinking and not self._in_flight
-        )
+        show_analyzing = self._thinking and not self._in_flight and not self._approval_pending
+        left = self._build_left_pane(show_analyzing=show_analyzing)
 
         # Before any tool output arrives, just show the left pane content
         if not self._data_lines:
             return left
 
-        right = self._build_data_pane()
+        if self._approval_pending:
+            right = self._build_approval_data_pane()
+        else:
+            right = self._build_data_pane()
 
         # Side-by-side layout with equal-width columns.
         # min_width ensures each column takes at least 50% of terminal width,
@@ -701,9 +734,12 @@ class AgenticProgressRenderer:
         table.add_column("data", min_width=half_width)
 
         stats = self._build_stats_line()
+        # Dim the data pane border when approval is pending
+        data_border = "dim" if not self._approval_pending else "dim"
+        data_title = f"[bold]Data[/bold]{stats}" if not self._approval_pending else "[dim]Data[/dim]"
         table.add_row(
             left,
-            Panel(right, title=f"[bold]Data[/bold]{stats}", title_align="left", border_style="dim", padding=(0, 0)),
+            Panel(right, title=data_title, title_align="left", border_style=data_border, padding=(0, 0)),
         )
 
         return table
@@ -712,6 +748,10 @@ class AgenticProgressRenderer:
         while not self._timer_stop.wait(0.15):
             with self._lock:
                 if self._live is not None:
+                    # Freeze scrolling when waiting for user approval
+                    if self._approval_pending:
+                        self._live.update(self._build_display())
+                        continue
                     # Scroll forward only: when we reach the end, wrap to start
                     if self._data_lines and len(self._data_lines) > self._DATA_PANE_LINES:
                         if self._scroll_pause > 0:
@@ -868,6 +908,7 @@ class AgenticProgressRenderer:
         with self._lock:
             if event.event == StreamEvents.START_TOOL:
                 self._thinking = False
+                self._approval_pending = False
                 num = self._next_tool_number
                 self._next_tool_number += 1
                 tool_name = event.data.get("tool_name", "...")
@@ -924,6 +965,12 @@ class AgenticProgressRenderer:
 
                 if not self._in_flight:
                     self._thinking = True
+                if self._live is not None:
+                    self._live.update(self._build_display())
+
+            elif event.event == StreamEvents.APPROVAL_REQUIRED:
+                self._approval_pending = True
+                self._thinking = False
                 if self._live is not None:
                     self._live.update(self._build_display())
 

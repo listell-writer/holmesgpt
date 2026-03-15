@@ -1301,6 +1301,113 @@ class TestRendererEndToEnd(unittest.TestCase):
         # TodoWrite should NOT be in data buffer
         assert not any("TodoWrite" in l for l in renderer._data_lines), "TodoWrite in data buffer"
 
+    def test_approval_pending_shows_paused_status(self):
+        """When approval is pending, status line should show static paused text."""
+        console = Console(width=100, force_terminal=True, color_system=None)
+        renderer = AgenticProgressRenderer(console, tool_number_offset=0)
+        renderer._thinking = True
+        renderer._start_time = time.time()
+        renderer._tool_history.append(("t", "desc", "ts", 1.0, 100, False))
+        renderer._ingest_output("t", "some data", description="desc")
+
+        # Before approval: should show "Analyzing"
+        display_text = self._render_to_text(renderer)
+        assert "Analyzing" in display_text, f"Should show Analyzing:\n{display_text}"
+        assert "Approval required" not in display_text
+
+        # Set approval pending
+        renderer._approval_pending = True
+        renderer._thinking = False
+        display_text = self._render_to_text(renderer)
+        assert "Approval required" in display_text, f"Should show paused:\n{display_text}"
+        assert "Analyzing" not in display_text, f"Should not show Analyzing:\n{display_text}"
+
+    def test_approval_pending_replaces_data_pane(self):
+        """When approval is pending, data pane should show 'Waiting for approval'."""
+        console = Console(width=100, force_terminal=True, color_system=None)
+        renderer = AgenticProgressRenderer(console, tool_number_offset=0)
+        renderer._thinking = True
+        renderer._start_time = time.time()
+        renderer._tool_history.append(("t", "desc", "ts", 1.0, 100, False))
+        renderer._ingest_output("t", "real tool output here", description="desc")
+
+        # Before approval: should show actual data
+        display_text = self._render_to_text(renderer)
+        assert "real tool output here" in display_text
+
+        # Set approval pending: data replaced
+        renderer._approval_pending = True
+        display_text = self._render_to_text(renderer)
+        assert "real tool output here" not in display_text, f"Should not show data:\n{display_text}"
+        assert "Waiting for approval" in display_text, f"Should show waiting:\n{display_text}"
+
+    def test_approval_pending_dims_task_panel(self):
+        """When approval is pending, tasks should all be dim (no bold yellow)."""
+        console = Console(width=100, force_terminal=True, color_system=None)
+        renderer = AgenticProgressRenderer(console, tool_number_offset=0)
+        renderer._thinking = True
+        renderer._start_time = time.time()
+        renderer._live_tasks = [
+            {"content": "Check pods", "status": "in_progress"},
+            {"content": "Check logs", "status": "pending"},
+        ]
+        renderer._tool_history.append(("t", "desc", "ts", 1.0, 100, False))
+        renderer._ingest_output("t", "data", description="desc")
+
+        renderer._approval_pending = True
+        display_text = self._render_to_text(renderer)
+        # The "Tasks" title should not be bold (dimmed)
+        assert "Approval required" in display_text
+
+    def test_approval_clears_on_new_tool(self):
+        """APPROVAL_REQUIRED then START_TOOL should clear the pending state."""
+        console = Console(width=100, force_terminal=True, color_system=None)
+        renderer = AgenticProgressRenderer(console, tool_number_offset=0)
+        all_tool_calls = []
+
+        # First tool
+        renderer.handle_event(
+            self._make_event(StreamEvents.START_TOOL, {"tool_name": "tool1"}),
+            all_tool_calls, [],
+        )
+        renderer.handle_event(
+            self._make_event(StreamEvents.TOOL_RESULT, {
+                "tool_name": "tool1", "description": "tool1", "toolset_name": "ts",
+                "result": {"data": "out", "elapsed_seconds": 0.5},
+            }),
+            all_tool_calls, [],
+        )
+
+        # Approval required
+        renderer.handle_event(
+            self._make_event(StreamEvents.APPROVAL_REQUIRED, {}),
+            all_tool_calls, [],
+        )
+        assert renderer._approval_pending is True
+        assert renderer._thinking is False
+
+        # New tool starts (approval was granted)
+        renderer.handle_event(
+            self._make_event(StreamEvents.START_TOOL, {"tool_name": "tool2"}),
+            all_tool_calls, [],
+        )
+        assert renderer._approval_pending is False
+
+    def test_approval_pending_hides_data_stats(self):
+        """When approval is pending, data pane title should not show stats."""
+        console = Console(width=100, force_terminal=True, color_system=None)
+        renderer = AgenticProgressRenderer(console, tool_number_offset=0)
+        renderer._thinking = True
+        renderer._start_time = time.time()
+        renderer._tool_history.append(("t", "desc", "ts", 1.0, 500, False))
+        renderer._ingest_output("t", "x" * 500, description="desc")
+        renderer._total_bytes = 500
+        renderer._total_queries = 1
+
+        renderer._approval_pending = True
+        display_text = self._render_to_text(renderer)
+        assert "tokens across" not in display_text, f"Stats should be hidden:\n{display_text}"
+
     def _render_to_text(self, renderer):
         """Render the display to plain text using a recording console."""
         capture = Console(width=100, record=True, force_terminal=True, color_system=None)
