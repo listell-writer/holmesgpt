@@ -175,7 +175,7 @@ class InitProgressRenderer:
         from rich.text import Text
 
         now = time.time()
-        elapsed = int(now - self._start_time)
+        elapsed = now - self._start_time
         ok = len(self._toolsets_ok)
         failed = len(self._toolsets_failed)
         checked = ok + failed
@@ -189,7 +189,7 @@ class InitProgressRenderer:
         display.append(f"  {checked} ready", style="dim")
         if in_flight:
             display.append(f", {in_flight} checking", style="dim")
-        display.append(f"  ({elapsed}s)", style="dim")
+        display.append(f"  ({elapsed:.1f}s)", style="dim")
 
         # Show recently completed toolset names (last 4, with "+N more" suffix)
         if self._toolsets_ok:
