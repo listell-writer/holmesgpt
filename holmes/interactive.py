@@ -392,8 +392,7 @@ class AgenticProgressRenderer:
         # Data feed: all raw output lines for the scrolling right pane
         self._data_lines: List[str] = []
         self._scroll_offset = 0  # Current scroll position
-        self._scroll_direction = 1  # 1 = forward, -1 = reverse
-        self._scroll_pause = 0  # Ticks to pause before reversing
+        self._scroll_pause = 0  # Ticks to pause before advancing
         self._total_bytes = 0  # Total bytes processed
         self._total_queries = 0  # Total tool calls completed
 
@@ -605,21 +604,21 @@ class AgenticProgressRenderer:
         while not self._timer_stop.wait(0.15):
             with self._lock:
                 if self._live is not None:
-                    # Bounce scroll: forward to end, pause, reverse to start, pause, repeat
+                    # Scroll forward only: when we reach the end, wrap to start
                     if self._data_lines and len(self._data_lines) > self._DATA_PANE_LINES:
                         if self._scroll_pause > 0:
                             self._scroll_pause -= 1
                         else:
                             max_start = len(self._data_lines) - self._DATA_PANE_LINES
-                            self._scroll_offset += self._SCROLL_SPEED * self._scroll_direction
                             if self._scroll_offset >= max_start:
-                                self._scroll_offset = max_start
-                                self._scroll_direction = -1
-                                self._scroll_pause = 10  # ~1.5s pause at bottom
-                            elif self._scroll_offset <= 0:
+                                # Reached the end — wrap to top and pause
                                 self._scroll_offset = 0
-                                self._scroll_direction = 1
                                 self._scroll_pause = 10  # ~1.5s pause at top
+                            else:
+                                self._scroll_offset += self._SCROLL_SPEED
+                                if self._scroll_offset >= max_start:
+                                    self._scroll_offset = max_start
+                                    self._scroll_pause = 10  # ~1.5s pause at bottom
                     self._live.update(self._build_display())
 
     def start(self) -> None:
@@ -753,13 +752,12 @@ class AgenticProgressRenderer:
                 # Ingest raw output into scrolling data buffer (skip TodoWrite)
                 if tool_name != _TODO_WRITE_TOOL_NAME and output_str:
                     self._ingest_output(tool_name, output_str)
-                    # Jump scroll to show new content, resume forward scrolling
+                    # Jump scroll to show new content
                     if len(self._data_lines) > self._DATA_PANE_LINES:
                         # Show the start of new data (not the very end)
                         self._scroll_offset = max(
                             0, len(self._data_lines) - self._DATA_PANE_LINES * 2
                         )
-                        self._scroll_direction = 1
                         self._scroll_pause = 0
 
                 # Remove from in-flight
