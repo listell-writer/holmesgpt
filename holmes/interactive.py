@@ -118,6 +118,43 @@ def restore_display_loggers():
 _SLOW_THRESHOLD_SECS = 1.0  # Show a toolset by name if it takes longer than this
 
 
+def _make_live(renderable: Any, **kwargs: Any) -> Any:
+    """Create a Rich Live instance with a workaround for the ghost-frame bug.
+
+    Rich 13.9.4 bug: Live.refresh() → console.print(Control()) uses end="\\n"
+    (default), adding a trailing newline not counted in LiveRender._shape.
+    position_cursor() does ``height - 1`` cursor-ups, but needs ``height``
+    because the trailing newline puts the cursor one line below the content.
+    Each frame leaks 1 ghost line; over N frames → N ghost lines accumulate.
+
+    Fix: monkey-patch position_cursor on the LiveRender instance to use
+    ``height`` instead of ``height - 1``.
+    """
+    from rich.control import Control
+    from rich.live import Live
+    from rich.segment import ControlType
+
+    live = Live(renderable, **kwargs)
+    _orig = live._live_render.position_cursor
+
+    def _patched_position_cursor() -> Control:
+        shape = live._live_render._shape
+        if shape is not None:
+            _, height = shape
+            return Control(
+                ControlType.CARRIAGE_RETURN,
+                (ControlType.ERASE_IN_LINE, 2),
+                *(
+                    ((ControlType.CURSOR_UP, 1), (ControlType.ERASE_IN_LINE, 2))
+                    * height  # was height - 1 in Rich
+                ),
+            )
+        return _orig()
+
+    live._live_render.position_cursor = _patched_position_cursor  # type: ignore[assignment]
+    return live
+
+
 class InitProgressRenderer:
     """Collects StatusEvents and renders live progress during initialization.
 
@@ -229,10 +266,8 @@ class InitProgressRenderer:
 
     def start(self) -> None:
         """Start the live display. Call before create_console_toolcalling_llm."""
-        from rich.live import Live
-
         self._start_time = time.time()
-        self._live = Live(
+        self._live = _make_live(
             self._build_display(),
             console=self._console,
             transient=True,
@@ -274,12 +309,9 @@ class InitProgressRenderer:
         self._console.rule(style="dim")
 
 
-_MODEL_HINT = "change with --model, see https://holmesgpt.dev/ai-providers"
-
-
 def format_model_info_rich(model_message: str) -> str:
-    """Return a Rich-formatted model info string with the --model hint."""
-    return f"[bold]{model_message}[/bold]  [dim]{_MODEL_HINT}[/dim]"
+    """Return a Rich-formatted model info string."""
+    return f"[bold]{model_message}[/bold]"
 
 
 _TODO_WRITE_TOOL_NAME = "TodoWrite"
@@ -771,8 +803,6 @@ class AgenticProgressRenderer:
 
     def start(self) -> None:
         """Start the Live display with the initial 'Thinking...' spinner."""
-        from rich.live import Live
-
         # Buffer log messages to prevent them from breaking Live's transient rendering.
         # Filters must be installed on handlers (not the root logger) because
         # Python's logging propagation skips logger-level filters on ancestors.
@@ -780,7 +810,7 @@ class AgenticProgressRenderer:
             handler.addFilter(self._log_filter)
 
         try:
-            self._live = Live(
+            self._live = _make_live(
                 self._build_display(),
                 console=self._console,
                 transient=True,

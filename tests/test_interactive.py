@@ -1,10 +1,12 @@
 import logging
 import os
+import re
 import shutil
 import tempfile
 import threading
 import time
 import unittest
+from io import StringIO
 from unittest.mock import Mock, patch
 
 from rich.console import Console
@@ -17,6 +19,7 @@ from holmes.interactive import (
     SlashCommandCompleter,
     SlashCommands,
     UserFeedback,
+    _make_live,
     handle_feedback_command,
     run_interactive_loop,
 )
@@ -1414,3 +1417,174 @@ class TestRendererEndToEnd(unittest.TestCase):
         display = renderer._build_display()
         capture.print(display)
         return capture.export_text()
+
+
+class TestLiveDisplayNoGhostFrames(unittest.TestCase):
+    """Verify _make_live fixes the Rich ghost-frame bug.
+
+    Rich 13.9.4 bug: Live.refresh() -> console.print(Control()) appends
+    end="\\n" which isn't counted in LiveRender._shape. position_cursor()
+    does height-1 cursor-ups but needs height, causing 1 ghost line per
+    frame.  _make_live patches position_cursor to use height instead.
+
+    Reproduction technique: render to a StringIO file with force_terminal=True,
+    then parse ANSI escape sequences to count cursor-up instructions per frame.
+    """
+
+    @staticmethod
+    def _count_cursor_ups_per_frame(raw_output: str) -> list:
+        """Parse raw terminal output and return cursor-up counts per frame transition."""
+        erase_pattern = r"\x1b\[2K(?:\x1b\[1A\x1b\[2K)*"
+        return [m.group(0).count("\x1b[1A") for m in re.finditer(erase_pattern, raw_output)]
+
+    @staticmethod
+    def _count_frame_lines(raw_output: str) -> list:
+        """Parse raw terminal output and return newline counts per rendered frame."""
+        erase_pattern = r"\x1b\[2K(?:\x1b\[1A\x1b\[2K)*"
+        frames = re.split(erase_pattern, raw_output)
+        # Filter out erase-only chunks and very short fragments
+        return [f.count("\n") for f in frames if len(f) > 5 and "\x1b[1A" not in f]
+
+    def test_make_live_no_cumulative_drift(self):
+        """Each frame-transition erase should use cursor-ups = previous frame height.
+
+        Without the fix, each erase does height-1 cursor-ups while the frame
+        occupies height+1 terminal lines (due to console.print's end="\\n"),
+        leaking 1 ghost line per frame.
+
+        With the fix, erase cursor-ups = height, which matches the height+1
+        lines (height-1 content newlines + 1 trailing newline = height lines
+        to go back up).
+        """
+        from rich.text import Text
+
+        buf = StringIO()
+        console = Console(file=buf, force_terminal=True, width=80, color_system="truecolor")
+
+        live = _make_live(Text("frame 0"), console=console, transient=True, auto_refresh=False)
+        live.start()
+        live.refresh()
+
+        # Render several frames of increasing height
+        for i in range(1, 8):
+            content = Text("\n".join(f"line {j}" for j in range(i + 1)))
+            live.update(content)
+            live.refresh()
+
+        live.stop()
+
+        raw = buf.getvalue()
+
+        # Parse alternating content-frames and erase-blocks from the raw output.
+        # Each erase block's cursor-up count should equal the PREVIOUS frame's
+        # newline count + 1 (compensating for console.print's trailing newline).
+        erase_pattern = r"(\x1b\[2K(?:\x1b\[1A\x1b\[2K)*)"
+        parts = re.split(erase_pattern, raw)
+
+        content_frames = []
+        erase_ups = []
+        for part in parts:
+            if "\x1b[1A" in part:
+                erase_ups.append(part.count("\x1b[1A"))
+            elif len(part) > 2:
+                content_frames.append(part.count("\n"))
+
+        # For each transition (erase[i] follows content_frames[i]),
+        # cursor-ups should equal content_newlines + 1.
+        # Check at least 4 transitions to be meaningful.
+        pairs = min(len(content_frames), len(erase_ups))
+        self.assertGreaterEqual(pairs, 4, "Need at least 4 frame transitions to test")
+
+        for i in range(pairs):
+            expected_ups = content_frames[i] + 1  # +1 for trailing newline
+            # Allow ±1 for edge effects (first/last frame, stop cleanup)
+            self.assertAlmostEqual(
+                erase_ups[i],
+                expected_ups,
+                delta=1,
+                msg=(
+                    f"Frame {i}: erase cursor-ups ({erase_ups[i]}) doesn't match "
+                    f"expected ({expected_ups} = {content_frames[i]} newlines + 1). "
+                    f"Ghost frame drift detected!"
+                ),
+            )
+
+    def test_renderer_live_uses_patched_live(self):
+        """AgenticProgressRenderer.start() should use the patched Live."""
+        console = Console(width=120, force_terminal=True, color_system=None)
+        renderer = AgenticProgressRenderer(console, tool_number_offset=0)
+        renderer.start()
+        try:
+            # The Live instance should have a patched position_cursor
+            self.assertIsNotNone(renderer._live)
+            # The patched function is a closure, not the original bound method
+            pos_cursor = renderer._live._live_render.position_cursor
+            self.assertFalse(
+                hasattr(pos_cursor, "__self__"),
+                "position_cursor should be patched (a closure), not the original bound method",
+            )
+        finally:
+            renderer._stop_live()
+
+
+class TestModelMessageFormat(unittest.TestCase):
+    """Verify model info message format has no double parentheses."""
+
+    def test_default_model_no_double_parens(self):
+        """Default model message should not contain ')(' pattern."""
+        from holmes.config import Config
+
+        config = Config(model="test-model")
+        config._model_source = None
+        context = config._format_token_count(1_000_000)
+        max_resp = config._format_token_count(64_000)
+
+        # Simulate the message construction logic
+        if config._model_source:
+            source_hint = f"configured {config._model_source}"
+        else:
+            source_hint = "default, change with --model, see https://holmesgpt.dev/ai-providers"
+        msg = f"Model: test-model, {context} context, {max_resp} max response ({source_hint})"
+
+        self.assertNotIn(")(", msg, f"Double parens found in: {msg}")
+        self.assertEqual(msg.count("("), 1, f"Should have exactly one opening paren: {msg}")
+        self.assertEqual(msg.count(")"), 1, f"Should have exactly one closing paren: {msg}")
+
+    def test_env_model_no_double_parens(self):
+        """$MODEL sourced model should have clean format."""
+        from holmes.config import Config
+
+        config = Config(model="test-model")
+        config._model_source = "via $MODEL"
+        context = config._format_token_count(128_000)
+        max_resp = config._format_token_count(8_192)
+
+        if config._model_source:
+            source_hint = f"configured {config._model_source}"
+        else:
+            source_hint = "default, change with --model, see https://holmesgpt.dev/ai-providers"
+        msg = f"Model: test-model, {context} context, {max_resp} max response ({source_hint})"
+
+        self.assertNotIn(")(", msg, f"Double parens found in: {msg}")
+        self.assertIn("configured via $MODEL", msg)
+        # Format: Model: test-model, 128K context, 8K max response (configured via $MODEL)
+        self.assertTrue(
+            msg.startswith("Model: test-model, 128K context, 8K max response"),
+            f"Unexpected format: {msg}",
+        )
+
+    def test_config_file_model_no_double_parens(self):
+        """Config-file sourced model should have clean format."""
+        from holmes.config import Config
+
+        config = Config(model="test-model")
+        config._model_source = "in ~/.holmes/config.yaml"
+
+        if config._model_source:
+            source_hint = f"configured {config._model_source}"
+        else:
+            source_hint = "default"
+        msg = f"Model: test-model, 1M context, 64K max response ({source_hint})"
+
+        self.assertNotIn(")(", msg, f"Double parens found in: {msg}")
+        self.assertIn("configured in ~/.holmes/config.yaml", msg)

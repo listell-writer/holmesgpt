@@ -256,6 +256,47 @@ When adding a new toolset or integration, update all of the following pages to k
 4. `docs/data-sources/builtin-toolsets/{name}.md` — Dedicated documentation page for the new toolset
 5. Add a logo image to `images/integration_logos/` if one is available
 
+## Debugging CLI / Rich Live Display Issues
+
+When troubleshooting terminal rendering bugs (ghost frames, flickering, misaligned output):
+
+**Capturing terminal output through a PTY:**
+```bash
+# Use `script` to force a PTY and capture raw ANSI escape sequences
+script -qec "poetry run python your_script.py" /dev/null > /tmp/raw_output.txt 2>&1
+```
+Without a PTY, Rich detects non-interactive mode and skips Live rendering entirely.
+
+**Analyzing ANSI escape sequences:**
+```python
+# Key escape codes for Rich Live:
+# \x1b[1A  = cursor up 1 line
+# \x1b[2K  = erase entire line
+# Rich erases previous frame with: (erase + cursor-up) × height, then prints new frame
+
+# Count cursor-ups per frame transition to detect drift:
+import re
+erase_pattern = r"\x1b\[2K(?:\x1b\[1A\x1b\[2K)*"
+for match in re.finditer(erase_pattern, raw_output):
+    ups = match.group(0).count("\x1b[1A")
+```
+
+**Writing unit tests for Live display (no LLM required):**
+```python
+# Render to StringIO with force_terminal=True to get ANSI sequences
+from io import StringIO
+buf = StringIO()
+console = Console(file=buf, force_terminal=True, width=120)
+# ... render frames ...
+raw = buf.getvalue()  # Contains full ANSI escape sequences
+# Parse cursor-up counts vs frame heights to detect ghost frames
+```
+
+**Key patterns:**
+- Ghost frames = cumulative drift where each frame leaves 1+ orphaned lines
+- Verify by counting: cursor-ups per transition should equal rendered lines per frame
+- Known Rich 13.9.4 bug: `console.print(end="\\n")` adds a trailing newline not counted in `LiveRender._shape`, causing 1 ghost line per frame. Workaround: patch `position_cursor()` to use `height` instead of `height - 1`.
+
 ## Security Notes
 
 - All tools have read-only access by design
