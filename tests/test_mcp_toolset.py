@@ -2253,6 +2253,30 @@ class TestParamCoercion:
         result = tool._coerce_params({"data": {"a": None, "b": 1}})
         assert result == {"data": {"a": None, "b": 1}}
 
+    def test_string_null_dropped_for_boolean(self):
+        """String "null" for a boolean param should be coerced to None and stripped."""
+        tool = self._make_tool({"verbose": ToolParameter(type="boolean", required=True)})
+        result = tool._coerce_params({"verbose": "null"})
+        assert "verbose" not in result
+
+    def test_string_null_dropped_for_record(self):
+        """String "null" for a record param should be coerced to None and stripped."""
+        tool = self._make_tool({"filters": ToolParameter(type="record", required=True)})
+        result = tool._coerce_params({"filters": "null"})
+        assert "filters" not in result
+
+    def test_decimal_string_to_integer(self):
+        """Decimal string like "42.0" should be parsed as integer 42."""
+        tool = self._make_tool({"count": ToolParameter(type="integer", required=True)})
+        result = tool._coerce_params({"count": "42.0"})
+        assert result == {"count": 42}
+
+    def test_non_integral_float_string_kept_for_integer(self):
+        """Non-integral float string like "3.14" should not be coerced to integer."""
+        tool = self._make_tool({"count": ToolParameter(type="integer", required=True)})
+        result = tool._coerce_params({"count": "3.14"})
+        assert result == {"count": "3.14"}
+
     def test_full_mcp_scenario(self):
         """End-to-end test: all coercion types combined in one call."""
         tool = self._make_tool({

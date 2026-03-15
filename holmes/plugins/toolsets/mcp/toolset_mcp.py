@@ -484,7 +484,7 @@ class RemoteMCPTool(Tool):
         """Coerce a single value to match the expected JSON Schema type."""
         # Drop null/None for non-nullable types
         if value is None or value == "null":
-            if expected_type in ("number", "integer", "array", "object"):
+            if expected_type in ("number", "integer", "array", "object", "boolean", "record"):
                 return None  # will be stripped below
             return value
 
@@ -502,7 +502,10 @@ class RemoteMCPTool(Tool):
         # String → number/integer
         if isinstance(value, str) and expected_type in ("number", "integer"):
             try:
-                return int(value) if expected_type == "integer" else float(value)
+                if expected_type == "integer":
+                    f = float(value)
+                    return int(f) if f == int(f) else value
+                return float(value)
             except (ValueError, TypeError):
                 pass
 
