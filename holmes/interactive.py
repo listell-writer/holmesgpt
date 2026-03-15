@@ -593,7 +593,7 @@ class AgenticProgressRenderer:
 
         stats = self._build_stats_line()
         table.add_row(
-            Panel(left, title="[bold]Status[/bold]", title_align="left", border_style="blue", padding=(0, 1)),
+            left,
             Panel(right, title=f"[bold]Data[/bold]{stats}", title_align="left", border_style="dim", padding=(0, 0)),
         )
         return table
