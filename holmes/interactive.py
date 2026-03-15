@@ -183,7 +183,8 @@ class InitProgressRenderer:
 
         display = Text()
 
-        display.append("  ")
+        frame = _SPINNER_FRAMES[int(now * 8) % len(_SPINNER_FRAMES)]
+        display.append(f"  {frame} ", style="bold")
         display.append(f"{self._phase}", style="bold")
         display.append(f"  {checked} ready", style="dim")
         if in_flight:
@@ -1817,7 +1818,7 @@ def handle_tool_approval(
 
     options = [
         "Yes",
-        f"Yes, and don't ask again for {prefixes_display} commands",
+        f"Yes, and automatically approve '{prefixes_display}' in the future",
         "No, and tell Holmes what to do differently",
     ]
 
