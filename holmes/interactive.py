@@ -416,12 +416,19 @@ class AgenticProgressRenderer:
         self._live_tasks: Optional[list] = None
         self._summary_printed = False
 
-    def _ingest_output(self, tool_name: str, output: str) -> None:
+    # Sentinel prefix for tool header lines in the data buffer
+    _TOOL_HEADER_PREFIX = "\x00TOOL:"
+
+    def _ingest_output(self, tool_name: str, output: str, description: str = "") -> None:
         """Ingest raw tool output into the scrolling data buffer."""
         if not output:
             return
         self._total_bytes += len(output)
         self._total_queries += 1
+
+        # Insert a header line so the data pane shows which tool produced this output
+        header = description if description else tool_name
+        self._data_lines.append(f"{self._TOOL_HEADER_PREFIX}{header}")
 
         lines = output.splitlines()
         for line in lines:
@@ -462,6 +469,15 @@ class AgenticProgressRenderer:
         for i, idx in enumerate(range(start, end)):
             line = self._data_lines[idx]
             line_num = idx + 1  # 1-based
+
+            # Tool header lines get special styling (no line number)
+            if line.startswith(self._TOOL_HEADER_PREFIX):
+                header = line[len(self._TOOL_HEADER_PREFIX):]
+                pane.append(f" {'':>{gutter_w}} ", style="dim")
+                pane.append(f"── {header}", style=f"bold {TOOLS_COLOR}")
+                if i < end - start - 1:
+                    pane.append("\n")
+                continue
 
             # Edge fade: dim bottom 2 lines to hint at more content below
             rows_in_window = end - start
@@ -554,7 +570,7 @@ class AgenticProgressRenderer:
                 label = desc if desc else name
                 if max_label > 6 and len(label) > max_label:
                     label = label[: max_label - 1] + "…"
-                tools_text.append(label, style="bold" if is_error else "")
+                tools_text.append(label, style="dim" if is_error else "")
                 if toolset:
                     tools_text.append(f" [{toolset}]", style="dim")
                 if elapsed is not None:
@@ -744,7 +760,7 @@ class AgenticProgressRenderer:
                 label = desc if desc else name
                 if len(label) > label_budget:
                     label = label[: label_budget - 1] + "…"
-                tools_text.append(label, style="bold" if is_error else "")
+                tools_text.append(label, style="dim" if is_error else "")
                 if toolset:
                     tools_text.append(f" [{toolset}]", style="dim")
                 if elapsed is not None:
@@ -810,7 +826,7 @@ class AgenticProgressRenderer:
 
                 # Ingest raw output into scrolling data buffer (skip TodoWrite)
                 if tool_name != _TODO_WRITE_TOOL_NAME and output_str:
-                    self._ingest_output(tool_name, output_str)
+                    self._ingest_output(tool_name, output_str, description=description)
                     # Jump scroll to show new content
                     if len(self._data_lines) > self._DATA_PANE_LINES:
                         # Show the start of new data (not the very end)
