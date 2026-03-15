@@ -421,14 +421,16 @@ class AgenticProgressRenderer:
 
     def _ingest_output(self, tool_name: str, output: str, description: str = "") -> None:
         """Ingest raw tool output into the scrolling data buffer."""
-        if not output:
-            return
-        self._total_bytes += len(output)
-        self._total_queries += 1
-
         # Insert a header line so the data pane shows which tool produced this output
         header = description if description else tool_name
         self._data_lines.append(f"{self._TOOL_HEADER_PREFIX}{header}")
+
+        if not output:
+            self._data_lines.append("  (empty)")
+            self._total_queries += 1
+            return
+        self._total_bytes += len(output)
+        self._total_queries += 1
 
         lines = output.splitlines()
         for line in lines:
@@ -469,15 +471,17 @@ class AgenticProgressRenderer:
         # Find the most recent tool header at or before the scroll position
         # and pin it at the top so the user always knows which tool's output they're viewing
         pinned_header = None
+        pinned_header_idx = -1
         for scan_idx in range(start, -1, -1):
             if self._data_lines[scan_idx].startswith(self._TOOL_HEADER_PREFIX):
                 pinned_header = self._data_lines[scan_idx][len(self._TOOL_HEADER_PREFIX):]
+                pinned_header_idx = scan_idx
                 break
 
         rows_rendered = 0
         if pinned_header:
             pane.append(f" {'':>{gutter_w}} ", style="dim")
-            pane.append(f"── {pinned_header}", style=f"bold {TOOLS_COLOR}")
+            pane.append(pinned_header, style=f"bold {TOOLS_COLOR}")
             pane.append("\n")
             rows_rendered += 1
 
@@ -486,12 +490,16 @@ class AgenticProgressRenderer:
                 break
             line = self._data_lines[idx]
 
-            # Skip header lines in the scroll — we pin them at top instead
+            # Skip header lines that duplicate the pinned header
             if line.startswith(self._TOOL_HEADER_PREFIX):
-                # Update pinned header for next section
+                if idx == pinned_header_idx:
+                    # This is the same header we already pinned — skip it
+                    continue
+                # New tool section header
                 pinned_header = line[len(self._TOOL_HEADER_PREFIX):]
+                pinned_header_idx = idx
                 pane.append(f" {'':>{gutter_w}} ", style="dim")
-                pane.append(f"── {pinned_header}", style=f"bold {TOOLS_COLOR}")
+                pane.append(pinned_header, style=f"bold {TOOLS_COLOR}")
                 pane.append("\n")
                 rows_rendered += 1
                 continue
@@ -853,7 +861,7 @@ class AgenticProgressRenderer:
                         self._live_tasks = todos
 
                 # Ingest raw output into scrolling data buffer (skip TodoWrite)
-                if tool_name != _TODO_WRITE_TOOL_NAME and output_str:
+                if tool_name != _TODO_WRITE_TOOL_NAME:
                     self._ingest_output(tool_name, output_str, description=description)
                     # Jump scroll to show new content
                     if len(self._data_lines) > self._DATA_PANE_LINES:
