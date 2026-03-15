@@ -2059,7 +2059,7 @@ def run_interactive_loop(
 
     if initial_user_input:
         console.print(
-            f"\n[bold {USER_COLOR}]User:[/bold {USER_COLOR}] {initial_user_input}\n"
+            f"\n[bold {USER_COLOR}]User:[/bold {USER_COLOR}] {initial_user_input}"
         )
     messages = None
     last_response = None
