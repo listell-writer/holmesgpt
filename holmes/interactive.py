@@ -530,7 +530,7 @@ class AgenticProgressRenderer:
         """Build the scrolling data feed pane."""
         from rich.text import Text
 
-        pane = Text()
+        pane = Text(no_wrap=True, overflow="ellipsis")
 
         if not self._data_lines:
             pane.append("  Waiting for data…", style="dim italic")
