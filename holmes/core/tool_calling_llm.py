@@ -596,17 +596,12 @@ class ToolCallingLLM:
             )
 
             tool_params = {}
-            # LiteLLM returns arguments as a JSON string for OpenAI but as an
-            # already-parsed dict for Bedrock/Anthropic.  Handle both.
-            if isinstance(tool_arguments, dict):
-                tool_params = tool_arguments
-            else:
-                try:
-                    tool_params = json.loads(tool_arguments)
-                except Exception:
-                    logging.warning(
-                        f"Failed to parse arguments for tool: {tool_name}. args: {tool_arguments}"
-                    )
+            try:
+                tool_params = json.loads(tool_arguments)
+            except Exception:
+                logging.warning(
+                    f"Failed to parse arguments for tool: {tool_name}. args: {tool_arguments}"
+                )
 
             if tool_name == "TodoWrite":
                 logging.debug(
