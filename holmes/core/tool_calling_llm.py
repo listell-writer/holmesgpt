@@ -42,6 +42,7 @@ from holmes.core.tools_utils.tool_context_window_limiter import (
 from holmes.core.tools_utils.tool_executor import ToolExecutor
 from holmes.core.tracing import DummySpan
 from holmes.core.truncation.input_context_window_limiter import (
+    check_compaction_needed,
     limit_input_context_window,
 )
 from holmes.utils.colors import AI_COLOR
@@ -739,12 +740,26 @@ class ToolCallingLLM:
             tools = None if i == max_steps else tools
             tool_choice = "auto" if tools else None
 
+            compaction_start_event = check_compaction_needed(self.llm, messages, tools)
+            if compaction_start_event:
+                yield compaction_start_event
+
             limit_result = limit_input_context_window(
                 llm=self.llm, messages=messages, tools=tools
             )
             yield from limit_result.events
             messages = limit_result.messages
             metadata = metadata | limit_result.metadata
+
+            # After compaction, emit a fresh token count so clients can update
+            if limit_result.conversation_history_compacted:
+                yield build_stream_event_token_count(
+                    metadata={
+                        "tokens": limit_result.tokens.model_dump(),
+                        "max_tokens": limit_result.max_context_size,
+                        "max_output_tokens": limit_result.maximum_output_token,
+                    }
+                )
 
             # Accumulate compaction costs
             compaction = limit_result.compaction_usage
