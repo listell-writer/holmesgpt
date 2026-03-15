@@ -74,7 +74,7 @@ def init_logging(verbose_flags: Optional[List[bool]] = None, log_costs: bool = F
         handlers=[console_handler],
     )
 
-    if verbosity < Verbosity.VERY_VERBOSE:
+    if verbosity != Verbosity.VERY_VERBOSE:
         suppress_noisy_logs()
 
     # Always add a debug file handler to ~/.holmes/debug.log for diagnostics
