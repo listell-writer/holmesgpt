@@ -257,8 +257,8 @@ class InitProgressRenderer:
                 self._live.update(self._build_display())
 
     def _tick(self) -> None:
-        """Background timer that updates the elapsed time every second."""
-        while not self._timer_stop.wait(1.0):
+        """Background timer that updates the display for smooth spinner animation."""
+        while not self._timer_stop.wait(0.15):
             with self._lock:
                 if self._live is not None:
                     self._live.update(self._build_display())
