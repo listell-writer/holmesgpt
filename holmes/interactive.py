@@ -9,7 +9,6 @@ import threading
 import time
 from collections import defaultdict
 from enum import Enum
-from io import StringIO
 from pathlib import Path
 from typing import Any, DefaultDict, Dict, List, Optional
 
@@ -1681,78 +1680,126 @@ def prompt_for_llm_sharing(
     return None
 
 
-def _run_inline_menu(options: list[str], console: Console) -> Optional[int]:
+def _read_key() -> str:
+    """Read a single keypress, handling escape sequences for arrow keys.
+
+    Returns a short string: ``"up"``, ``"down"``, ``"enter"``, ``"esc"``,
+    ``"1"``–``"9"``, or the raw character.
     """
-    Run an inline menu with arrow key navigation.
+    ch = sys.stdin.read(1)
+    if ch == "\x1b":
+        # Could be standalone Escape or start of an escape sequence
+        ready, _, _ = select_module.select([sys.stdin], [], [], 0.05)
+        if ready:
+            ch2 = sys.stdin.read(1)
+            if ch2 == "[":
+                ch3 = sys.stdin.read(1)
+                if ch3 == "A":
+                    return "up"
+                if ch3 == "B":
+                    return "down"
+            # Unknown escape sequence — treat as Esc
+        return "esc"
+    if ch in ("\r", "\n"):
+        return "enter"
+    if ch == "\x03":  # Ctrl-C
+        return "esc"
+    if ch in ("k", "K"):
+        return "up"
+    if ch in ("j", "J"):
+        return "down"
+    return ch
+
+
+def _build_menu_renderable(
+    options: list[str], selected: int, header: Any = None
+) -> Any:
+    """Build a Rich renderable for the inline menu (optionally with a header panel)."""
+    from rich.text import Text
+
+    parts: list[Any] = []
+    if header is not None:
+        parts.append(header)
+
+    menu = Text()
+    for i, option in enumerate(options):
+        if i == selected:
+            menu.append(f"  > {i + 1}. {option}\n", style="bold")
+        else:
+            menu.append(f"    {i + 1}. {option}\n")
+    menu.append("\n")
+    menu.append("  Esc to cancel", style="dim")
+    parts.append(menu)
+
+    if len(parts) == 1:
+        return parts[0]
+
+    from rich.console import Group
+
+    return Group(*parts)
+
+
+def _run_inline_menu(
+    options: list[str], console: Console, header: Any = None
+) -> Optional[int]:
+    """Run an inline menu with arrow-key navigation using Rich Live.
+
+    The entire menu (and optional *header*) is rendered inside a transient
+    Rich Live display so it auto-erases when the user makes a selection.
 
     Args:
-        options: List of option strings to display
-        console: Rich console for output
+        options: List of option strings to display.
+        console: Rich console for output.
+        header: Optional Rich renderable displayed above the options.
 
     Returns:
-        Index of selected option (0-based), or None if cancelled
+        Index of selected option (0-based), or ``None`` if cancelled.
     """
-    selected = [0]  # Use list to allow mutation in nested function
-    result = [None]  # None means cancelled
+    if not _HAS_TERMINAL_CONTROL or not sys.stdin.isatty():
+        # No terminal control — fall back to a simple numbered prompt
+        console.print(header or "")
+        for i, opt in enumerate(options):
+            console.print(f"  {i + 1}. {opt}")
+        try:
+            choice = input("Enter number (or press Enter to cancel): ").strip()
+        except (EOFError, KeyboardInterrupt):
+            return None
+        if choice.isdigit() and 1 <= int(choice) <= len(options):
+            return int(choice) - 1
+        return None
 
-    def get_menu_text():
-        lines = []
-        for i, option in enumerate(options):
-            if i == selected[0]:
-                lines.append(("bold", f"> {i + 1}. {option}\n"))
-            else:
-                lines.append(("", f"  {i + 1}. {option}\n"))
-        lines.append(("class:hint", "\nEsc to cancel"))
-        return lines
+    selected = 0
+    fd = sys.stdin.fileno()
+    old_settings = termios.tcgetattr(fd)
 
-    bindings = KeyBindings()
-
-    @bindings.add("up")
-    @bindings.add("k")
-    def _up(event):
-        selected[0] = (selected[0] - 1) % len(options)
-
-    @bindings.add("down")
-    @bindings.add("j")
-    def _down(event):
-        selected[0] = (selected[0] + 1) % len(options)
-
-    @bindings.add("enter")
-    def _enter(event):
-        result[0] = selected[0]
-        event.app.exit()
-
-    @bindings.add("escape")
-    @bindings.add("c-c")
-    def _cancel(event):
-        result[0] = None
-        event.app.exit()
-
-    # Also allow number keys 1-9 for direct selection
-    for i in range(min(9, len(options))):
-
-        @bindings.add(str(i + 1))
-        def _select_num(event, idx=i):
-            result[0] = idx
-            event.app.exit()
-
-    menu_style = Style.from_dict(
-        {
-            "hint": "#666666",
-        }
+    live = _make_live(
+        _build_menu_renderable(options, selected, header),
+        console=console,
+        transient=True,
+        refresh_per_second=15,
     )
-
-    layout = Layout(Window(FormattedTextControl(get_menu_text, show_cursor=False)))
-
-    app: Application = Application(
-        layout=layout,
-        key_bindings=bindings,
-        style=menu_style,
-        full_screen=False,
-    )
-
-    app.run()
-    return result[0]
+    live.start()
+    try:
+        tty.setcbreak(fd)
+        while True:
+            ready, _, _ = select_module.select([sys.stdin], [], [], 0.1)
+            if not ready:
+                continue
+            key = _read_key()
+            if key == "up":
+                selected = (selected - 1) % len(options)
+            elif key == "down":
+                selected = (selected + 1) % len(options)
+            elif key == "enter":
+                return selected
+            elif key == "esc":
+                return None
+            elif key.isdigit() and 1 <= int(key) <= len(options):
+                return int(key) - 1
+            live.update(_build_menu_renderable(options, selected, header))
+    finally:
+        live.stop()
+        termios.tcsetattr(fd, termios.TCSADRAIN, old_settings)
 
 
 def handle_tool_approval(
@@ -1787,7 +1834,8 @@ def handle_tool_approval(
     else:
         prefixes_display = "<command>"
 
-    # Show command in a yellow-bordered panel to draw attention
+    # Build command panel — passed as header to the menu so everything
+    # lives inside a single transient Rich Live (auto-erased on exit).
     panel = Panel(
         f"  {command or 'unknown'}",
         title="[bold]Approve bash command?[/bold]",
@@ -1796,33 +1844,13 @@ def handle_tool_approval(
         padding=(1, 1),
     )
 
-    # Render the panel to a buffer so we can count its height for cleanup.
-    _buf = StringIO()
-    _measure = Console(file=_buf, width=console.width or 120, force_terminal=True)
-    _measure.print()
-    _measure.print(panel)
-    rendered = _buf.getvalue()
-    panel_lines = rendered.count("\n")
-
-    # Print to real console
-    console.print()
-    console.print(panel)
-
-    # Show inline menu
     options = [
         "Yes",
         f"Yes, and don't ask again for {prefixes_display} commands",
         "No, and tell Holmes what to do differently",
     ]
 
-    result = _run_inline_menu(options, console)
-
-    # Erase the entire approval prompt (panel + menu) so it doesn't
-    # linger and look like action is still required.
-    # Menu is: N options + 1 blank line + "Esc to cancel" = len(options) + 2
-    total_lines = panel_lines + len(options) + 2
-    sys.stdout.write(f"\x1b[{total_lines}A\x1b[0J")
-    sys.stdout.flush()
+    result = _run_inline_menu(options, console, header=panel)
 
     if result == 0:  # Yes
         return True, None
