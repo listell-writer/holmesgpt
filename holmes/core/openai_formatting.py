@@ -45,7 +45,7 @@ def type_to_open_ai_schema(param_attributes: Any) -> dict[str, Any]:
     elif param_type == "array":
         # Handle arrays with explicit item schemas
         if hasattr(param_attributes, "items") and param_attributes.items:
-            items_schema = type_to_open_ai_schema(param_attributes.items)
+            items_schema = _build_property_schema(param_attributes.items)
             type_obj = {"type": "array", "items": items_schema}
         else:
             # Fallback for arrays without explicit item schema

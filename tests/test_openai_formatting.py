@@ -206,3 +206,35 @@ class TestNestedPropertyMetadata:
             ["properties"]["inner"]["properties"]["deep"]
         )
         assert deep["description"] == "deeply nested field"
+
+    def test_array_items_metadata_preserved(self):
+        """Array items get description, enum, default, and examples."""
+        params = {
+            "colors": ToolParameter(
+                type="array", required=True,
+                items=ToolParameter(
+                    type="string", required=True,
+                    description="A color name",
+                    enum=["red", "green", "blue"],
+                ),
+            ),
+        }
+        result = format_tool_to_open_ai_standard("test", "test", params)
+        items = result["function"]["parameters"]["properties"]["colors"]["items"]
+        assert items["description"] == "A color name"
+        assert items["enum"] == ["red", "green", "blue"]
+
+    def test_array_items_default_and_examples_preserved(self):
+        params = {
+            "sizes": ToolParameter(
+                type="array", required=True,
+                items=ToolParameter(
+                    type="integer", required=True,
+                    default=10, examples=[10, 20, 50],
+                ),
+            ),
+        }
+        result = format_tool_to_open_ai_standard("test", "test", params)
+        items = result["function"]["parameters"]["properties"]["sizes"]["items"]
+        assert items["default"] == 10
+        assert items["examples"] == [10, 20, 50]
