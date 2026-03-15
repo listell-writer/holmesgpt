@@ -647,29 +647,7 @@ class AgenticProgressRenderer:
         from rich.console import Group
         return Group(*sections)
 
-    def _has_investigation_context(self) -> bool:
-        """True if we have any investigation state to show in the two-pane layout."""
-        return bool(self._live_tasks or self._data_lines or self._tool_history or self._in_flight)
-
     def _build_display(self) -> Any:
-        from rich.text import Text
-
-        now = time.time()
-
-        # Before any data is gathered, show simple thinking spinner
-        if self._thinking and not self._in_flight and not self._has_investigation_context():
-            display = Text()
-            elapsed = now - self._start_time
-            frame = _SPINNER_FRAMES[int(now * 8) % len(_SPINNER_FRAMES)]
-            display.append(f"  {frame} ", style=f"bold {AI_COLOR}")
-            display.append("Analyzing", style=f"bold {AI_COLOR}")
-            dots = "." * (int(elapsed * 2) % 4)
-            display.append(f"{dots:<4}", style=f"bold {AI_COLOR}")
-            if self._escape_hint:
-                display.append(f"    {self._escape_hint}", style="dim")
-            display.append("\n")  # Blank line so errors don't run into the spinner
-            return display
-
         left = self._build_left_pane(
             show_analyzing=self._thinking and not self._in_flight
         )
