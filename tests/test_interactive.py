@@ -1,6 +1,9 @@
+import logging
 import os
 import shutil
 import tempfile
+import threading
+import time
 import unittest
 from unittest.mock import Mock, patch
 
@@ -914,3 +917,393 @@ class TestRunInteractiveLoop(unittest.TestCase):
                 "/feedback" in call_str for call_str in help_calls
             )
             self.assertFalse(has_feedback_in_help)
+
+
+class TestRendererEndToEnd(unittest.TestCase):
+    """End-to-end tests for AgenticProgressRenderer with real Rich Console.
+
+    These tests exercise the full lifecycle: start() → handle_event() → flush(),
+    using a real Console(record=True) to capture actual rendered output.
+    """
+
+    def _make_console(self):
+        return Console(width=100, record=True, force_terminal=True, color_system=None)
+
+    def _make_event(self, event_type, data=None):
+        return StreamMessage(event=event_type, data=data or {})
+
+    def test_full_lifecycle_with_tools(self):
+        """Full start → tools → AI message → flush lifecycle renders correctly."""
+        console = self._make_console()
+        renderer = AgenticProgressRenderer(console, tool_number_offset=0)
+
+        renderer.start()
+        all_tool_calls = []
+        history = []
+
+        # Tool 1: start
+        renderer.handle_event(
+            self._make_event(StreamEvents.START_TOOL, {"tool_name": "kubectl_get"}),
+            all_tool_calls, history,
+        )
+
+        # Tool 1: complete with output
+        renderer.handle_event(
+            self._make_event(StreamEvents.TOOL_RESULT, {
+                "tool_name": "kubectl_get",
+                "description": "kubectl get pods --all-namespaces",
+                "toolset_name": "kubernetes/core",
+                "result": {
+                    "data": "NAMESPACE  NAME       READY  STATUS\ndefault    nginx-abc  1/1    Running",
+                    "elapsed_seconds": 1.5,
+                },
+            }),
+            all_tool_calls, history,
+        )
+
+        # Tool 2: start + complete with empty output (error)
+        renderer.handle_event(
+            self._make_event(StreamEvents.START_TOOL, {"tool_name": "Fetch Runbook"}),
+            all_tool_calls, history,
+        )
+        renderer.handle_event(
+            self._make_event(StreamEvents.TOOL_RESULT, {
+                "tool_name": "Fetch Runbook",
+                "description": "Fetch Runbook cluster-problems.md",
+                "toolset_name": "runbook",
+                "result": {"data": "", "elapsed_seconds": 0.0},
+            }),
+            all_tool_calls, history,
+        )
+
+        # AI message triggers summary
+        renderer.handle_event(
+            self._make_event(StreamEvents.AI_MESSAGE, {
+                "content": "All pods are running normally.",
+            }),
+            all_tool_calls, history,
+        )
+
+        renderer.flush()
+
+        output = console.export_text()
+
+        # Verify tools summary is printed
+        assert "kubectl get pods --all-namespaces" in output, f"Tool description not in output:\n{output}"
+        assert "Fetch Runbook cluster-problems.md" in output, f"Error tool not in output:\n{output}"
+        assert "(error)" in output, f"Error marker not in output:\n{output}"
+
+        # Verify AI message content is printed
+        assert "All pods are running normally." in output, f"AI message not in output:\n{output}"
+
+        # Verify stats line
+        assert "tokens" in output.lower(), f"Stats line not in output:\n{output}"
+
+    def test_no_data_pane_before_tool_output(self):
+        """Data pane should not appear until tools produce output."""
+        console = Console(width=100, force_terminal=True, color_system=None)
+        renderer = AgenticProgressRenderer(console, tool_number_offset=0)
+        renderer._thinking = True
+        renderer._start_time = time.time()
+
+        # Initial state: no data pane
+        display_text = self._render_to_text(renderer)
+        assert "Data" not in display_text, f"Data pane appeared too early:\n{display_text}"
+
+        # Add tasks — still no data pane
+        renderer._live_tasks = [
+            {"content": "Check pods", "status": "pending"},
+        ]
+        display_text = self._render_to_text(renderer)
+        assert "Data" not in display_text, f"Data pane appeared with only tasks:\n{display_text}"
+        assert "Check pods" in display_text, f"Tasks not shown:\n{display_text}"
+
+        # Add in-flight tool — still no data pane
+        renderer._in_flight[1] = ("kubectl_get", time.time())
+        renderer._thinking = False
+        display_text = self._render_to_text(renderer)
+        assert "Data" not in display_text, f"Data pane appeared during in-flight tool:\n{display_text}"
+        assert "kubectl_get" in display_text, f"In-flight tool not shown:\n{display_text}"
+
+        # Now add output — data pane should appear
+        del renderer._in_flight[1]
+        renderer._thinking = True
+        renderer._tool_history.append(("kubectl_get", "get pods", "k8s", 1.0, 100, False))
+        renderer._ingest_output("kubectl_get", "some output data", description="get pods")
+        display_text = self._render_to_text(renderer)
+        assert "Data" in display_text, f"Data pane did not appear after output:\n{display_text}"
+        assert "some output data" in display_text, f"Output not in data pane:\n{display_text}"
+
+    def test_data_pane_fixed_width(self):
+        """Data pane should take 50% of terminal width regardless of content."""
+        console = Console(width=100, force_terminal=True, color_system=None)
+        renderer = AgenticProgressRenderer(console, tool_number_offset=0)
+        renderer._thinking = True
+        renderer._start_time = time.time()
+
+        # Add a tool with short output — data pane should still be ~50% wide
+        renderer._tool_history.append(("tool1", "desc", "ts", 1.0, 10, False))
+        renderer._ingest_output("tool1", "short", description="desc")
+
+        display_text = self._render_to_text(renderer)
+
+        # The data panel border should be ~50 chars (50% of 100)
+        data_lines = [l for l in display_text.split("\n") if "Data" in l]
+        assert data_lines, f"No Data header line found:\n{display_text}"
+        data_header = data_lines[0]
+        # With ratio=1:1, data pane should be close to 50 chars, not shrunk
+        assert len(data_header.rstrip()) >= 40, (
+            f"Data pane header too narrow ({len(data_header.rstrip())} chars), "
+            f"expected ~50% width:\n{display_text}"
+        )
+
+    def test_error_tool_shows_token_count(self):
+        """Error tools with output should show both token count and (error)."""
+        console = Console(width=100, force_terminal=True, color_system=None)
+        renderer = AgenticProgressRenderer(console, tool_number_offset=0)
+        all_tool_calls = []
+
+        renderer.handle_event(
+            self._make_event(StreamEvents.START_TOOL, {"tool_name": "bad_query"}),
+            all_tool_calls, [],
+        )
+        renderer.handle_event(
+            self._make_event(StreamEvents.TOOL_RESULT, {
+                "tool_name": "bad_query",
+                "description": "bad query that returned error",
+                "toolset_name": "test",
+                "result": {
+                    "data": "Error: connection refused to database server",
+                    "elapsed_seconds": 0.5,
+                    "error": True,
+                },
+            }),
+            all_tool_calls, [],
+        )
+
+        # Tool should have output_len > 0 AND is_error
+        assert len(renderer._tool_history) == 1
+        _name, _desc, _ts, _elapsed, output_len, is_error = renderer._tool_history[0]
+        assert is_error, "Tool should be marked as error"
+        assert output_len > 0, "Tool should have output length despite error"
+
+        # Render the left pane and verify both token count and (error) appear
+        display_text = self._render_to_text(renderer)
+        assert "tokens" in display_text.lower() or "token" in display_text.lower(), (
+            f"Token count not shown for error tool:\n{display_text}"
+        )
+        assert "(error)" in display_text, f"Error marker not shown:\n{display_text}"
+
+    def test_empty_output_shows_red_marker(self):
+        """Empty tool output should show a visible red marker, not dim text."""
+        console = Console(width=100, force_terminal=True, color_system=None)
+        renderer = AgenticProgressRenderer(console, tool_number_offset=0)
+        renderer._thinking = True
+        renderer._start_time = time.time()
+
+        renderer._tool_history.append(("bad_tool", "bad tool call", "test", 0.0, 0, True))
+        renderer._ingest_output("bad_tool", "", description="bad tool call")
+
+        display_text = self._render_to_text(renderer)
+        assert "no output" in display_text, f"Empty marker not found:\n{display_text}"
+
+    def test_log_buffering_filter(self):
+        """Log filter should capture records and prevent them from passing through."""
+        console = Mock(spec=Console)
+        renderer = AgenticProgressRenderer(console, tool_number_offset=0)
+        root = logging.getLogger()
+
+        # Install filter on all handlers (matches production behavior)
+        for handler in root.handlers:
+            handler.addFilter(renderer._log_filter)
+        try:
+            test_logger = logging.getLogger("test.interactive.buffering")
+            test_logger.error("This should be buffered")
+
+            assert len(renderer._log_buffer) >= 1, (
+                f"Expected at least 1 buffered log record, got {len(renderer._log_buffer)}"
+            )
+            assert renderer._log_buffer[0].getMessage() == "This should be buffered"
+        finally:
+            for handler in root.handlers:
+                handler.removeFilter(renderer._log_filter)
+            renderer._log_buffer.clear()
+
+    def test_start_installs_log_filter_on_handlers(self):
+        """start() should install the log filter on root logger's handlers."""
+        console = self._make_console()
+        renderer = AgenticProgressRenderer(console, tool_number_offset=0)
+        root = logging.getLogger()
+
+        renderer.start()
+        try:
+            # Filter should be on at least one handler
+            has_filter = any(
+                renderer._log_filter in h.filters for h in root.handlers
+            )
+            assert has_filter, "Log filter not installed on any handler after start()"
+        finally:
+            renderer.flush()
+
+        # After flush, filter should be removed from all handlers
+        has_filter = any(
+            renderer._log_filter in h.filters for h in root.handlers
+        )
+        assert not has_filter, "Log filter still on handlers after flush"
+
+    def test_handle_event_tool_result_populates_data(self):
+        """TOOL_RESULT events should populate tool history and data buffer."""
+        console = Mock(spec=Console)
+        renderer = AgenticProgressRenderer(console, tool_number_offset=0)
+        all_tool_calls = []
+
+        # Start a tool
+        renderer.handle_event(
+            self._make_event(StreamEvents.START_TOOL, {"tool_name": "my_tool"}),
+            all_tool_calls, [],
+        )
+        assert len(renderer._in_flight) == 1
+        assert renderer._thinking is False
+
+        # Complete the tool
+        renderer.handle_event(
+            self._make_event(StreamEvents.TOOL_RESULT, {
+                "tool_name": "my_tool",
+                "description": "do something useful",
+                "toolset_name": "test_toolset",
+                "result": {
+                    "data": "line 1\nline 2\nline 3",
+                    "elapsed_seconds": 2.0,
+                },
+            }),
+            all_tool_calls, [],
+        )
+
+        assert len(renderer._in_flight) == 0, "Tool still in flight after completion"
+        assert renderer._thinking is True, "Should be thinking between tools"
+        assert len(renderer._tool_history) == 1
+        assert renderer._tool_history[0][1] == "do something useful"
+        assert len(renderer._data_lines) > 0, "Data buffer should have content"
+        assert any("line 1" in l for l in renderer._data_lines)
+
+    def test_ai_message_stops_live_and_prints_summary(self):
+        """AI_MESSAGE event should stop Live and print the summary."""
+        console = self._make_console()
+        renderer = AgenticProgressRenderer(console, tool_number_offset=0)
+
+        renderer.start()
+        all_tool_calls = []
+
+        # Run a tool through the full cycle
+        renderer.handle_event(
+            self._make_event(StreamEvents.START_TOOL, {"tool_name": "test_tool"}),
+            all_tool_calls, [],
+        )
+        renderer.handle_event(
+            self._make_event(StreamEvents.TOOL_RESULT, {
+                "tool_name": "test_tool",
+                "description": "test tool description",
+                "toolset_name": "testing",
+                "result": {"data": "some output", "elapsed_seconds": 0.5},
+            }),
+            all_tool_calls, [],
+        )
+
+        # AI message should stop Live and print summary
+        renderer.handle_event(
+            self._make_event(StreamEvents.AI_MESSAGE, {
+                "content": "Here is my analysis.",
+            }),
+            all_tool_calls, [],
+        )
+
+        assert renderer._live is None, "Live display not stopped after AI_MESSAGE"
+        assert renderer._summary_printed is True
+
+        output = console.export_text()
+        assert "test tool description" in output, f"Tool not in summary:\n{output}"
+        assert "Here is my analysis." in output, f"AI message not printed:\n{output}"
+
+    def test_multiple_tool_rounds_no_duplicate_summary(self):
+        """Multiple tool rounds followed by AI message should print summary once."""
+        console = self._make_console()
+        renderer = AgenticProgressRenderer(console, tool_number_offset=0)
+
+        renderer.start()
+        all_tool_calls = []
+
+        # Round 1
+        for tool_name in ["tool_a", "tool_b"]:
+            renderer.handle_event(
+                self._make_event(StreamEvents.START_TOOL, {"tool_name": tool_name}),
+                all_tool_calls, [],
+            )
+            renderer.handle_event(
+                self._make_event(StreamEvents.TOOL_RESULT, {
+                    "tool_name": tool_name,
+                    "description": f"run {tool_name}",
+                    "toolset_name": "test",
+                    "result": {"data": f"output from {tool_name}", "elapsed_seconds": 0.1},
+                }),
+                all_tool_calls, [],
+            )
+
+        # AI message
+        renderer.handle_event(
+            self._make_event(StreamEvents.AI_MESSAGE, {"content": "Done."}),
+            all_tool_calls, [],
+        )
+
+        # flush should not duplicate
+        renderer.flush()
+
+        output = console.export_text()
+        # Count occurrences of "Tools" panel header
+        tools_count = output.count("Tools")
+        assert tools_count <= 2, (  # Title + border
+            f"Tools panel printed multiple times ({tools_count}):\n{output}"
+        )
+
+    def test_todo_write_updates_tasks(self):
+        """TodoWrite tool results should update live tasks, not appear in tool history."""
+        console = Mock(spec=Console)
+        renderer = AgenticProgressRenderer(console, tool_number_offset=0)
+        all_tool_calls = []
+
+        renderer.handle_event(
+            self._make_event(StreamEvents.START_TOOL, {"tool_name": "TodoWrite"}),
+            all_tool_calls, [],
+        )
+        renderer.handle_event(
+            self._make_event(StreamEvents.TOOL_RESULT, {
+                "tool_name": "TodoWrite",
+                "description": "TodoWrite",
+                "toolset_name": "",
+                "result": {
+                    "data": "Tasks updated",
+                    "elapsed_seconds": 0.0,
+                    "params": {
+                        "todos": [
+                            {"content": "Check pods", "status": "in_progress"},
+                            {"content": "Check logs", "status": "pending"},
+                        ]
+                    },
+                },
+            }),
+            all_tool_calls, [],
+        )
+
+        assert renderer._live_tasks is not None, "Tasks not set"
+        assert len(renderer._live_tasks) == 2
+        assert renderer._live_tasks[0]["content"] == "Check pods"
+        # TodoWrite should NOT appear in tool history
+        assert len(renderer._tool_history) == 0, "TodoWrite should not be in tool history"
+        # TodoWrite should NOT be in data buffer
+        assert not any("TodoWrite" in l for l in renderer._data_lines), "TodoWrite in data buffer"
+
+    def _render_to_text(self, renderer):
+        """Render the display to plain text using a recording console."""
+        capture = Console(width=100, record=True, force_terminal=True, color_system=None)
+        display = renderer._build_display()
+        capture.print(display)
+        return capture.export_text()

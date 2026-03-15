@@ -604,9 +604,11 @@ class AgenticProgressRenderer:
         if has_tools:
             tools_text = Text()
             # Compute available width for tool labels.
-            # Full terminal width minus panel border (2), padding (2), prefix (4 = "  → ").
+            # The left pane gets ratio=1 out of 2 total columns (50%),
+            # minus panel border (2) and padding (2) and prefix (4 = "  → ").
             term_width = self._console.width or 120
-            label_budget = max(term_width - 2 - 2 - 4, 30)
+            pane_width = term_width // 2
+            label_budget = max(pane_width - 2 - 2 - 4, 30)
 
             for name, desc, toolset, elapsed, output_len, is_error in self._tool_history:
                 tools_text.append("  → ", style="dim")
@@ -616,10 +618,10 @@ class AgenticProgressRenderer:
                     suffix += f" [{toolset}]"
                 if elapsed is not None:
                     suffix += f" {elapsed:.1f}s"
+                if output_len > 0:
+                    suffix += f" {_format_size(output_len)}"
                 if is_error:
                     suffix += " (error)"
-                elif output_len > 0:
-                    suffix += f" {_format_size(output_len)}"
                 max_label = label_budget - len(suffix)
                 label = desc if desc else name
                 if max_label > 6 and len(label) > max_label:
@@ -629,10 +631,10 @@ class AgenticProgressRenderer:
                     tools_text.append(f" [{toolset}]", style="dim")
                 if elapsed is not None:
                     tools_text.append(f" {elapsed:.1f}s", style="dim")
+                if output_len > 0:
+                    tools_text.append(f" {_format_size(output_len)}", style="dim cyan")
                 if is_error:
                     tools_text.append(" (error)", style="dim red")
-                elif output_len > 0:
-                    tools_text.append(f" {_format_size(output_len)}", style="dim cyan")
                 tools_text.append("\n")
 
             frame = _SPINNER_FRAMES[int(now * 8) % len(_SPINNER_FRAMES)]
@@ -677,8 +679,6 @@ class AgenticProgressRenderer:
         return Group(*sections)
 
     def _build_display(self) -> Any:
-        from rich.console import Group
-
         left = self._build_left_pane(
             show_analyzing=self._thinking and not self._in_flight
         )
@@ -687,18 +687,26 @@ class AgenticProgressRenderer:
         if not self._data_lines:
             return left
 
-        # Stack vertically: status panels on top, full-width data pane below
         right = self._build_data_pane()
+
+        # Side-by-side layout with equal-width columns.
+        # min_width ensures each column takes at least 50% of terminal width,
+        # preventing the data pane from shrinking when content is narrow.
+        try:
+            half_width = max((self._console.width or 120) // 2 - 1, 30)
+        except (TypeError, ValueError):
+            half_width = 59
+        table = Table.grid(padding=(0, 1))
+        table.add_column("status", min_width=half_width)
+        table.add_column("data", min_width=half_width)
+
         stats = self._build_stats_line()
-        data_panel = Panel(
-            right,
-            title=f"[bold]Data[/bold]{stats}",
-            title_align="left",
-            border_style="dim",
-            padding=(0, 0),
+        table.add_row(
+            left,
+            Panel(right, title=f"[bold]Data[/bold]{stats}", title_align="left", border_style="dim", padding=(0, 0)),
         )
 
-        return Group(left, data_panel)
+        return table
 
     def _tick(self) -> None:
         while not self._timer_stop.wait(0.15):
@@ -725,8 +733,11 @@ class AgenticProgressRenderer:
         """Start the Live display with the initial 'Thinking...' spinner."""
         from rich.live import Live
 
-        # Buffer log messages to prevent them from breaking Live's transient rendering
-        logging.getLogger().addFilter(self._log_filter)
+        # Buffer log messages to prevent them from breaking Live's transient rendering.
+        # Filters must be installed on handlers (not the root logger) because
+        # Python's logging propagation skips logger-level filters on ancestors.
+        for handler in logging.getLogger().handlers:
+            handler.addFilter(self._log_filter)
 
         try:
             self._live = Live(
@@ -739,7 +750,8 @@ class AgenticProgressRenderer:
         except (TypeError, AttributeError):
             # Console may be a mock in tests — skip live display
             self._live = None
-            logging.getLogger().removeFilter(self._log_filter)
+            for handler in logging.getLogger().handlers:
+                handler.removeFilter(self._log_filter)
             return
         self._timer_stop.clear()
         timer_thread = threading.Thread(target=self._tick, daemon=True)
@@ -754,8 +766,9 @@ class AgenticProgressRenderer:
             except (TypeError, AttributeError):
                 pass
             self._live = None
-        # Remove filter and replay buffered log records
-        logging.getLogger().removeFilter(self._log_filter)
+        # Remove filter from all handlers and replay buffered log records
+        for handler in logging.getLogger().handlers:
+            handler.removeFilter(self._log_filter)
         if self._log_buffer:
             root = logging.getLogger()
             for record in self._log_buffer:
