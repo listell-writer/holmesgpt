@@ -3,7 +3,7 @@ import logging
 import os
 from pathlib import Path
 from tempfile import TemporaryDirectory
-from typing import Any, List
+from typing import Any, Dict, List
 from unittest.mock import patch
 
 import litellm
@@ -23,11 +23,11 @@ logger = logging.getLogger(__name__)
 
 
 def get_cached_tokens(raw_response: Any) -> int:
-    return extract_usage_from_response(raw_response).cached_tokens or 0
+    return extract_usage_from_response(raw_response)["cached_tokens"] or 0
 
 
 def get_prompt_tokens(raw_response: Any) -> int:
-    return extract_usage_from_response(raw_response).prompt_tokens
+    return extract_usage_from_response(raw_response)["prompt_tokens"]
 
 
 def extract_cached_tokens_list(raw_responses: List[Any]) -> List[int]:
