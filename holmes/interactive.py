@@ -152,10 +152,6 @@ class InitProgressRenderer:
 
         display = Text()
 
-        # Show model prominently at top if loaded
-        if self._model_message:
-            display.append(f"  {self._model_message}\n", style="bold")
-
         display.append("  ")
         display.append(f"{self._phase}", style="bold")
         display.append(f"  {checked} ready", style="dim")
@@ -190,6 +186,10 @@ class InitProgressRenderer:
             failed_names = ", ".join(name for name, _ in self._toolsets_failed[-4:])
             display.append("\n  ")
             display.append(f"  failed: {failed_names}", style="red dim")
+
+        # Show model after datasources
+        if self._model_message:
+            display.append(f"\n  {self._model_message}", style="bold")
 
         return display
 
@@ -254,10 +254,6 @@ class InitProgressRenderer:
         failed = len(self._toolsets_failed)
         elapsed = time.time() - self._start_time
 
-        # Model gets its own prominent line
-        if self._model_message:
-            self._console.print(f"[bold]{self._model_message}[/bold]")
-
         parts = []
         parts.append(f"[bold green]{ok}[/bold green] datasources loaded")
         if failed:
@@ -270,6 +266,10 @@ class InitProgressRenderer:
             for name, error in self._toolsets_failed:
                 err_suffix = f": {error}" if error else ""
                 self._console.print(f"  [red]✗ {name}{err_suffix}[/red]")
+
+        # Model info after datasources
+        if self._model_message:
+            self._console.print(f"[bold]{self._model_message}[/bold]")
         self._console.rule(style="dim")
 
 
@@ -441,8 +441,12 @@ class AgenticProgressRenderer:
         start = min(self._scroll_offset, max_start)
         end = min(start + visible, total)
 
+        # Width of line number gutter based on total lines
+        gutter_w = len(str(total))
+
         for i, idx in enumerate(range(start, end)):
             line = self._data_lines[idx]
+            line_num = idx + 1  # 1-based
 
             # Edge fade: dim bottom 2 lines to hint at more content below
             rows_in_window = end - start
@@ -451,7 +455,8 @@ class AgenticProgressRenderer:
             else:
                 style = ""
 
-            pane.append(f" {line}", style=style)
+            pane.append(f" {line_num:>{gutter_w}} ", style="dim")
+            pane.append(line, style=style)
             if i < end - start - 1:
                 pane.append("\n")
 
