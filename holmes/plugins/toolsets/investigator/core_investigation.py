@@ -101,9 +101,15 @@ class TodoWriteTool(Tool):
         try:
             todos_data = params.get("todos", [])
 
+            logging.debug(
+                f"[TodoDebug] TodoWriteTool._invoke: params_keys={list(params.keys())} "
+                f"todos_type={type(todos_data).__name__} todos_len={len(todos_data) if isinstance(todos_data, list) else 'N/A'} "
+                f"todos_data={todos_data!r}"
+            )
+
             tasks = parse_tasks(todos_data=todos_data)
 
-            logging.debug(f"Tasks: {len(tasks)}")
+            logging.debug(f"[TodoDebug] Parsed {len(tasks)} tasks: {[(t.id, t.content, t.status.value) for t in tasks]}")
 
             self.print_tasks_table(tasks)
             formatted_tasks = format_tasks(tasks)

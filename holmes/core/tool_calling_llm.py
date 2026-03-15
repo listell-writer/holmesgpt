@@ -590,12 +590,25 @@ class ToolCallingLLM:
             tool_arguments = tool_to_call.function.arguments
             tool_id = tool_to_call.id
 
+            logging.debug(
+                f"[TodoDebug] LLM tool_call: name={tool_name} id={tool_id} "
+                f"raw_arguments={tool_arguments!r}"
+            )
+
             tool_params = {}
             try:
                 tool_params = json.loads(tool_arguments)
             except Exception:
                 logging.warning(
                     f"Failed to parse arguments for tool: {tool_name}. args: {tool_arguments}"
+                )
+
+            if tool_name == "TodoWrite":
+                logging.debug(
+                    f"[TodoDebug] TodoWrite parsed params keys={list(tool_params.keys())} "
+                    f"todos_type={type(tool_params.get('todos')).__name__} "
+                    f"todos_len={len(tool_params.get('todos', []))} "
+                    f"todos_value={tool_params.get('todos')!r}"
                 )
 
             tool_response = None
@@ -841,6 +854,11 @@ class ToolCallingLLM:
             yield self._emit_token_count(messages, tools, full_response, limit_result, metadata, stats)
 
             tools_to_call = getattr(response_message, "tool_calls", None)
+            logging.debug(
+                f"[TodoDebug] LLM turn {i}: model={self.llm.model} "
+                f"num_tool_calls={len(tools_to_call) if tools_to_call else 0} "
+                f"tool_names={[t.function.name for t in tools_to_call] if tools_to_call else []}"
+            )
             if not tools_to_call:
                 yield StreamMessage(
                     event=StreamEvents.ANSWER_END,
