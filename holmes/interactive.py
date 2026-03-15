@@ -728,8 +728,8 @@ class AgenticProgressRenderer:
         # Status line: static when approval pending, animated otherwise
         if self._approval_pending:
             status_text = Text()
-            status_text.append("  ⏸ ", style="dim")
-            status_text.append("Approval required", style="dim")
+            status_text.append("  ⏸ ", style="bold yellow")
+            status_text.append("Approval required", style="bold yellow")
             if self._escape_hint:
                 status_text.append(f"  {self._escape_hint}", style="dim")
             sections.append(status_text)
@@ -755,17 +755,19 @@ class AgenticProgressRenderer:
         from rich.console import Group
         return Group(*sections)
 
-    def _build_approval_data_pane(self) -> "Text":
-        """Build a dim data pane with centered 'Waiting for approval' message."""
+    def _build_approval_data_pane(self) -> Any:
+        """Build a data pane showing the command awaiting approval."""
         from rich.text import Text
 
         pane = Text()
-        # Fill with blank lines then center the message
-        half = self._DATA_PANE_LINES // 2
-        for _ in range(half - 1):
-            pane.append("\n")
-        pane.append("  ⏸ Waiting for approval…", style="dim italic")
         pane.append("\n")
+        if self._pending_approval_descriptions:
+            for desc in self._pending_approval_descriptions:
+                pane.append(f"  {desc}\n", style="bold")
+        else:
+            pane.append("  (unknown command)\n", style="dim")
+        pane.append("\n")
+        pane.append("  Respond below…\n", style="dim italic")
         return pane
 
     def _build_display(self) -> Any:
@@ -796,9 +798,12 @@ class AgenticProgressRenderer:
         table.add_column("data", min_width=right_width)
 
         stats = self._build_stats_line()
-        # Dim the data pane border when approval is pending
-        data_border = "dim" if not self._approval_pending else "dim"
-        data_title = f"[bold]Data[/bold]{stats}" if not self._approval_pending else "[dim]Data[/dim]"
+        if self._approval_pending:
+            data_border = "bold yellow"
+            data_title = "[bold yellow]Approve bash command?[/bold yellow]"
+        else:
+            data_border = "dim"
+            data_title = f"[bold]Data[/bold]{stats}"
         table.add_row(
             left,
             Panel(right, title=data_title, title_align="left", border_style=data_border, padding=(0, 0)),
@@ -880,28 +885,40 @@ class AgenticProgressRenderer:
                         handler.emit(record)
             self._log_buffer.clear()
 
-    def _resume_live(self) -> None:
-        """Restart the Live display (e.g. after approval completes)."""
-        if self._live is not None:
-            return  # already running
-        for handler in logging.getLogger().handlers:
-            handler.addFilter(self._log_filter)
-        try:
-            self._live = _make_live(
-                self._build_display(),
-                console=self._console,
-                transient=True,
-                refresh_per_second=8,
-            )
-            self._live.start()
-        except (TypeError, AttributeError):
-            self._live = None
-            for handler in logging.getLogger().handlers:
-                handler.removeFilter(self._log_filter)
-            return
-        self._timer_stop.clear()
-        timer_thread = threading.Thread(target=self._tick, daemon=True)
-        timer_thread.start()
+    def stop_for_approval(self) -> None:
+        """Pause Live so the interactive approval prompt can use the terminal.
+
+        Unlike ``_stop_live``, this does **not** replay buffered log messages
+        (we only pause temporarily and will restart).
+        """
+        with self._lock:
+            self._timer_stop.set()
+            if self._live is not None:
+                try:
+                    self._live.stop()
+                except (TypeError, AttributeError):
+                    pass
+                self._live = None
+
+    def restart_after_approval(self) -> None:
+        """Restart Live after the approval prompt has finished."""
+        with self._lock:
+            if self._live is not None:
+                return  # already running
+            try:
+                self._live = _make_live(
+                    self._build_display(),
+                    console=self._console,
+                    transient=True,
+                    refresh_per_second=8,
+                )
+                self._live.start()
+            except (TypeError, AttributeError):
+                self._live = None
+                return
+            self._timer_stop.clear()
+            timer_thread = threading.Thread(target=self._tick, daemon=True)
+            timer_thread.start()
 
     def _process_completed(self) -> None:
         """Absorb completed tools into live state (tool history + tasks)."""
@@ -994,11 +1011,8 @@ class AgenticProgressRenderer:
         with self._lock:
             if event.event == StreamEvents.START_TOOL:
                 self._thinking = False
-                # Resume Live if it was stopped for approval
-                if self._approval_pending:
-                    self._approval_pending = False
-                    self._pending_approval_descriptions = []
-                    self._resume_live()
+                self._approval_pending = False
+                self._pending_approval_descriptions = []
                 num = self._next_tool_number
                 self._next_tool_number += 1
                 tool_name = event.data.get("tool_name", "...")
@@ -1059,8 +1073,8 @@ class AgenticProgressRenderer:
                 self._pending_approval_descriptions = [
                     a.get("description", a.get("tool_name", "unknown")) for a in pending
                 ]
-                # Stop Live so the interactive approval prompt renders cleanly below
-                self._stop_live()
+                if self._live is not None:
+                    self._live.update(self._build_display())
 
             elif event.event == StreamEvents.AI_MESSAGE:
                 self._thinking = False
@@ -2501,6 +2515,8 @@ def run_interactive_loop(
 
             # Wrap approval callback to coordinate terminal access with escape listener
             call_approval_callback = approval_callback
+            # Mutable container so the closure can access the renderer created later
+            progress_ref: List[Optional[AgenticProgressRenderer]] = [None]
             if approval_callback:
 
                 def _wrapped_approval(
@@ -2508,14 +2524,21 @@ def run_interactive_loop(
                     _orig=approval_callback,
                     _approval_active=approval_active,
                     _terminal_restored=terminal_restored,
+                    _progress_ref=progress_ref,
                 ) -> tuple[bool, Optional[str]]:
                     _approval_active.set()
                     # Wait for the escape listener to restore the terminal
                     # from cbreak mode before launching the prompt_toolkit UI.
                     _terminal_restored.wait(timeout=2.0)
+                    # Stop the Live display so the interactive prompt renders cleanly
+                    renderer = _progress_ref[0]
+                    if renderer is not None:
+                        renderer.stop_for_approval()
                     try:
                         return _orig(pending_approval)
                     finally:
+                        if renderer is not None:
+                            renderer.restart_after_approval()
                         _approval_active.clear()
 
                 call_approval_callback = _wrapped_approval
@@ -2594,6 +2617,7 @@ def run_interactive_loop(
 
                 # --- Main thread: render stream events while monitoring for escape ---
                 progress = AgenticProgressRenderer(console, tool_number_offset, escape_hint)
+                progress_ref[0] = progress
                 progress.start()
                 all_tool_calls_this_turn: list[dict] = []
                 terminal_data = None

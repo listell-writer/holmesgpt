@@ -1342,7 +1342,7 @@ class TestRendererEndToEnd(unittest.TestCase):
         renderer._approval_pending = True
         display_text = self._render_to_text(renderer)
         assert "real tool output here" not in display_text, f"Should not show data:\n{display_text}"
-        assert "Waiting for approval" in display_text, f"Should show waiting:\n{display_text}"
+        assert "Approve bash command?" in display_text, f"Should show approval prompt:\n{display_text}"
 
     def test_approval_pending_dims_task_panel(self):
         """When approval is pending, tasks should all be dim (no bold yellow)."""
@@ -1395,6 +1395,53 @@ class TestRendererEndToEnd(unittest.TestCase):
             all_tool_calls, [],
         )
         assert renderer._approval_pending is False
+
+    def test_approval_shows_command_description(self):
+        """When approval is pending with descriptions, the command should be shown."""
+        console = Console(width=100, force_terminal=True, color_system=None)
+        renderer = AgenticProgressRenderer(console, tool_number_offset=0)
+        renderer._thinking = True
+        renderer._start_time = time.time()
+        renderer._tool_history.append(("t", "desc", "ts", 1.0, 100, False))
+        renderer._ingest_output("t", "real tool output here", description="desc")
+
+        # Set approval pending with command description
+        renderer._approval_pending = True
+        renderer._pending_approval_descriptions = ["egrep -r 'error' /var/log"]
+        display_text = self._render_to_text(renderer)
+        assert "egrep -r" in display_text, f"Should show command:\n{display_text}"
+        assert "Approve bash command?" in display_text, f"Should show title:\n{display_text}"
+
+    def test_approval_event_stores_descriptions(self):
+        """APPROVAL_REQUIRED event should store descriptions from pending_approvals."""
+        console = Console(width=100, force_terminal=True, color_system=None)
+        renderer = AgenticProgressRenderer(console, tool_number_offset=0)
+        renderer._thinking = True
+        renderer._start_time = time.time()
+
+        event = self._make_event(StreamEvents.APPROVAL_REQUIRED, {
+            "pending_approvals": [
+                {"description": "kubectl get pods", "tool_name": "bash", "tool_call_id": "1", "params": {}},
+            ]
+        })
+        renderer.handle_event(event, [], [])
+        assert renderer._approval_pending is True
+        assert renderer._pending_approval_descriptions == ["kubectl get pods"]
+
+    def test_stop_and_restart_for_approval(self):
+        """stop_for_approval stops Live, restart_after_approval restarts it."""
+        console = Console(width=100, force_terminal=True, color_system=None)
+        renderer = AgenticProgressRenderer(console, tool_number_offset=0)
+        renderer._thinking = True
+        renderer._start_time = time.time()
+
+        # Simulate Live being active (start will try to create Live, may fail in test)
+        # Just test the methods don't raise
+        renderer.stop_for_approval()
+        assert renderer._live is None
+
+        renderer.restart_after_approval()
+        # After restart, Live should be created (or None if console doesn't support it)
 
     def test_approval_pending_hides_data_stats(self):
         """When approval is pending, data pane title should not show stats."""
