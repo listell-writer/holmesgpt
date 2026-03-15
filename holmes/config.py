@@ -555,7 +555,7 @@ class Config(RobustaBaseConfig):
         if self._model_source and self._model_source != "default":
             source_hint = f"configured {self._model_source}"
         else:
-            source_hint = "default, change with --model, see https://holmesgpt.dev/ai-providers"
+            source_hint = "default, change with --model, for all options see https://holmesgpt.dev/ai-providers"
         msg = f"Model: {model_name}, {context_size} context, {max_response} max response ({source_hint})"
         display_logger.info(msg)
         if on_event is not None:

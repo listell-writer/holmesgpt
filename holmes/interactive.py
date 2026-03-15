@@ -9,6 +9,7 @@ import threading
 import time
 from collections import defaultdict
 from enum import Enum
+from io import StringIO
 from pathlib import Path
 from typing import Any, DefaultDict, Dict, List, Optional
 
@@ -1787,16 +1788,25 @@ def handle_tool_approval(
         prefixes_display = "<command>"
 
     # Show command in a yellow-bordered panel to draw attention
-    console.print()
-    console.print(
-        Panel(
-            f"  {command or 'unknown'}",
-            title="[bold]Approve bash command?[/bold]",
-            title_align="left",
-            border_style="bold yellow",
-            padding=(1, 1),
-        )
+    panel = Panel(
+        f"  {command or 'unknown'}",
+        title="[bold]Approve bash command?[/bold]",
+        title_align="left",
+        border_style="bold yellow",
+        padding=(1, 1),
     )
+
+    # Render the panel to a buffer so we can count its height for cleanup.
+    _buf = StringIO()
+    _measure = Console(file=_buf, width=console.width or 120, force_terminal=True)
+    _measure.print()
+    _measure.print(panel)
+    rendered = _buf.getvalue()
+    panel_lines = rendered.count("\n")
+
+    # Print to real console
+    console.print()
+    console.print(panel)
 
     # Show inline menu
     options = [
@@ -1806,6 +1816,13 @@ def handle_tool_approval(
     ]
 
     result = _run_inline_menu(options, console)
+
+    # Erase the entire approval prompt (panel + menu) so it doesn't
+    # linger and look like action is still required.
+    # Menu is: N options + 1 blank line + "Esc to cancel" = len(options) + 2
+    total_lines = panel_lines + len(options) + 2
+    sys.stdout.write(f"\x1b[{total_lines}A\x1b[0J")
+    sys.stdout.flush()
 
     if result == 0:  # Yes
         return True, None
