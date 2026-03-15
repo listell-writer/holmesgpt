@@ -1688,17 +1688,39 @@ def _read_key() -> str:
     """
     ch = sys.stdin.read(1)
     if ch == "\x1b":
-        # Could be standalone Escape or start of an escape sequence
-        ready, _, _ = select_module.select([sys.stdin], [], [], 0.05)
+        # Could be standalone Escape or start of an escape sequence.
+        # Use a generous timeout — SSH or slow terminals may split the
+        # sequence across multiple reads.
+        ready, _, _ = select_module.select([sys.stdin], [], [], 0.1)
         if ready:
             ch2 = sys.stdin.read(1)
             if ch2 == "[":
+                # CSI sequence: read the final byte
                 ch3 = sys.stdin.read(1)
                 if ch3 == "A":
                     return "up"
                 if ch3 == "B":
                     return "down"
-            # Unknown escape sequence — treat as Esc
+                # Consume any remaining bytes of longer sequences (e.g. \x1b[1;5A)
+                while ch3.isdigit() or ch3 == ";":
+                    ch3 = sys.stdin.read(1)
+                if ch3 == "A":
+                    return "up"
+                if ch3 == "B":
+                    return "down"
+                # Other CSI sequences (left, right, home, etc.) — ignore
+                return ""
+            if ch2 == "O":
+                # SS3 sequence (some terminals send \x1bOA for arrow keys)
+                ch3 = sys.stdin.read(1)
+                if ch3 == "A":
+                    return "up"
+                if ch3 == "B":
+                    return "down"
+                return ""
+            # Unknown escape sequence — ignore, don't treat as Esc
+            return ""
+        # No follow-up byte within timeout → standalone Escape key
         return "esc"
     if ch in ("\r", "\n"):
         return "enter"
@@ -1786,6 +1808,8 @@ def _run_inline_menu(
             if not ready:
                 continue
             key = _read_key()
+            if not key:
+                continue  # Unknown escape sequence — ignore
             if key == "up":
                 selected = (selected - 1) % len(options)
             elif key == "down":
@@ -2227,11 +2251,20 @@ def _wait_for_completion_or_escape(
                 if ch == "\x1b":
                     # Disambiguate standalone Escape from escape sequences (arrow keys etc.)
                     ready2, _, _ = select_module.select(
-                        [sys.stdin], [], [], 0.05
+                        [sys.stdin], [], [], 0.1
                     )
                     if ready2:
-                        # Part of an escape sequence — consume and discard
-                        sys.stdin.read(1)
+                        # Part of an escape sequence — consume all remaining bytes
+                        # (e.g. \x1b[A is 2 more bytes, \x1b[1;5A is more)
+                        ch2 = sys.stdin.read(1)
+                        if ch2 == "[":
+                            # CSI sequence — read until final alpha byte
+                            while True:
+                                ch3 = sys.stdin.read(1)
+                                if ch3.isalpha() or ch3 == "~":
+                                    break
+                        elif ch2 == "O":
+                            sys.stdin.read(1)  # SS3: one more byte
                         continue
                     # Standalone Escape key pressed
                     cancel_event.set()
