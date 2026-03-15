@@ -9,6 +9,7 @@ from rich.console import Console
 from holmes.core.feedback import FeedbackMetadata
 from holmes.core.tool_calling_llm import ToolCallingLLM
 from holmes.interactive import (
+    AgenticProgressRenderer,
     Feedback,
     SlashCommandCompleter,
     SlashCommands,
@@ -18,6 +19,81 @@ from holmes.interactive import (
 )
 from holmes.utils.stream import StreamEvents, StreamMessage
 from tests.mocks.toolset_mocks import SampleToolset
+
+
+class TestAgenticProgressRendererSummary(unittest.TestCase):
+    """Test that tasks and tools panels persist after flush()."""
+
+    def _get_printed_panels(self, console):
+        """Extract Panel objects from console.print calls."""
+        from rich.panel import Panel
+        panels = []
+        for call in console.print.call_args_list:
+            args = call[0] if call[0] else []
+            for arg in args:
+                if isinstance(arg, Panel):
+                    panels.append(arg)
+        return panels
+
+    def test_flush_prints_tools_summary(self):
+        """flush() should print the tools panel even when AI_MESSAGE never fired."""
+        console = Mock(spec=Console)
+        renderer = AgenticProgressRenderer(console, tool_number_offset=0)
+
+        # Simulate tool completion (what TOOL_RESULT handler does)
+        renderer._tool_history.append(("kubectl_get_pods", 1.2, 500, False))
+        renderer._tool_history.append(("kubectl_top_pods", 0.8, 300, False))
+        renderer._total_bytes = 800
+        renderer._total_queries = 2
+
+        renderer.flush()
+
+        # Should have printed panels (tools) and stats
+        panels = self._get_printed_panels(console)
+        assert len(panels) >= 1, f"Expected at least 1 panel, got {len(panels)}"
+        assert console.print.call_count >= 2  # tools panel + stats line
+
+    def test_flush_prints_tasks_summary(self):
+        """flush() should print task panel when tasks exist."""
+        console = Mock(spec=Console)
+        renderer = AgenticProgressRenderer(console, tool_number_offset=0)
+
+        renderer._live_tasks = [
+            {"content": "Check pods", "status": "completed"},
+            {"content": "Check logs", "status": "in_progress"},
+        ]
+        renderer._tool_history.append(("kubectl_get_pods", 1.0, 100, False))
+
+        renderer.flush()
+
+        panels = self._get_printed_panels(console)
+        assert len(panels) >= 2, f"Expected tasks + tools panels, got {len(panels)}"
+
+    def test_flush_no_double_print_after_ai_message(self):
+        """Summary should print only once even if AI_MESSAGE already triggered it."""
+        console = Mock(spec=Console)
+        renderer = AgenticProgressRenderer(console, tool_number_offset=0)
+
+        renderer._tool_history.append(("kubectl_get_pods", 1.0, 100, False))
+
+        # Simulate AI_MESSAGE calling _print_investigation_summary
+        renderer._print_investigation_summary()
+        first_print_count = console.print.call_count
+
+        # Now flush - should NOT re-print
+        renderer.flush()
+        assert console.print.call_count == first_print_count, (
+            "Summary was printed twice"
+        )
+
+    def test_flush_no_output_when_no_tools(self):
+        """flush() should not print anything when no tools ran."""
+        console = Mock(spec=Console)
+        renderer = AgenticProgressRenderer(console, tool_number_offset=0)
+
+        renderer.flush()
+
+        console.print.assert_not_called()
 
 
 class TestSlashCommandCompleter(unittest.TestCase):
