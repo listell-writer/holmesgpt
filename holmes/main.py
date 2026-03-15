@@ -339,7 +339,9 @@ def ask(
         init_renderer = None
         on_event = None
         if interactive:
-            init_renderer = InitProgressRenderer(console)
+            init_renderer = InitProgressRenderer(
+                console, model_name=model or config.model or ""
+            )
             on_event = init_renderer.on_event
             init_renderer.start()
 

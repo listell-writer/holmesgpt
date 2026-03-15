@@ -127,13 +127,13 @@ class InitProgressRenderer:
     Thread-safe: events arrive from the ThreadPoolExecutor in check_toolset_prerequisites.
     """
 
-    def __init__(self, console: Console):
+    def __init__(self, console: Console, model_name: str = ""):
         self._console = console
         self._lock = threading.Lock()
         self._toolsets_ok: List[str] = []
         self._toolsets_failed: List[tuple[str, str]] = []  # (name, error)
         self._in_flight: Dict[str, float] = {}  # name → start time
-        self._model_message: str = ""
+        self._model_message: str = f"Model: {model_name}" if model_name else ""
         self._phase: str = "Loading datasources"
         self._start_time: float = 0.0
         self._live: Optional[Any] = None  # Rich Live
@@ -326,9 +326,8 @@ def _build_task_panel(tasks: list) -> Panel:
             content.append(" ☑ ", style="green")
             content.append(task_content, style="dim strike")
         elif status == "in_progress":
-            frame = _task_spinner_frame()
-            content.append(f" {frame} ", style="bold magenta")
-            content.append(task_content, style="bold")
+            content.append(" ☐ ", style="bold yellow")
+            content.append(task_content, style="bold yellow")
         elif status == "failed":
             content.append(" ☒ ", style="bold red")
             content.append(task_content, style="red")
@@ -472,65 +471,92 @@ class AgenticProgressRenderer:
             size = f"{self._total_bytes}"
         return f" [dim]{size} across {self._total_queries} queries[/dim]"
 
-    def _build_left_pane(self) -> "Text":
-        """Build the left-side status pane (tasks + tool history + in-flight tools)."""
+    def _build_left_pane(self, show_analyzing: bool = False) -> Any:
+        """Build the left-side status pane with separate tasks and tools sections."""
         from rich.text import Text
 
         now = time.time()
-        display = Text()
+        sections = []
 
-        # Show tasks if we have them
+        # --- Tasks section ---
         if self._live_tasks:
+            tasks_text = Text()
+            completed = sum(1 for t in self._live_tasks if t.get("status") == "completed")
+            total = len(self._live_tasks)
             for task in self._live_tasks:
                 status = task.get("status", "pending")
                 tc = task.get("content", "")
                 if status == "completed":
-                    display.append(" ☑ ", style="green")
-                    display.append(tc, style="dim strike")
+                    tasks_text.append(" ☑ ", style="green")
+                    tasks_text.append(tc, style="dim strike")
                 elif status == "in_progress":
-                    frame = _task_spinner_frame()
-                    display.append(f" {frame} ", style="bold magenta")
-                    display.append(tc, style="bold")
+                    tasks_text.append(" ☐ ", style="bold yellow")
+                    tasks_text.append(tc, style="bold yellow")
                 elif status == "failed":
-                    display.append(" ☒ ", style="bold red")
-                    display.append(tc, style="red")
+                    tasks_text.append(" ☒ ", style="bold red")
+                    tasks_text.append(tc, style="red")
                 else:
-                    display.append(" ☐ ", style="dim")
-                    display.append(tc, style="dim")
-                display.append("\n")
+                    tasks_text.append(" ☐ ", style="dim")
+                    tasks_text.append(tc, style="dim")
+                tasks_text.append("\n")
+            # Remove trailing newline
+            if tasks_text.plain.endswith("\n"):
+                tasks_text.right_crop(1)
+            sections.append(
+                Panel(tasks_text, title=f"[bold]Tasks[/bold] [dim]{completed}/{total}[/dim]",
+                      title_align="left", border_style="blue", padding=(0, 1))
+            )
 
-        # Separator
-        if self._live_tasks and (self._tool_history or self._in_flight):
-            display.append("\n")
+        # --- Tools section ---
+        has_tools = self._tool_history or self._in_flight
+        if has_tools:
+            tools_text = Text()
+            for name, elapsed, output_len, is_error in self._tool_history:
+                if is_error:
+                    tools_text.append("  ⚠ ", style="bold red")
+                else:
+                    tools_text.append("  → ", style="dim")
+                tools_text.append(name, style="bold" if is_error else "")
+                if elapsed is not None:
+                    tools_text.append(f" {elapsed:.1f}s", style="dim")
+                if output_len > 0:
+                    tools_text.append(f" {_format_size(output_len)}", style="dim cyan")
+                tools_text.append("\n")
 
-        # Show completed tool history
-        for name, elapsed, output_len, is_error in self._tool_history:
-            if is_error:
-                display.append("  ⚠ ", style="bold red")
-            else:
-                display.append("  → ", style="dim")
-            display.append(name, style="bold" if is_error else "")
-            if elapsed is not None:
-                display.append(f" {elapsed:.1f}s", style="dim")
-            if output_len > 0:
-                display.append(f" {_format_size(output_len)}", style="dim cyan")
-            display.append("\n")
+            frame = _SPINNER_FRAMES[int(now * 8) % len(_SPINNER_FRAMES)]
+            for _num, (name, started) in sorted(self._in_flight.items()):
+                elapsed = now - started
+                tools_text.append(f"  {frame} ", style="bold magenta")
+                tools_text.append(f"{name}", style="bold")
+                if elapsed >= 1.0:
+                    tools_text.append(f" ({elapsed:.0f}s)", style="dim")
+                tools_text.append("\n")
 
-        # Show in-flight tools
-        frame = _SPINNER_FRAMES[int(now * 8) % len(_SPINNER_FRAMES)]
-        for _num, (name, started) in sorted(self._in_flight.items()):
-            elapsed = now - started
-            display.append(f"  {frame} ", style="bold magenta")
-            display.append(f"{name}", style="bold")
-            if elapsed >= 1.0:
-                display.append(f" ({elapsed:.0f}s)", style="dim")
-            display.append("\n")
+            if tools_text.plain.endswith("\n"):
+                tools_text.right_crop(1)
 
-        # Remove trailing newline
-        if display.plain.endswith("\n"):
-            display.right_crop(1)
+            tool_count = len(self._tool_history) + len(self._in_flight)
+            sections.append(
+                Panel(tools_text, title=f"[bold]Tools[/bold] [dim]{tool_count}[/dim]",
+                      title_align="left", border_style="dim", padding=(0, 1))
+            )
 
-        return display
+        # Add analyzing spinner when thinking between tool batches
+        if show_analyzing:
+            analyzing = Text()
+            elapsed = now - self._start_time
+            frame = _SPINNER_FRAMES[int(now * 8) % len(_SPINNER_FRAMES)]
+            analyzing.append(f"  {frame} ", style=f"bold {AI_COLOR}")
+            analyzing.append("Analyzing", style=f"bold {AI_COLOR}")
+            dots = "." * (int(elapsed * 2) % 4)
+            analyzing.append(f"{dots:<4}", style=f"bold {AI_COLOR}")
+            sections.append(analyzing)
+
+        if not sections:
+            return Text("  Waiting…", style="dim italic")
+
+        from rich.console import Group
+        return Group(*sections)
 
     def _has_investigation_context(self) -> bool:
         """True if we have any investigation state to show in the two-pane layout."""
@@ -550,20 +576,13 @@ class AgenticProgressRenderer:
             dots = "." * (int(elapsed * 2) % 4)
             display.append(f"{dots:<4}", style=f"bold {AI_COLOR}")
             if self._escape_hint:
-                display.append(f" {self._escape_hint}", style="dim")
+                display.append(f"    {self._escape_hint}", style="dim")
+            display.append("\n")  # Blank line so errors don't run into the spinner
             return display
 
-        left = self._build_left_pane()
-
-        # During thinking with context, add a thinking indicator to the left pane
-        if self._thinking and not self._in_flight:
-            left.append("\n\n")
-            elapsed = now - self._start_time
-            frame = _task_spinner_frame()
-            left.append(f"  {frame} ", style=f"bold {AI_COLOR}")
-            left.append("Analyzing", style=f"bold {AI_COLOR}")
-            dots = "." * (int(elapsed * 2) % 4)
-            left.append(f"{dots:<4}", style=f"bold {AI_COLOR}")
+        left = self._build_left_pane(
+            show_analyzing=self._thinking and not self._in_flight
+        )
 
         right = self._build_data_pane()
 
