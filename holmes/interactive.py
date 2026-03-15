@@ -631,7 +631,15 @@ class AgenticProgressRenderer:
 
         if self._escape_hint:
             from rich.console import Group
-            hint = Text(f"  {self._escape_hint}", style="dim")
+            hint = Text()
+            if self._in_flight:
+                frame = _SPINNER_FRAMES[int(now * 8) % len(_SPINNER_FRAMES)]
+                hint.append(f"  {frame} ", style=f"bold {AI_COLOR}")
+                hint.append("Gathering data", style=f"bold {AI_COLOR}")
+            elif self._thinking:
+                hint.append("  ◐ ", style=f"bold {AI_COLOR}")
+                hint.append("Thinking", style=f"bold {AI_COLOR}")
+            hint.append(f"    {self._escape_hint}", style="dim")
             return Group(table, hint)
         return table
 
