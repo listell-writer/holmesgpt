@@ -5149,24 +5149,19 @@
 </thead>
 <tbody>
 <tr>
-<td><code>call(messages)</code></td>
+<td><code>call(messages, approval_callback=None)</code></td>
 <td><code>LLMResult</code></td>
 <td>Run a tool-calling conversation with a full message list.</td>
 </tr>
 <tr>
-<td><code>prompt_call(system_prompt, user_prompt)</code></td>
-<td><code>LLMResult</code></td>
-<td>Single-turn call with system and user prompts.</td>
-</tr>
-<tr>
-<td><code>messages_call(messages)</code></td>
-<td><code>LLMResult</code></td>
-<td>Call with a message list (simpler signature than <code>call</code>).</td>
+<td><code>call_stream(msgs)</code></td>
+<td><code>Generator[StreamMessage]</code></td>
+<td>Streaming version that yields events between iterations.</td>
 </tr>
 </tbody>
 </table>
 <h3 id="llmresult"><code>LLMResult</code><a class="headerlink" href="#llmresult" title="Permanent link">&para;</a></h3>
-<p>Response object returned by <code>call()</code> and <code>prompt_call()</code>.</p>
+<p>Response object returned by <code>call()</code>.</p>
 <table>
 <thead>
 <tr>
