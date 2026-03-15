@@ -432,9 +432,9 @@ class AgenticProgressRenderer:
     """
 
     _DATA_PANE_LINES = 14  # Visible lines in the data pane
-    _DATA_LINE_MAX = 80  # Max chars per line in the data pane
+    _DATA_LINE_MAX = 200  # Max chars per line (dynamically clamped to pane width)
     _DATA_BUFFER_MAX = 2000  # Max raw lines kept in buffer
-    _SCROLL_SPEED = 3  # Lines to advance per tick
+    _SCROLL_SPEED = 3  # Lines to advance per tick when idle-scrolling history
 
     def __init__(self, console: Console, tool_number_offset: int, escape_hint: str = ""):
         self._console = console
@@ -461,6 +461,7 @@ class AgenticProgressRenderer:
         self._data_lines: List[str] = []
         self._scroll_offset = 0  # Current scroll position
         self._scroll_pause = 0  # Ticks to pause before advancing
+        self._follow_tail = True  # When True, snap to end of data
         self._total_bytes = 0  # Total bytes processed
         self._total_queries = 0  # Total tool calls completed
 
@@ -479,6 +480,18 @@ class AgenticProgressRenderer:
     # Sentinel prefix for tool header lines in the data buffer
     _TOOL_HEADER_PREFIX = "\x00TOOL:"
 
+    def _data_line_max(self) -> int:
+        """Dynamic max chars per line based on actual data pane width."""
+        try:
+            tw = self._console.width
+            if not isinstance(tw, (int, float)) or tw <= 0:
+                tw = 120
+        except (TypeError, ValueError, AttributeError):
+            tw = 120
+        # Data pane gets ~60% of terminal width minus panel border/padding (~4 chars)
+        data_width = int(tw * 0.6) - 4
+        return max(40, min(data_width, self._DATA_LINE_MAX))
+
     def _ingest_output(self, tool_name: str, output: str, description: str = "") -> None:
         """Ingest raw tool output into the scrolling data buffer."""
         # Insert a header line so the data pane shows which tool produced this output
@@ -488,18 +501,23 @@ class AgenticProgressRenderer:
         if not output:
             self._data_lines.append("\x00EMPTY")
             self._total_queries += 1
+            self._follow_tail = True
             return
         self._total_bytes += len(output)
         self._total_queries += 1
 
+        line_max = self._data_line_max()
         lines = output.splitlines()
         for line in lines:
             line = line.rstrip()
             if not line:
                 continue
-            if len(line) > self._DATA_LINE_MAX:
-                line = line[: self._DATA_LINE_MAX - 1] + "…"
+            if len(line) > line_max:
+                line = line[: line_max - 1] + "…"
             self._data_lines.append(line)
+
+        # Jump to tail so new data is immediately visible
+        self._follow_tail = True
 
         # Trim buffer if too large
         if len(self._data_lines) > self._DATA_BUFFER_MAX:
@@ -757,16 +775,17 @@ class AgenticProgressRenderer:
         else:
             right = self._build_data_pane()
 
-        # Side-by-side layout with equal-width columns.
-        # min_width ensures each column takes at least 50% of terminal width,
-        # preventing the data pane from shrinking when content is narrow.
+        # Side-by-side layout: left pane (status/tools) is narrower,
+        # data pane gets the majority of terminal width.
         try:
-            half_width = max((self._console.width or 120) // 2 - 1, 30)
+            tw = self._console.width or 120
         except (TypeError, ValueError):
-            half_width = 59
+            tw = 120
+        left_width = max(int(tw * 0.38), 30)
+        right_width = max(tw - left_width - 3, 40)  # -3 for padding/borders
         table = Table.grid(padding=(0, 1))
-        table.add_column("status", min_width=half_width)
-        table.add_column("data", min_width=half_width)
+        table.add_column("status", min_width=left_width)
+        table.add_column("data", min_width=right_width)
 
         stats = self._build_stats_line()
         # Dim the data pane border when approval is pending
@@ -787,20 +806,27 @@ class AgenticProgressRenderer:
                     if self._approval_pending:
                         self._live.update(self._build_display())
                         continue
-                    # Scroll forward only: when we reach the end, wrap to start
+                    # Scroll logic: follow tail when new data arrives,
+                    # then slowly scroll backward through history when idle
                     if self._data_lines and len(self._data_lines) > self._DATA_PANE_LINES:
-                        if self._scroll_pause > 0:
+                        max_start = len(self._data_lines) - self._DATA_PANE_LINES
+                        if self._follow_tail:
+                            # Snap to the latest data
+                            self._scroll_offset = max_start
+                            self._follow_tail = False
+                            self._scroll_pause = 20  # ~3s pause before scrolling back
+                        elif self._scroll_pause > 0:
                             self._scroll_pause -= 1
                         else:
-                            max_start = len(self._data_lines) - self._DATA_PANE_LINES
-                            if self._scroll_offset >= max_start:
-                                # Reached the end — wrap to top and pause
-                                self._scroll_offset = 0
-                                self._scroll_pause = 10  # ~1.5s pause at top
+                            # Idle: slowly scroll backward through history
+                            if self._scroll_offset > 0:
+                                self._scroll_offset = max(0, self._scroll_offset - self._SCROLL_SPEED)
+                                if self._scroll_offset == 0:
+                                    self._scroll_pause = 10  # ~1.5s pause at top
                             else:
-                                self._scroll_offset += self._SCROLL_SPEED
+                                # Reached top — scroll forward back to tail
+                                self._scroll_offset = min(self._scroll_offset + self._SCROLL_SPEED, max_start)
                                 if self._scroll_offset >= max_start:
-                                    self._scroll_offset = max_start
                                     self._scroll_pause = 10  # ~1.5s pause at bottom
                     self._live.update(self._build_display())
 
@@ -974,13 +1000,6 @@ class AgenticProgressRenderer:
                 # Ingest raw output into scrolling data buffer (skip TodoWrite)
                 if tool_name != _TODO_WRITE_TOOL_NAME:
                     self._ingest_output(tool_name, output_str, description=description)
-                    # Jump scroll to show new content
-                    if len(self._data_lines) > self._DATA_PANE_LINES:
-                        # Show the start of new data (not the very end)
-                        self._scroll_offset = max(
-                            0, len(self._data_lines) - self._DATA_PANE_LINES * 2
-                        )
-                        self._scroll_pause = 0
 
                 # Remove from in-flight
                 self._in_flight.pop(tool_number, None)

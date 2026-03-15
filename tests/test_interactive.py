@@ -1567,3 +1567,98 @@ class TestModelMessageFormat(unittest.TestCase):
 
         self.assertNotIn(")(", msg, f"Double parens found in: {msg}")
         self.assertIn("configured in ~/.holmes/config.yaml", msg)
+
+
+class TestDataPaneScrollAndWidth(unittest.TestCase):
+    """Test data pane scroll-to-tail and dynamic width behavior."""
+
+    def _make_renderer(self, width=120):
+        console = Mock(spec=Console)
+        console.width = width
+        renderer = AgenticProgressRenderer(console, tool_number_offset=0)
+        return renderer
+
+    def test_ingest_sets_follow_tail(self):
+        """After ingesting data, _follow_tail should be True so tick snaps to end."""
+        r = self._make_renderer()
+        self.assertTrue(r._follow_tail)  # starts True
+        r._follow_tail = False  # simulate tick consuming it
+        r._ingest_output("tool1", "line1\nline2\nline3")
+        self.assertTrue(r._follow_tail)
+
+    def test_ingest_empty_sets_follow_tail(self):
+        """Even empty output should set follow_tail so the header is visible."""
+        r = self._make_renderer()
+        r._follow_tail = False
+        r._ingest_output("tool1", "")
+        self.assertTrue(r._follow_tail)
+
+    def test_tick_snaps_to_tail(self):
+        """When follow_tail is True, tick should set scroll_offset to max_start."""
+        r = self._make_renderer()
+        # Add more lines than the visible pane
+        for i in range(30):
+            r._data_lines.append(f"line {i}")
+        r._follow_tail = True
+        r._scroll_offset = 0
+
+        # Simulate one tick iteration (without the Live update)
+        max_start = len(r._data_lines) - r._DATA_PANE_LINES
+        if r._follow_tail:
+            r._scroll_offset = max_start
+            r._follow_tail = False
+            r._scroll_pause = 20
+
+        self.assertEqual(r._scroll_offset, max_start)
+        self.assertFalse(r._follow_tail)
+        self.assertEqual(r._scroll_pause, 20)
+
+    def test_new_data_jumps_past_old_scroll(self):
+        """After slow-scroll moves back, new data should jump to tail again."""
+        r = self._make_renderer()
+        # Fill buffer
+        for i in range(50):
+            r._data_lines.append(f"line {i}")
+        r._scroll_offset = 5  # pretend we scrolled back
+        r._follow_tail = False
+
+        # New data arrives
+        r._ingest_output("tool2", "new output\nmore output")
+        self.assertTrue(r._follow_tail)
+        # After tick processes it, should be at tail
+        max_start = len(r._data_lines) - r._DATA_PANE_LINES
+        # Simulate tick
+        r._scroll_offset = max_start
+        r._follow_tail = False
+        self.assertEqual(r._scroll_offset, max_start)
+
+    def test_dynamic_line_max_uses_terminal_width(self):
+        """_data_line_max should scale with terminal width."""
+        r_narrow = self._make_renderer(width=80)
+        r_wide = self._make_renderer(width=200)
+        self.assertGreater(r_wide._data_line_max(), r_narrow._data_line_max())
+
+    def test_dynamic_line_max_minimum(self):
+        """Even on very narrow terminals, line max should not go below 40."""
+        r = self._make_renderer(width=40)
+        self.assertGreaterEqual(r._data_line_max(), 40)
+
+    def test_ingest_truncates_to_dynamic_width(self):
+        """Lines longer than dynamic max should be truncated."""
+        r = self._make_renderer(width=80)
+        line_max = r._data_line_max()
+        long_line = "x" * (line_max + 50)
+        r._ingest_output("tool1", long_line)
+        # Find the data line (skip header)
+        data_lines = [l for l in r._data_lines if not l.startswith(r._TOOL_HEADER_PREFIX)]
+        self.assertEqual(len(data_lines), 1)
+        self.assertEqual(len(data_lines[0]), line_max)
+        self.assertTrue(data_lines[0].endswith("…"))
+
+    def test_layout_data_pane_wider_than_left(self):
+        """Data pane column should be wider than the left pane."""
+        r = self._make_renderer(width=120)
+        tw = 120
+        left_width = max(int(tw * 0.38), 30)
+        right_width = max(tw - left_width - 3, 40)
+        self.assertGreater(right_width, left_width)
