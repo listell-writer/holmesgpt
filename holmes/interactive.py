@@ -748,15 +748,23 @@ class AgenticProgressRenderer:
                 term_width = int(self._console.width or 120)
             except (TypeError, ValueError):
                 term_width = 120
-            # Budget: full width minus panel border(2), padding(2), number prefix(~6),
-            # and suffix space for [toolset] time size (~30)
-            label_budget = max(term_width - 2 - 2 - 6 - 30, 30)
             for idx, (name, desc, toolset, elapsed, output_len, is_error) in enumerate(self._tool_history):
                 tool_num = self._tool_number_offset + idx + 1
                 if is_error:
                     tools_text.append(f"  {tool_num}. ", style="bold red")
                 else:
                     tools_text.append(f"  {tool_num}. ", style="dim")
+                # Build suffix first so we know how much space the label gets
+                suffix = ""
+                if toolset:
+                    suffix += f" [{toolset}]"
+                if elapsed is not None:
+                    suffix += f" {elapsed:.1f}s"
+                if output_len > 0:
+                    suffix += f" {_format_size(output_len)}"
+                # panel border(2) + padding(2) + number prefix(~6)
+                prefix_len = 2 + 2 + len(f"  {tool_num}. ")
+                label_budget = max(term_width - prefix_len - len(suffix), 20)
                 label = desc if desc else name
                 if len(label) > label_budget:
                     label = label[: label_budget - 1] + "…"
