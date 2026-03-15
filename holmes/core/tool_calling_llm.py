@@ -432,7 +432,7 @@ class ToolCallingLLM:
             # Re-check: a previous approval in this batch may have saved
             # the prefix to disk, making this tool no longer need approval.
             if self._is_tool_call_already_approved(approval.tool_name, approval.params):
-                logging.info(f"Approval no longer needed for {approval.tool_name}")
+                logging.debug(f"Approval no longer needed for {approval.tool_name}")
                 decisions.append(ToolApprovalDecision(
                     tool_call_id=approval.tool_call_id,
                     approved=True,

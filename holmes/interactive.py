@@ -886,6 +886,50 @@ class AgenticProgressRenderer:
                         handler.emit(record)
             self._log_buffer.clear()
 
+    def pause_for_approval(self) -> None:
+        """Stop Live so the main thread can show an interactive approval prompt.
+
+        Unlike ``flush()``, this does NOT replay buffered logs or print the
+        investigation summary.  Call ``resume_after_approval()`` to restart.
+        """
+        with self._lock:
+            self._timer_stop.set()
+            if self._live is not None:
+                try:
+                    self._live.stop()
+                except (TypeError, AttributeError):
+                    pass
+                self._live = None
+            # Remove log filter so approval prompt logs go through normally
+            for handler in logging.getLogger().handlers:
+                handler.removeFilter(self._log_filter)
+
+    def resume_after_approval(self) -> None:
+        """Restart Live after the approval prompt has finished."""
+        with self._lock:
+            # Clear approval state so the display shows normal UI
+            self._approval_pending = False
+            self._pending_approval_descriptions = []
+            if self._live is not None:
+                return  # already running
+            # Re-install log filter
+            for handler in logging.getLogger().handlers:
+                handler.addFilter(self._log_filter)
+            try:
+                self._live = _make_live(
+                    self._build_display(),
+                    console=self._console,
+                    transient=True,
+                    refresh_per_second=8,
+                )
+                self._live.start()
+            except (TypeError, AttributeError):
+                self._live = None
+                return
+            self._timer_stop.clear()
+            timer_thread = threading.Thread(target=self._tick, daemon=True)
+            timer_thread.start()
+
     def _process_completed(self) -> None:
         """Absorb completed tools into live state (tool history + tasks)."""
         if not self._completed:
@@ -2614,8 +2658,8 @@ def run_interactive_loop(
                         approval_pending_event.wait(timeout=5.0)
                         approval_pending_event.clear()
 
-                        # 1. Stop Live display permanently
-                        progress.flush()
+                        # 1. Pause Live display
+                        progress.pause_for_approval()
 
                         # 2. Stop escape listener (it holds terminal in cbreak)
                         escape_stop.set()
@@ -2629,10 +2673,8 @@ def run_interactive_loop(
                         approval_decisions[0] = decisions
                         approval_done_event.set()
 
-                        # 4. Restart progress renderer and escape listener
-                        current_offset = len(all_tool_calls_history) + len(all_tool_calls_this_turn)
-                        progress = AgenticProgressRenderer(console, current_offset, escape_hint)
-                        progress.start()
+                        # 4. Resume progress renderer and escape listener
+                        progress.resume_after_approval()
 
                         escape_stop = threading.Event()
                         escape_thread = threading.Thread(
