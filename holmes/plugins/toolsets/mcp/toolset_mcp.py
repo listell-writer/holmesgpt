@@ -297,6 +297,12 @@ class RemoteMCPTool(Tool):
         schema_params = input_schema.get("properties", {})
         parameters = {}
         for key, val in schema_params.items():
+            resolved = cls._resolve_schema(val, input_schema)
+            if resolved != val:
+                logger.debug(
+                    f"MCP param '{key}' schema resolved: "
+                    f"{json.dumps(val, default=str)} -> {json.dumps(resolved, default=str)}"
+                )
             parameters[key] = cls._parse_tool_parameter(
                 val, root_schema=input_schema, required=key in required_list
             )
@@ -638,6 +644,12 @@ class RemoteMCPToolset(Toolset):
                     self._mcp_config.url = AnyUrl(clean_url_str + "/sse")
 
             tools_result = asyncio.run(self._get_server_tools())
+
+            for tool in tools_result.tools:
+                logger.debug(
+                    f"MCP server {self.name} raw tool schema for '{tool.name}': "
+                    f"{json.dumps(tool.inputSchema, indent=2, default=str)}"
+                )
 
             self.tools = [
                 RemoteMCPTool.create(tool, self) for tool in tools_result.tools
