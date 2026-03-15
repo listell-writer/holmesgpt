@@ -133,7 +133,7 @@ class InitProgressRenderer:
         self._toolsets_ok: List[str] = []
         self._toolsets_failed: List[tuple[str, str]] = []  # (name, error)
         self._in_flight: Dict[str, float] = {}  # name → start time
-        self._model_message: str = f"Model: {model_name}" if model_name else ""
+        self._model_message: str = ""
         self._phase: str = "Loading datasources"
         self._start_time: float = 0.0
         self._live: Optional[Any] = None  # Rich Live

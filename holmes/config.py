@@ -333,10 +333,11 @@ class Config(RobustaBaseConfig):
         tool_results_dir: Optional[Path] = None,
         on_event: EventCallback = None,
     ) -> "ToolCallingLLM":
-        tool_executor = self.create_console_tool_executor(dal, refresh_toolsets, on_event=on_event)
         from holmes.core.tool_calling_llm import ToolCallingLLM
 
+        # Create LLM first so model info appears during toolset loading
         llm = self._get_llm(tracer=tracer, model_key=model_name, on_event=on_event)
+        tool_executor = self.create_console_tool_executor(dal, refresh_toolsets, on_event=on_event)
         return ToolCallingLLM(
             tool_executor,
             self.max_steps,
