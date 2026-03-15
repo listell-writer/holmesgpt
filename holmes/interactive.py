@@ -151,6 +151,11 @@ class InitProgressRenderer:
         in_flight = len(self._in_flight)
 
         display = Text()
+
+        # Show model prominently at top if loaded
+        if self._model_message:
+            display.append(f"  {self._model_message}\n", style="bold")
+
         display.append("  ")
         display.append(f"{self._phase}", style="bold")
         display.append(f"  {checked} ready", style="dim")
@@ -289,11 +294,11 @@ def _format_size(n: int) -> str:
     return str(n)
 
 
-def _size_bar(output_len: int, max_width: int = 20) -> str:
+def _size_bar(output_len: int, max_width: int = 12) -> str:
     """Build a proportional bar representing data volume.
 
     Uses a log scale so small results still get a visible bar.
-    Returns a string like '▰▰▰▰▱▱▱▱▱▱ 39K'.
+    Returns a string like '▰▰▰▰ 39K' — no empty blocks.
     """
     import math
 
@@ -301,9 +306,8 @@ def _size_bar(output_len: int, max_width: int = 20) -> str:
         return ""
     # log scale: 100 chars → 1 block, 100K → max blocks
     filled = min(max_width, max(1, int(math.log10(max(output_len, 1)) * (max_width / 5))))
-    empty = max_width - filled
     size_str = _format_size(output_len)
-    return f"{'▰' * filled}{'▱' * empty} {size_str}"
+    return f"{'▰' * filled} {size_str}"
 
 
 def _build_task_panel(tasks: list) -> Panel:
@@ -383,13 +387,11 @@ class AgenticProgressRenderer:
         self._live: Optional[Any] = None  # Rich Live
         self._timer_stop = threading.Event()
 
-        # Accumulated completed tools for the left pane history
-        # Each: (name, elapsed, output_len, is_error)
-        self._tool_history: List[tuple] = []
-
         # Data feed: all raw output lines for the scrolling right pane
         self._data_lines: List[str] = []
         self._scroll_offset = 0  # Current scroll position
+        self._scroll_direction = 1  # 1 = forward, -1 = reverse
+        self._scroll_pause = 0  # Ticks to pause before reversing
         self._total_bytes = 0  # Total bytes processed
         self._total_queries = 0  # Total tool calls completed
 
@@ -494,21 +496,8 @@ class AgenticProgressRenderer:
                     display.append(tc, style="dim")
                 display.append("\n")
 
-            if self._tool_history or self._in_flight:
+            if self._in_flight:
                 display.append("\n")
-
-        # Show completed tool history
-        for name, elapsed, output_len, is_error in self._tool_history:
-            if is_error:
-                display.append("  ⚠ ", style="bold red")
-            else:
-                display.append("  → ", style="dim")
-            display.append(name, style="bold" if is_error else "")
-            if elapsed is not None:
-                display.append(f" {elapsed:.1f}s", style="dim")
-            if output_len > 0:
-                display.append(f" {_format_size(output_len)}", style="dim cyan")
-            display.append("\n")
 
         # Show in-flight tools
         frame = _SPINNER_FRAMES[int(now * 8) % len(_SPINNER_FRAMES)]
@@ -577,13 +566,21 @@ class AgenticProgressRenderer:
         while not self._timer_stop.wait(0.15):
             with self._lock:
                 if self._live is not None:
-                    # Scroll forward if there's more data below the current view
-                    if self._data_lines:
-                        max_start = max(0, len(self._data_lines) - self._DATA_PANE_LINES)
-                        if self._scroll_offset < max_start:
-                            self._scroll_offset = min(
-                                self._scroll_offset + self._SCROLL_SPEED, max_start
-                            )
+                    # Bounce scroll: forward to end, pause, reverse to start, pause, repeat
+                    if self._data_lines and len(self._data_lines) > self._DATA_PANE_LINES:
+                        if self._scroll_pause > 0:
+                            self._scroll_pause -= 1
+                        else:
+                            max_start = len(self._data_lines) - self._DATA_PANE_LINES
+                            self._scroll_offset += self._SCROLL_SPEED * self._scroll_direction
+                            if self._scroll_offset >= max_start:
+                                self._scroll_offset = max_start
+                                self._scroll_direction = -1
+                                self._scroll_pause = 10  # ~1.5s pause at bottom
+                            elif self._scroll_offset <= 0:
+                                self._scroll_offset = 0
+                                self._scroll_direction = 1
+                                self._scroll_pause = 10  # ~1.5s pause at top
                     self._live.update(self._build_display())
 
     def start(self) -> None:
@@ -616,8 +613,8 @@ class AgenticProgressRenderer:
                 pass
             self._live = None
 
-    def _absorb_completed(self) -> None:
-        """Absorb completed tools into the left pane history (no printing)."""
+    def _process_completed(self) -> None:
+        """Process completed tools: print tool lines permanently, update live tasks."""
         if not self._completed:
             return
 
@@ -625,10 +622,49 @@ class AgenticProgressRenderer:
             _num, name, _desc, elapsed, output_len, is_error, extra = item
             if name == _TODO_WRITE_TOOL_NAME and extra:
                 self._live_tasks = extra
+                continue
+
+            # Print tool line permanently
+            if is_error:
+                icon = "[bold red]⚠[/bold red]"
             else:
-                self._tool_history.append((name, elapsed, output_len or 0, is_error))
+                icon = "[dim]→[/dim]"
+
+            elapsed_str = ""
+            if elapsed is not None:
+                elapsed_str = f" {elapsed:.1f}s"
+
+            bar = _size_bar(output_len or 0)
+            bar_str = f" [dim cyan]{bar}[/dim cyan]" if bar else ""
+
+            self._console.print(
+                f"  {icon} [bold]{escape(name)}[/bold]"
+                f"[dim]{elapsed_str}[/dim]{bar_str}"
+            )
 
         self._completed.clear()
+
+    def _print_investigation_summary(self) -> None:
+        """Print a final snapshot of tasks + stats before the answer."""
+        if not self._live_tasks and self._total_bytes == 0:
+            return
+
+        from rich.text import Text
+
+        summary = Text()
+        if self._live_tasks:
+            completed = sum(1 for t in self._live_tasks if t.get("status") == "completed")
+            total = len(self._live_tasks)
+            summary.append(f"  ☑ {completed}/{total} tasks", style="green")
+
+        if self._total_bytes > 0:
+            if summary.plain:
+                summary.append("  ·  ", style="dim")
+            stats = _format_size(self._total_bytes)
+            summary.append(f"Analyzed {stats} across {self._total_queries} queries", style="dim")
+
+        if summary.plain:
+            self._console.print(summary)
 
     def handle_event(
         self,
@@ -671,9 +707,14 @@ class AgenticProgressRenderer:
                 # Ingest raw output into scrolling data buffer (skip TodoWrite)
                 if tool_name != _TODO_WRITE_TOOL_NAME and output_str:
                     self._ingest_output(tool_name, output_str)
-                    # Jump scroll to latest data so user sees new content
+                    # Jump scroll to show new content, resume forward scrolling
                     if len(self._data_lines) > self._DATA_PANE_LINES:
-                        self._scroll_offset = len(self._data_lines) - self._DATA_PANE_LINES
+                        # Show the start of new data (not the very end)
+                        self._scroll_offset = max(
+                            0, len(self._data_lines) - self._DATA_PANE_LINES * 2
+                        )
+                        self._scroll_direction = 1
+                        self._scroll_pause = 0
 
                 # Remove from in-flight
                 self._in_flight.pop(tool_number, None)
@@ -687,21 +728,24 @@ class AgenticProgressRenderer:
                     (tool_number, tool_name, description, elapsed, output_len, is_error, extra)
                 )
 
-                # Absorb into live pane state (no printing)
-                self._absorb_completed()
+                # Stop Live, print tool lines permanently, restart Live
+                self._stop_live()
+                self._process_completed()
 
                 if not self._in_flight:
-                    # Batch done — switch to thinking mode, keep Live running
                     self._thinking = True
-                if self._live is not None:
-                    self._live.update(self._build_display())
+                self.start()
 
             elif event.event == StreamEvents.AI_MESSAGE:
                 # AI messages print immediately — stop Live first if running
                 self._thinking = False
                 if self._completed:
-                    self._absorb_completed()
-                self._stop_live()
+                    self._stop_live()
+                    self._process_completed()
+                else:
+                    self._stop_live()
+                # Print final investigation summary before the answer
+                self._print_investigation_summary()
 
                 reasoning = event.data.get("reasoning")
                 content = event.data.get("content")
@@ -718,12 +762,15 @@ class AgenticProgressRenderer:
         """Ensure any remaining in-flight display is cleaned up."""
         with self._lock:
             if self._completed:
-                self._absorb_completed()
-            self._stop_live()
+                self._stop_live()
+                self._process_completed()
+            else:
+                self._stop_live()
             # Reset all state for next invocation
             self._data_lines.clear()
-            self._tool_history.clear()
             self._scroll_offset = 0
+            self._scroll_direction = 1
+            self._scroll_pause = 0
             self._total_bytes = 0
             self._total_queries = 0
             self._live_tasks = None
