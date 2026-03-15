@@ -399,6 +399,7 @@ class AgenticProgressRenderer:
 
         # Latest tasks for live display
         self._live_tasks: Optional[list] = None
+        self._summary_printed = False
 
     def _ingest_output(self, tool_name: str, output: str) -> None:
         """Ingest raw tool output into the scrolling data buffer."""
@@ -667,8 +668,11 @@ class AgenticProgressRenderer:
         """Print full task list + tools as a permanent record before the answer."""
         from rich.text import Text
 
+        if self._summary_printed:
+            return
         if not self._live_tasks and not self._tool_history:
             return
+        self._summary_printed = True
 
         # Print the task list
         if self._live_tasks:
@@ -796,6 +800,7 @@ class AgenticProgressRenderer:
             if self._completed:
                 self._process_completed()
             self._stop_live()
+            self._print_investigation_summary()
             # Reset all state for next invocation
             self._data_lines.clear()
             self._tool_history.clear()
