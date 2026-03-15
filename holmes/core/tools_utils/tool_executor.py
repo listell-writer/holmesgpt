@@ -59,6 +59,11 @@ class ToolExecutor:
         logging.warning(f"could not find tool {name}. skipping")
         return None
 
+    def get_toolset_name(self, tool_name: str) -> Optional[str]:
+        """Return the toolset name that provides a given tool, or None."""
+        ts = self._tool_to_toolset.get(tool_name)
+        return ts.name if ts else None
+
     def ensure_toolset_initialized(self, tool_name: str) -> Optional[str]:
         """Ensure the toolset containing the given tool is lazily initialized.
 

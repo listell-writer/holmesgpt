@@ -617,6 +617,7 @@ class ToolCallingLLM:
                 )
 
             tool = self.tool_executor.get_tool_by_name(tool_name)
+            toolset_name = self.tool_executor.get_toolset_name(tool_name)
             tool_call_result = ToolCallResult(
                 tool_call_id=tool_id,
                 tool_name=tool_name,
@@ -624,6 +625,7 @@ class ToolCallingLLM:
                 if tool
                 else "",
                 result=tool_response,
+                toolset_name=toolset_name if isinstance(toolset_name, str) else None,
             )
 
             original_token_count = prevent_overly_big_tool_response(

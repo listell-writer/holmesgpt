@@ -516,12 +516,15 @@ class AgenticProgressRenderer:
         has_tools = self._tool_history or self._in_flight
         if has_tools:
             tools_text = Text()
-            for name, elapsed, output_len, is_error in self._tool_history:
+            for name, desc, toolset, elapsed, output_len, is_error in self._tool_history:
                 if is_error:
                     tools_text.append("  ⚠ ", style="bold red")
                 else:
                     tools_text.append("  → ", style="dim")
-                tools_text.append(name, style="bold" if is_error else "")
+                label = desc if desc else name
+                tools_text.append(label, style="bold" if is_error else "")
+                if toolset:
+                    tools_text.append(f" [{toolset}]", style="dim")
                 if elapsed is not None:
                     tools_text.append(f" {elapsed:.1f}s", style="dim")
                 if output_len > 0:
@@ -660,11 +663,11 @@ class AgenticProgressRenderer:
             return
 
         for item in self._completed:
-            _num, name, _desc, elapsed, output_len, is_error, extra = item
+            _num, name, desc, toolset, elapsed, output_len, is_error, extra = item
             if name == _TODO_WRITE_TOOL_NAME and extra:
                 self._live_tasks = extra
             else:
-                self._tool_history.append((name, elapsed, output_len or 0, is_error))
+                self._tool_history.append((name, desc, toolset, elapsed, output_len or 0, is_error))
 
         self._completed.clear()
 
@@ -685,13 +688,16 @@ class AgenticProgressRenderer:
         # Print the tools list
         if self._tool_history:
             tools_text = Text()
-            for idx, (name, elapsed, output_len, is_error) in enumerate(self._tool_history):
+            for idx, (name, desc, toolset, elapsed, output_len, is_error) in enumerate(self._tool_history):
                 tool_num = self._tool_number_offset + idx + 1
                 if is_error:
                     tools_text.append(f"  {tool_num}. ", style="bold red")
                 else:
                     tools_text.append(f"  {tool_num}. ", style="dim")
-                tools_text.append(name, style="bold" if is_error else "")
+                label = desc if desc else name
+                tools_text.append(label, style="bold" if is_error else "")
+                if toolset:
+                    tools_text.append(f" [{toolset}]", style="dim")
                 if elapsed is not None:
                     tools_text.append(f" {elapsed:.1f}s", style="dim")
                 if output_len > 0:
@@ -736,6 +742,7 @@ class AgenticProgressRenderer:
 
                 description = event.data.get("description", "")
                 tool_name = event.data.get("tool_name", event.data.get("name", ""))
+                toolset_name = event.data.get("toolset_name", "")
                 result_data = event.data.get("result", {})
                 output_str = result_data.get("data", "")
                 elapsed = result_data.get("elapsed_seconds")
@@ -772,7 +779,7 @@ class AgenticProgressRenderer:
                         break
 
                 self._completed.append(
-                    (tool_number, tool_name, description, elapsed, output_len, is_error, extra)
+                    (tool_number, tool_name, description, toolset_name, elapsed, output_len, is_error, extra)
                 )
 
                 self._process_completed()
@@ -811,7 +818,6 @@ class AgenticProgressRenderer:
             self._data_lines.clear()
             self._tool_history.clear()
             self._scroll_offset = 0
-            self._scroll_direction = 1
             self._scroll_pause = 0
             self._total_bytes = 0
             self._total_queries = 0

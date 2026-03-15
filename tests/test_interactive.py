@@ -41,8 +41,8 @@ class TestAgenticProgressRendererSummary(unittest.TestCase):
         renderer = AgenticProgressRenderer(console, tool_number_offset=0)
 
         # Simulate tool completion (what TOOL_RESULT handler does)
-        renderer._tool_history.append(("kubectl_get_pods", 1.2, 500, False))
-        renderer._tool_history.append(("kubectl_top_pods", 0.8, 300, False))
+        renderer._tool_history.append(("kubectl_get_pods", "get pods in namespace default", "kubernetes", 1.2, 500, False))
+        renderer._tool_history.append(("kubectl_top_pods", "get resource usage for pods", "kubernetes", 0.8, 300, False))
         renderer._total_bytes = 800
         renderer._total_queries = 2
 
@@ -62,7 +62,7 @@ class TestAgenticProgressRendererSummary(unittest.TestCase):
             {"content": "Check pods", "status": "completed"},
             {"content": "Check logs", "status": "in_progress"},
         ]
-        renderer._tool_history.append(("kubectl_get_pods", 1.0, 100, False))
+        renderer._tool_history.append(("kubectl_get_pods", "get pods in namespace default", "kubernetes", 1.0, 100, False))
 
         renderer.flush()
 
@@ -74,7 +74,7 @@ class TestAgenticProgressRendererSummary(unittest.TestCase):
         console = Mock(spec=Console)
         renderer = AgenticProgressRenderer(console, tool_number_offset=0)
 
-        renderer._tool_history.append(("kubectl_get_pods", 1.0, 100, False))
+        renderer._tool_history.append(("kubectl_get_pods", "get pods in namespace default", "kubernetes", 1.0, 100, False))
 
         # Simulate AI_MESSAGE calling _print_investigation_summary
         renderer._print_investigation_summary()
