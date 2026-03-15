@@ -199,7 +199,7 @@ class InitProgressRenderer:
             if remaining > 0:
                 names += f" and {remaining} more"
             display.append("\n  ")
-            display.append(f"  ready: {names}", style="green dim")
+            display.append(f"  ready: {names}", style="green")
 
         # Show in-flight toolsets that are taking more than 1 second
         slow: List[tuple[str, float]] = []
@@ -211,7 +211,7 @@ class InitProgressRenderer:
             slow.sort(key=lambda x: -x[1])  # longest first
             parts = [f"{name} ({dur:.0f}s)" for name, dur in slow]
             display.append("\n  ")
-            display.append(f"  checking: {', '.join(parts)}", style="yellow dim")
+            display.append(f"  checking: {', '.join(parts)}", style="yellow")
 
         if self._toolsets_failed:
             failed_names = ", ".join(name for name, _ in self._toolsets_failed[-4:])
@@ -968,10 +968,10 @@ class AgenticProgressRenderer:
                     suffix += f" [{toolset}]"
                 if elapsed is not None:
                     suffix += f" {elapsed:.1f}s"
+                if output_len > 0:
+                    suffix += f" {_format_size(output_len)}"
                 if is_error:
                     suffix += " (error)"
-                elif output_len > 0:
-                    suffix += f" {_format_size(output_len)}"
                 # panel border(2) + padding(2) + number prefix(~6)
                 prefix_len = 2 + 2 + len(f"  {tool_num}. ")
                 label_budget = max(term_width - prefix_len - len(suffix), 20)
@@ -983,10 +983,10 @@ class AgenticProgressRenderer:
                     tools_text.append(f" [{toolset}]", style="dim")
                 if elapsed is not None:
                     tools_text.append(f" {elapsed:.1f}s", style="dim")
+                if output_len > 0:
+                    tools_text.append(f" {_format_size(output_len)}", style="dim cyan")
                 if is_error:
                     tools_text.append(" (error)", style="dim red")
-                elif output_len > 0:
-                    tools_text.append(f" {_format_size(output_len)}", style="dim cyan")
                 tools_text.append("\n")
             if tools_text.plain.endswith("\n"):
                 tools_text.right_crop(1)

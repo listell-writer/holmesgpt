@@ -182,7 +182,6 @@ class RunBashCommand(Tool):
             return None
 
         if validation_result.status == ValidationStatus.APPROVAL_REQUIRED:
-            logging.info(f"Bash command requires approval: {command_str}")
             prefixes_to_save = validation_result.prefixes_needing_approval
             return ApprovalRequirement(
                 needs_approval=True,
