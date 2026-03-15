@@ -220,7 +220,12 @@ class InitProgressRenderer:
 
         # Show model after datasources
         if self._model_message:
-            display.append(f"\n  {self._model_message}", style="bold")
+            paren = self._model_message.find("(")
+            if paren > 0:
+                display.append(f"\n  {self._model_message[:paren].rstrip()}", style="bold")
+                display.append(f" {self._model_message[paren:]}", style="dim")
+            else:
+                display.append(f"\n  {self._model_message}", style="bold")
 
         return display
 
@@ -303,7 +308,12 @@ class InitProgressRenderer:
 
 
 def format_model_info_rich(model_message: str) -> str:
-    """Return a Rich-formatted model info string."""
+    """Return a Rich-formatted model info string with dimmed source hint."""
+    paren = model_message.find("(")
+    if paren > 0:
+        main = model_message[:paren].rstrip()
+        hint = model_message[paren:]
+        return f"[bold]{main}[/bold] [dim]{hint}[/dim]"
     return f"[bold]{model_message}[/bold]"
 
 
