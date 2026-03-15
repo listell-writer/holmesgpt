@@ -299,7 +299,7 @@ class RemoteMCPTool(Tool):
         for key, val in schema_params.items():
             resolved = cls._resolve_schema(val, input_schema)
             if resolved != val:
-                logger.debug(
+                logger.info(
                     f"MCP param '{key}' schema resolved: "
                     f"{json.dumps(val, default=str)} -> {json.dumps(resolved, default=str)}"
                 )
@@ -646,7 +646,7 @@ class RemoteMCPToolset(Toolset):
             tools_result = asyncio.run(self._get_server_tools())
 
             for tool in tools_result.tools:
-                logger.debug(
+                logger.info(
                     f"MCP server {self.name} raw tool schema for '{tool.name}': "
                     f"{json.dumps(tool.inputSchema, indent=2, default=str)}"
                 )
