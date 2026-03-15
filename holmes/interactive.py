@@ -365,6 +365,23 @@ def _build_task_panel(tasks: list) -> Panel:
     )
 
 
+class _LiveLogFilter(logging.Filter):
+    """Captures log records into a buffer instead of letting them through.
+
+    During Rich Live display, log messages from separate Console instances
+    break transient rendering — causing duplicate frames and garbled output.
+    This filter intercepts records so they can be replayed after Live stops.
+    """
+
+    def __init__(self, buffer: List[logging.LogRecord]):
+        super().__init__()
+        self._buffer = buffer
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        self._buffer.append(record)
+        return False  # Suppress — will be replayed later
+
+
 class AgenticProgressRenderer:
     """Renders tool-calling progress using Rich Live.
 
@@ -416,6 +433,11 @@ class AgenticProgressRenderer:
         self._live_tasks: Optional[list] = None
         self._summary_printed = False
 
+        # Log buffering: capture log messages during Live display to prevent
+        # them from breaking the transient rendering (duplicate frames, garbled output)
+        self._log_buffer: List[logging.LogRecord] = []
+        self._log_filter = _LiveLogFilter(self._log_buffer)
+
     # Sentinel prefix for tool header lines in the data buffer
     _TOOL_HEADER_PREFIX = "\x00TOOL:"
 
@@ -426,7 +448,7 @@ class AgenticProgressRenderer:
         self._data_lines.append(f"{self._TOOL_HEADER_PREFIX}{header}")
 
         if not output:
-            self._data_lines.append("  (empty)")
+            self._data_lines.append("\x00EMPTY")
             self._total_queries += 1
             return
         self._total_bytes += len(output)
@@ -504,6 +526,15 @@ class AgenticProgressRenderer:
                 rows_rendered += 1
                 continue
 
+            # Render empty marker with visible style
+            if line == "\x00EMPTY":
+                pane.append(f" {'':>{gutter_w}} ", style="dim")
+                pane.append("  ✗ no output", style="italic red")
+                rows_rendered += 1
+                if rows_rendered < visible:
+                    pane.append("\n")
+                continue
+
             # Edge fade: dim bottom 2 lines to hint at more content below
             remaining = visible - rows_rendered
             if remaining <= 2:
@@ -573,11 +604,9 @@ class AgenticProgressRenderer:
         if has_tools:
             tools_text = Text()
             # Compute available width for tool labels.
-            # The left pane gets ratio=2 out of 5 total columns,
-            # minus panel border (2) and padding (2) and prefix (4 = "  → ").
+            # Full terminal width minus panel border (2), padding (2), prefix (4 = "  → ").
             term_width = self._console.width or 120
-            pane_width = int(term_width * 2 / 5)
-            label_budget = max(pane_width - 2 - 2 - 4, 30)
+            label_budget = max(term_width - 2 - 2 - 4, 30)
 
             for name, desc, toolset, elapsed, output_len, is_error in self._tool_history:
                 tools_text.append("  → ", style="dim")
@@ -648,30 +677,28 @@ class AgenticProgressRenderer:
         return Group(*sections)
 
     def _build_display(self) -> Any:
+        from rich.console import Group
+
         left = self._build_left_pane(
             show_analyzing=self._thinking and not self._in_flight
         )
 
-        # Only show the two-pane layout when there's actual data to display.
         # Before any tool output arrives, just show the left pane content
-        # (status indicator, tasks, tools) without a wasteful empty data panel.
         if not self._data_lines:
             return left
 
+        # Stack vertically: status panels on top, full-width data pane below
         right = self._build_data_pane()
-
-        # Use a table for side-by-side layout — data pane is wider
-        table = Table.grid(padding=(0, 1))
-        table.add_column("status", ratio=2)
-        table.add_column("data", ratio=3)
-
         stats = self._build_stats_line()
-        table.add_row(
-            left,
-            Panel(right, title=f"[bold]Data[/bold]{stats}", title_align="left", border_style="dim", padding=(0, 0)),
+        data_panel = Panel(
+            right,
+            title=f"[bold]Data[/bold]{stats}",
+            title_align="left",
+            border_style="dim",
+            padding=(0, 0),
         )
 
-        return table
+        return Group(left, data_panel)
 
     def _tick(self) -> None:
         while not self._timer_stop.wait(0.15):
@@ -698,6 +725,9 @@ class AgenticProgressRenderer:
         """Start the Live display with the initial 'Thinking...' spinner."""
         from rich.live import Live
 
+        # Buffer log messages to prevent them from breaking Live's transient rendering
+        logging.getLogger().addFilter(self._log_filter)
+
         try:
             self._live = Live(
                 self._build_display(),
@@ -709,13 +739,14 @@ class AgenticProgressRenderer:
         except (TypeError, AttributeError):
             # Console may be a mock in tests — skip live display
             self._live = None
+            logging.getLogger().removeFilter(self._log_filter)
             return
         self._timer_stop.clear()
         timer_thread = threading.Thread(target=self._tick, daemon=True)
         timer_thread.start()
 
     def _stop_live(self) -> None:
-        """Stop the Live display."""
+        """Stop the Live display and replay buffered log messages."""
         self._timer_stop.set()
         if self._live is not None:
             try:
@@ -723,6 +754,15 @@ class AgenticProgressRenderer:
             except (TypeError, AttributeError):
                 pass
             self._live = None
+        # Remove filter and replay buffered log records
+        logging.getLogger().removeFilter(self._log_filter)
+        if self._log_buffer:
+            root = logging.getLogger()
+            for record in self._log_buffer:
+                for handler in root.handlers:
+                    if record.levelno >= handler.level:
+                        handler.emit(record)
+            self._log_buffer.clear()
 
     def _process_completed(self) -> None:
         """Absorb completed tools into live state (tool history + tasks)."""
