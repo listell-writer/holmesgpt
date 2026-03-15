@@ -581,16 +581,22 @@ class AgenticProgressRenderer:
                       title_align="left", border_style="dim", padding=(0, 1))
             )
 
-        # Add analyzing spinner when thinking between tool batches
-        if show_analyzing:
-            analyzing = Text()
+        # Add status spinner when thinking between tool batches or gathering data
+        if show_analyzing or self._in_flight:
+            status_text = Text()
             elapsed = now - self._start_time
             frame = _SPINNER_FRAMES[int(now * 8) % len(_SPINNER_FRAMES)]
-            analyzing.append(f"  {frame} ", style=f"bold {AI_COLOR}")
-            analyzing.append("Analyzing", style=f"bold {AI_COLOR}")
-            dots = "." * (int(elapsed * 2) % 4)
-            analyzing.append(f"{dots:<4}", style=f"bold {AI_COLOR}")
-            sections.append(analyzing)
+            status_text.append(f"  {frame} ", style=f"bold {AI_COLOR}")
+            if show_analyzing:
+                status_text.append("Analyzing", style=f"bold {AI_COLOR}")
+                dots = "." * (int(elapsed * 2) % 4)
+                status_text.append(f"{dots:<4}", style=f"bold {AI_COLOR}")
+            else:
+                status_text.append("Gathering data", style=f"bold {AI_COLOR}")
+                status_text.append("    ", style=f"bold {AI_COLOR}")
+            if self._escape_hint:
+                status_text.append(f"  {self._escape_hint}", style="dim")
+            sections.append(status_text)
 
         if not sections:
             return Text("  Waiting…", style="dim italic")
@@ -611,8 +617,9 @@ class AgenticProgressRenderer:
         if self._thinking and not self._in_flight and not self._has_investigation_context():
             display = Text()
             elapsed = now - self._start_time
-            display.append("  ◐ ", style=f"bold {AI_COLOR}")
-            display.append("Thinking", style=f"bold {AI_COLOR}")
+            frame = _SPINNER_FRAMES[int(now * 8) % len(_SPINNER_FRAMES)]
+            display.append(f"  {frame} ", style=f"bold {AI_COLOR}")
+            display.append("Analyzing", style=f"bold {AI_COLOR}")
             dots = "." * (int(elapsed * 2) % 4)
             display.append(f"{dots:<4}", style=f"bold {AI_COLOR}")
             if self._escape_hint:
@@ -637,18 +644,6 @@ class AgenticProgressRenderer:
             Panel(right, title=f"[bold]Data[/bold]{stats}", title_align="left", border_style="dim", padding=(0, 0)),
         )
 
-        if self._escape_hint:
-            from rich.console import Group
-            hint = Text()
-            if self._in_flight:
-                frame = _SPINNER_FRAMES[int(now * 8) % len(_SPINNER_FRAMES)]
-                hint.append(f"  {frame} ", style=f"bold {AI_COLOR}")
-                hint.append("Gathering data", style=f"bold {AI_COLOR}")
-            elif self._thinking:
-                hint.append("  ◐ ", style=f"bold {AI_COLOR}")
-                hint.append("Thinking", style=f"bold {AI_COLOR}")
-            hint.append(f"    {self._escape_hint}", style="dim")
-            return Group(table, hint)
         return table
 
     def _tick(self) -> None:
@@ -733,6 +728,13 @@ class AgenticProgressRenderer:
         # Print the tools list
         if self._tool_history:
             tools_text = Text()
+            try:
+                term_width = int(self._console.width or 120)
+            except (TypeError, ValueError):
+                term_width = 120
+            # Budget: full width minus panel border(2), padding(2), number prefix(~6),
+            # and suffix space for [toolset] time size (~30)
+            label_budget = max(term_width - 2 - 2 - 6 - 30, 30)
             for idx, (name, desc, toolset, elapsed, output_len, is_error) in enumerate(self._tool_history):
                 tool_num = self._tool_number_offset + idx + 1
                 if is_error:
@@ -740,6 +742,8 @@ class AgenticProgressRenderer:
                 else:
                     tools_text.append(f"  {tool_num}. ", style="dim")
                 label = desc if desc else name
+                if len(label) > label_budget:
+                    label = label[: label_budget - 1] + "…"
                 tools_text.append(label, style="bold" if is_error else "")
                 if toolset:
                     tools_text.append(f" [{toolset}]", style="dim")
