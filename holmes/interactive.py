@@ -121,38 +121,32 @@ _SLOW_THRESHOLD_SECS = 1.0  # Show a toolset by name if it takes longer than thi
 def _make_live(renderable: Any, **kwargs: Any) -> Any:
     """Create a Rich Live instance with a workaround for the ghost-frame bug.
 
-    Rich 13.9.4 bug: Live.refresh() → console.print(Control()) uses end="\\n"
-    (default), adding a trailing newline not counted in LiveRender._shape.
-    position_cursor() does ``height - 1`` cursor-ups, but needs ``height``
-    because the trailing newline puts the cursor one line below the content.
-    Each frame leaks 1 ghost line; over N frames → N ghost lines accumulate.
+    Rich 13.9.4 bug: ``Live.refresh()`` calls ``console.print(Control())``
+    which uses the default ``end="\\n"``.  This trailing newline is not
+    accounted for in ``LiveRender._shape``, so ``position_cursor()`` (which
+    does ``height - 1`` cursor-ups) under-erases by one line when the
+    terminal has room below the display.  Each frame leaks one ghost line.
 
-    Fix: monkey-patch position_cursor on the LiveRender instance to use
-    ``height`` instead of ``height - 1``.
+    Fix: subclass ``Live`` and override ``refresh()`` to pass ``end=""``,
+    eliminating the spurious trailing newline.  With ``end=""``, the cursor
+    stays on the last content line and ``height - 1`` cursor-ups correctly
+    reaches line 1.
     """
     from rich.control import Control
     from rich.live import Live
-    from rich.segment import ControlType
 
-    live = Live(renderable, **kwargs)
-    _orig = live._live_render.position_cursor
+    class _FixedLive(Live):
+        def refresh(self) -> None:
+            with self._lock:
+                self._live_render.set_renderable(self.renderable)
+                if self.console.is_terminal and not self.console.is_dumb_terminal:
+                    with self.console:
+                        self.console.print(Control(), end="")
+                elif not self._started and not self.transient:
+                    with self.console:
+                        self.console.print(Control(), end="")
 
-    def _patched_position_cursor() -> Control:
-        shape = live._live_render._shape
-        if shape is not None:
-            _, height = shape
-            return Control(
-                ControlType.CARRIAGE_RETURN,
-                (ControlType.ERASE_IN_LINE, 2),
-                *(
-                    ((ControlType.CURSOR_UP, 1), (ControlType.ERASE_IN_LINE, 2))
-                    * height  # was height - 1 in Rich
-                ),
-            )
-        return _orig()
-
-    live._live_render.position_cursor = _patched_position_cursor  # type: ignore[assignment]
-    return live
+    return _FixedLive(renderable, **kwargs)
 
 
 class InitProgressRenderer:

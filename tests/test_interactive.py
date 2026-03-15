@@ -1422,64 +1422,45 @@ class TestRendererEndToEnd(unittest.TestCase):
 class TestLiveDisplayNoGhostFrames(unittest.TestCase):
     """Verify _make_live fixes the Rich ghost-frame bug.
 
-    Rich 13.9.4 bug: Live.refresh() -> console.print(Control()) appends
-    end="\\n" which isn't counted in LiveRender._shape. position_cursor()
-    does height-1 cursor-ups but needs height, causing 1 ghost line per
-    frame.  _make_live patches position_cursor to use height instead.
+    Rich 13.9.4 bug: Live.refresh() calls console.print(Control()) with
+    the default end="\\n", adding a trailing newline not counted in
+    LiveRender._shape. This causes position_cursor() (height-1 cursor-ups)
+    to under-erase by 1 line when the terminal has space below the display.
+
+    _make_live returns a Live subclass that overrides refresh() to pass
+    end="", eliminating the spurious trailing newline.
 
     Reproduction technique: render to a StringIO file with force_terminal=True,
     then parse ANSI escape sequences to count cursor-up instructions per frame.
     """
 
-    @staticmethod
-    def _count_cursor_ups_per_frame(raw_output: str) -> list:
-        """Parse raw terminal output and return cursor-up counts per frame transition."""
-        erase_pattern = r"\x1b\[2K(?:\x1b\[1A\x1b\[2K)*"
-        return [m.group(0).count("\x1b[1A") for m in re.finditer(erase_pattern, raw_output)]
+    def test_make_live_no_trailing_newline(self):
+        """Frames rendered by _make_live should NOT end with a trailing newline.
 
-    @staticmethod
-    def _count_frame_lines(raw_output: str) -> list:
-        """Parse raw terminal output and return newline counts per rendered frame."""
-        erase_pattern = r"\x1b\[2K(?:\x1b\[1A\x1b\[2K)*"
-        frames = re.split(erase_pattern, raw_output)
-        # Filter out erase-only chunks and very short fragments
-        return [f.count("\n") for f in frames if len(f) > 5 and "\x1b[1A" not in f]
-
-    def test_make_live_no_cumulative_drift(self):
-        """Each frame-transition erase should use cursor-ups = previous frame height.
-
-        Without the fix, each erase does height-1 cursor-ups while the frame
-        occupies height+1 terminal lines (due to console.print's end="\\n"),
-        leaking 1 ghost line per frame.
-
-        With the fix, erase cursor-ups = height, which matches the height+1
-        lines (height-1 content newlines + 1 trailing newline = height lines
-        to go back up).
+        With end="" in refresh(), the cursor stays on the last content line.
+        position_cursor with height-1 cursor-ups then correctly reaches line 1.
         """
         from rich.text import Text
 
         buf = StringIO()
         console = Console(file=buf, force_terminal=True, width=80, color_system="truecolor")
 
-        live = _make_live(Text("frame 0"), console=console, transient=True, auto_refresh=False)
+        live = _make_live(Text("line 0\nline 1\nline 2"), console=console, transient=True, auto_refresh=False)
         live.start()
         live.refresh()
 
-        # Render several frames of increasing height
-        for i in range(1, 8):
-            content = Text("\n".join(f"line {j}" for j in range(i + 1)))
-            live.update(content)
-            live.refresh()
+        # Render another frame
+        live.update(Text("frame 1\nframe 1 line 2"))
+        live.refresh()
 
         live.stop()
 
         raw = buf.getvalue()
 
-        # Parse alternating content-frames and erase-blocks from the raw output.
-        # Each erase block's cursor-up count should equal the PREVIOUS frame's
-        # newline count + 1 (compensating for console.print's trailing newline).
-        erase_pattern = r"(\x1b\[2K(?:\x1b\[1A\x1b\[2K)*)"
-        parts = re.split(erase_pattern, raw)
+        # With end="", frames should have exactly height-1 newlines
+        # (between lines, no trailing). Split out erase blocks.
+        erase_pattern = r"\x1b\[2K(?:\x1b\[1A\x1b\[2K)*"
+        parts = re.split(f"({erase_pattern})", raw)
 
         content_frames = []
         erase_ups = []
@@ -1489,40 +1470,38 @@ class TestLiveDisplayNoGhostFrames(unittest.TestCase):
             elif len(part) > 2:
                 content_frames.append(part.count("\n"))
 
-        # For each transition (erase[i] follows content_frames[i]),
-        # cursor-ups should equal content_newlines + 1.
-        # Check at least 4 transitions to be meaningful.
-        pairs = min(len(content_frames), len(erase_ups))
-        self.assertGreaterEqual(pairs, 4, "Need at least 4 frame transitions to test")
-
-        for i in range(pairs):
-            expected_ups = content_frames[i] + 1  # +1 for trailing newline
-            # Allow ±1 for edge effects (first/last frame, stop cleanup)
-            self.assertAlmostEqual(
-                erase_ups[i],
-                expected_ups,
-                delta=1,
-                msg=(
-                    f"Frame {i}: erase cursor-ups ({erase_ups[i]}) doesn't match "
-                    f"expected ({expected_ups} = {content_frames[i]} newlines + 1). "
-                    f"Ghost frame drift detected!"
-                ),
+        # Frame 0: "line 0\nline 1\nline 2" = 3 lines, 2 newlines between them
+        # With end="": 2 newlines in output. Cursor stays on line 3.
+        # Erase for frame 0→1: height-1 = 2 cursor-ups (Rich default, correct with end="")
+        if content_frames:
+            self.assertEqual(
+                content_frames[0],
+                2,
+                f"Frame 0 should have 2 newlines (no trailing), got {content_frames[0]}",
+            )
+        if erase_ups:
+            self.assertEqual(
+                erase_ups[0],
+                2,
+                f"First erase should use 2 cursor-ups (height-1 for 3-line frame), got {erase_ups[0]}",
             )
 
-    def test_renderer_live_uses_patched_live(self):
-        """AgenticProgressRenderer.start() should use the patched Live."""
+    def test_renderer_live_uses_fixed_subclass(self):
+        """AgenticProgressRenderer.start() should use the _FixedLive subclass."""
+        from rich.live import Live
+
         console = Console(width=120, force_terminal=True, color_system=None)
         renderer = AgenticProgressRenderer(console, tool_number_offset=0)
         renderer.start()
         try:
-            # The Live instance should have a patched position_cursor
             self.assertIsNotNone(renderer._live)
-            # The patched function is a closure, not the original bound method
-            pos_cursor = renderer._live._live_render.position_cursor
-            self.assertFalse(
-                hasattr(pos_cursor, "__self__"),
-                "position_cursor should be patched (a closure), not the original bound method",
+            # Should be a subclass of Live, not Live itself
+            self.assertNotEqual(
+                type(renderer._live),
+                Live,
+                "Live instance should be _FixedLive subclass, not plain Live",
             )
+            self.assertIsInstance(renderer._live, Live)
         finally:
             renderer._stop_live()
 

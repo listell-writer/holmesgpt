@@ -295,7 +295,8 @@ raw = buf.getvalue()  # Contains full ANSI escape sequences
 **Key patterns:**
 - Ghost frames = cumulative drift where each frame leaves 1+ orphaned lines
 - Verify by counting: cursor-ups per transition should equal rendered lines per frame
-- Known Rich 13.9.4 bug: `console.print(end="\\n")` adds a trailing newline not counted in `LiveRender._shape`, causing 1 ghost line per frame. Workaround: patch `position_cursor()` to use `height` instead of `height - 1`.
+- Known Rich 13.9.4 bug: `Live.refresh()` calls `console.print(Control())` with default `end="\\n"`, adding a trailing newline not counted in `LiveRender._shape`. When the terminal has room below the display, each frame leaks 1 ghost line. When the display is at the bottom (common case), the `\\n` causes scrolling and `height-1` cursor-ups is correct.
+- Workaround: subclass `Live` and override `refresh()` to pass `end=""`. Do NOT patch `position_cursor` — that over-erases when the display is at the terminal bottom (the common case).
 
 ## Security Notes
 

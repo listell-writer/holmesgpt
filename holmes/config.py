@@ -552,7 +552,7 @@ class Config(RobustaBaseConfig):
         )  # type: ignore
         context_size = self._format_token_count(llm.get_context_window_size())
         max_response = self._format_token_count(llm.get_maximum_output_token())
-        if self._model_source:
+        if self._model_source and self._model_source != "default":
             source_hint = f"configured {self._model_source}"
         else:
             source_hint = "default, change with --model, see https://holmesgpt.dev/ai-providers"
