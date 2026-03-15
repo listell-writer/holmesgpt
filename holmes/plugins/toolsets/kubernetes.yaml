@@ -14,7 +14,7 @@ toolsets:
 
     tools:
       - name: "kubernetes_jq_query"
-        user_description: "kubectl get {{kind}} | jq '{{jq_expr}}'"
+        user_description: "jq query: kubectl get {{kind}} | jq '{{jq_expr}}'"
         description: >
           Use kubectl to get json for all resources of a specific kind and filter with jq.
           More memory-efficient than bash for large queries - uses Kubernetes API pagination
@@ -177,7 +177,7 @@ toolsets:
                 - Include grep-ready keys/values; avoid repeating entire objects or unchanged defaults
 
       - name: "kubernetes_tabular_query"
-        user_description: "kubectl get {{kind}} -o custom-columns='{{columns}}'{% if filter_pattern %} | grep {{filter_pattern}}{% endif %}"
+        user_description: "tabular query: kubectl get {{kind}} columns='{{columns}}'{% if filter_pattern %} filter={{filter_pattern}}{% endif %}"
         description: >
           Extract specific fields from Kubernetes resources in tabular format with optional filtering.
           Returns a JSON object with keys: "count" (number of rows), "header" (column header line),
