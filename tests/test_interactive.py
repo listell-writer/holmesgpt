@@ -20,6 +20,7 @@ from holmes.interactive import (
     SlashCommands,
     UserFeedback,
     _make_live,
+    _run_inline_menu,
     handle_feedback_command,
     run_interactive_loop,
 )
@@ -1727,3 +1728,65 @@ class TestDataPaneScrollAndWidth(unittest.TestCase):
         left_width = min(52, tw // 2)
         right_width = max(tw - left_width - 3, 40)
         self.assertGreater(right_width, left_width)
+
+
+class TestInlineMenu(unittest.TestCase):
+    """Test _run_inline_menu using prompt_toolkit's pipe input for simulated keystrokes."""
+
+    def _run_menu(self, keys: str, options: list[str]) -> int | None:
+        """Run the menu with simulated keystrokes and return the result."""
+        from prompt_toolkit.input import create_pipe_input
+        from prompt_toolkit.output import DummyOutput
+
+        console = Console(file=StringIO(), force_terminal=True, width=120)
+
+        with create_pipe_input() as pipe_input:
+            pipe_input.send_text(keys)
+            # Patch prompt_toolkit to use our pipe input/output
+            with patch("holmes.interactive.Application") as MockApp:
+                captured_result = [None]
+
+                def fake_run(self_app):
+                    from prompt_toolkit.application import Application as RealApp
+                    real_app = RealApp(
+                        layout=self_app.layout,
+                        key_bindings=self_app.key_bindings,
+                        style=self_app.style,
+                        full_screen=False,
+                        erase_when_done=False,
+                        input=pipe_input,
+                        output=DummyOutput(),
+                    )
+                    real_app.run()
+
+                MockApp.side_effect = lambda **kwargs: type(
+                    "_FakeApp", (),
+                    {**kwargs, "run": lambda self: fake_run(self)},
+                )()
+
+                return _run_inline_menu(options, console)
+
+    def test_enter_selects_first(self):
+        """Pressing Enter immediately selects the first option."""
+        result = self._run_menu("\r", ["Yes", "No", "Cancel"])
+        self.assertEqual(result, 0)
+
+    def test_down_arrow_then_enter(self):
+        """Down arrow + Enter selects the second option."""
+        result = self._run_menu("\x1b[B\r", ["Yes", "No", "Cancel"])
+        self.assertEqual(result, 1)
+
+    def test_down_arrow_twice_then_enter(self):
+        """Two down arrows + Enter selects the third option."""
+        result = self._run_menu("\x1b[B\x1b[B\r", ["Yes", "No", "Cancel"])
+        self.assertEqual(result, 2)
+
+    def test_number_key_direct_selection(self):
+        """Number key 2 directly selects the second option."""
+        result = self._run_menu("2", ["Yes", "No", "Cancel"])
+        self.assertEqual(result, 1)
+
+    def test_escape_cancels(self):
+        """Escape returns None (cancelled)."""
+        result = self._run_menu("\x1b", ["Yes", "No", "Cancel"])
+        self.assertIsNone(result)

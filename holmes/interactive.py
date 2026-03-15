@@ -1680,150 +1680,97 @@ def prompt_for_llm_sharing(
     return None
 
 
-def _read_key() -> str:
-    """Read a single keypress, handling escape sequences for arrow keys.
-
-    Returns a short string: ``"up"``, ``"down"``, ``"enter"``, ``"esc"``,
-    ``"1"``–``"9"``, or the raw character.
-    """
-    ch = sys.stdin.read(1)
-    if ch == "\x1b":
-        # Could be standalone Escape or start of an escape sequence.
-        # Use a generous timeout — SSH or slow terminals may split the
-        # sequence across multiple reads.
-        ready, _, _ = select_module.select([sys.stdin], [], [], 0.1)
-        if ready:
-            ch2 = sys.stdin.read(1)
-            if ch2 == "[":
-                # CSI sequence: read the final byte
-                ch3 = sys.stdin.read(1)
-                if ch3 == "A":
-                    return "up"
-                if ch3 == "B":
-                    return "down"
-                # Consume any remaining bytes of longer sequences (e.g. \x1b[1;5A)
-                while ch3.isdigit() or ch3 == ";":
-                    ch3 = sys.stdin.read(1)
-                if ch3 == "A":
-                    return "up"
-                if ch3 == "B":
-                    return "down"
-                # Other CSI sequences (left, right, home, etc.) — ignore
-                return ""
-            if ch2 == "O":
-                # SS3 sequence (some terminals send \x1bOA for arrow keys)
-                ch3 = sys.stdin.read(1)
-                if ch3 == "A":
-                    return "up"
-                if ch3 == "B":
-                    return "down"
-                return ""
-            # Unknown escape sequence — ignore, don't treat as Esc
-            return ""
-        # No follow-up byte within timeout → standalone Escape key
-        return "esc"
-    if ch in ("\r", "\n"):
-        return "enter"
-    if ch == "\x03":  # Ctrl-C
-        return "esc"
-    if ch in ("k", "K"):
-        return "up"
-    if ch in ("j", "J"):
-        return "down"
-    return ch
-
-
-def _build_menu_renderable(
-    options: list[str], selected: int, header: Any = None
-) -> Any:
-    """Build a Rich renderable for the inline menu (optionally with a header panel)."""
-    from rich.text import Text
-
-    parts: list[Any] = []
-    if header is not None:
-        parts.append(header)
-
-    menu = Text()
-    for i, option in enumerate(options):
-        if i == selected:
-            menu.append(f"  > {i + 1}. {option}\n", style="bold")
-        else:
-            menu.append(f"    {i + 1}. {option}\n")
-    menu.append("\n")
-    menu.append("  Esc to cancel", style="dim")
-    parts.append(menu)
-
-    if len(parts) == 1:
-        return parts[0]
-
-    from rich.console import Group
-
-    return Group(*parts)
-
-
 def _run_inline_menu(
     options: list[str], console: Console, header: Any = None
 ) -> Optional[int]:
-    """Run an inline menu with arrow-key navigation using Rich Live.
+    """Run an inline menu with arrow-key navigation using prompt_toolkit.
 
-    The entire menu (and optional *header*) is rendered inside a transient
-    Rich Live display so it auto-erases when the user makes a selection.
+    Uses prompt_toolkit ``Application`` with ``erase_when_done=True`` so the
+    entire UI (header panel + options) is erased when the user makes a
+    selection.  Arrow keys, j/k, number keys, Enter, and Escape all work
+    correctly across terminals and SSH.
 
     Args:
         options: List of option strings to display.
         console: Rich console for output.
-        header: Optional Rich renderable displayed above the options.
+        header: Optional Rich renderable printed above the menu (erased
+                via ANSI codes after the menu exits).
 
     Returns:
         Index of selected option (0-based), or ``None`` if cancelled.
     """
-    if not _HAS_TERMINAL_CONTROL or not sys.stdin.isatty():
-        # No terminal control — fall back to a simple numbered prompt
-        console.print(header or "")
-        for i, opt in enumerate(options):
-            console.print(f"  {i + 1}. {opt}")
-        try:
-            choice = input("Enter number (or press Enter to cancel): ").strip()
-        except (EOFError, KeyboardInterrupt):
-            return None
-        if choice.isdigit() and 1 <= int(choice) <= len(options):
-            return int(choice) - 1
-        return None
+    from io import StringIO
 
-    selected = 0
-    fd = sys.stdin.fileno()
-    old_settings = termios.tcgetattr(fd)
+    selected = [0]
+    result: List[Optional[int]] = [None]
 
-    live = _make_live(
-        _build_menu_renderable(options, selected, header),
-        console=console,
-        transient=True,
-        refresh_per_second=15,
+    def get_menu_text():
+        lines = []
+        for i, option in enumerate(options):
+            if i == selected[0]:
+                lines.append(("bold", f"  > {i + 1}. {option}\n"))
+            else:
+                lines.append(("", f"    {i + 1}. {option}\n"))
+        lines.append(("class:hint", "\n  Esc to cancel"))
+        return lines
+
+    bindings = KeyBindings()
+
+    @bindings.add("up")
+    @bindings.add("k")
+    def _up(event: Any) -> None:
+        selected[0] = (selected[0] - 1) % len(options)
+
+    @bindings.add("down")
+    @bindings.add("j")
+    def _down(event: Any) -> None:
+        selected[0] = (selected[0] + 1) % len(options)
+
+    @bindings.add("enter")
+    def _enter(event: Any) -> None:
+        result[0] = selected[0]
+        event.app.exit()
+
+    @bindings.add("escape")
+    @bindings.add("c-c")
+    def _cancel(event: Any) -> None:
+        result[0] = None
+        event.app.exit()
+
+    for i in range(min(9, len(options))):
+
+        @bindings.add(str(i + 1))
+        def _select_num(event: Any, idx: int = i) -> None:
+            result[0] = idx
+            event.app.exit()
+
+    menu_style = Style.from_dict({"hint": "#666666"})
+    layout = Layout(Window(FormattedTextControl(get_menu_text, show_cursor=False)))
+
+    # Measure header height so we can erase it after the menu exits
+    header_lines = 0
+    if header is not None:
+        buf = StringIO()
+        measure = Console(file=buf, width=console.width or 120, force_terminal=True)
+        measure.print(header)
+        header_lines = buf.getvalue().count("\n")
+        console.print(header)
+
+    app: Application = Application(
+        layout=layout,
+        key_bindings=bindings,
+        style=menu_style,
+        full_screen=False,
+        erase_when_done=True,
     )
-    live.start()
-    try:
-        tty.setcbreak(fd)
-        while True:
-            ready, _, _ = select_module.select([sys.stdin], [], [], 0.1)
-            if not ready:
-                continue
-            key = _read_key()
-            if not key:
-                continue  # Unknown escape sequence — ignore
-            if key == "up":
-                selected = (selected - 1) % len(options)
-            elif key == "down":
-                selected = (selected + 1) % len(options)
-            elif key == "enter":
-                return selected
-            elif key == "esc":
-                return None
-            elif key.isdigit() and 1 <= int(key) <= len(options):
-                return int(key) - 1
-            live.update(_build_menu_renderable(options, selected, header))
-    finally:
-        live.stop()
-        termios.tcsetattr(fd, termios.TCSADRAIN, old_settings)
+    app.run()
+
+    # erase_when_done clears the menu; also erase the Rich header above it
+    if header_lines > 0:
+        sys.stdout.write(f"\x1b[{header_lines}A\x1b[0J")
+        sys.stdout.flush()
+
+    return result[0]
 
 
 def handle_tool_approval(

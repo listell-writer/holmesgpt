@@ -491,16 +491,6 @@ class YAMLTool(Tool, BaseModel):
 
     def get_parameterized_one_liner(self, params) -> str:
         params = sanitize_params(params)
-        # Add derived template variables for user_description rendering
-        if "columns" in params:
-            # Extract column header names from custom-columns spec
-            # e.g. "NAME:.metadata.name,STATUS:.status.phase" → "NAME,STATUS"
-            headers = ",".join(
-                col.split(":")[0].strip("'\" ")
-                for col in params["columns"].split(",")
-                if ":" in col
-            )
-            params["column_headers"] = headers
         if self.user_description:
             template = Template(self.user_description)
         else:

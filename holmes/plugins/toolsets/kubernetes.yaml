@@ -177,7 +177,7 @@ toolsets:
                 - Include grep-ready keys/values; avoid repeating entire objects or unchanged defaults
 
       - name: "kubernetes_tabular_query"
-        user_description: "kubectl get {{kind}} → {{column_headers}}{% if filter_pattern %} | grep {{filter_pattern}}{% endif %}"
+        user_description: "kubectl get {{kind}} -o custom-columns='{{columns}}'{% if filter_pattern %} | grep {{filter_pattern}}{% endif %}"
         description: >
           Extract specific fields from Kubernetes resources in tabular format with optional filtering.
           Returns a JSON object with keys: "count" (number of rows), "header" (column header line),
