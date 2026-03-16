@@ -331,29 +331,6 @@ class ToolCallingLLM:
         total_num_llm_calls = 0
         accumulated_stats = RequestStats()
 
-<<<<<<< HEAD
-            try:
-                limit_result = limit_input_context_window(
-                    llm=self.llm, messages=messages, tools=tools
-                )
-            except ContextWindowOverflowError as e:
-                logging.warning(f"Context window overflow: {e}")
-                return LLMResult(
-                    result=str(e),
-                    tool_calls=all_tool_calls,
-                    num_llm_calls=max(0, i - 1),
-                    messages=messages,
-                    metadata=metadata,
-                    total_cost=costs.total_cost,
-                    total_tokens=costs.total_tokens,
-                    prompt_tokens=costs.prompt_tokens,
-                    completion_tokens=costs.completion_tokens,
-                    num_compactions=costs.num_compactions,
-                )
-
-            messages = limit_result.messages
-            metadata = metadata | limit_result.metadata
-=======
         while True:
             stream = self.call_stream(
                 msgs=messages,
@@ -366,7 +343,6 @@ class ToolCallingLLM:
                 request_context=request_context,
                 iteration_offset=total_num_llm_calls,
             )
->>>>>>> origin/master
 
             tool_decisions = None
             terminal_data = None
@@ -763,7 +739,10 @@ class ToolCallingLLM:
             tools = None if i == max_steps else tools
             tool_choice = "auto" if tools else None
 
-<<<<<<< HEAD
+            compaction_start_event = check_compaction_needed(self.llm, messages, tools)
+            if compaction_start_event:
+                yield compaction_start_event
+
             try:
                 limit_result = limit_input_context_window(
                     llm=self.llm, messages=messages, tools=tools
@@ -779,16 +758,6 @@ class ToolCallingLLM:
                     },
                 )
                 return
-
-=======
-            compaction_start_event = check_compaction_needed(self.llm, messages, tools)
-            if compaction_start_event:
-                yield compaction_start_event
-
-            limit_result = limit_input_context_window(
-                llm=self.llm, messages=messages, tools=tools
-            )
->>>>>>> origin/master
             yield from limit_result.events
             messages = limit_result.messages
             metadata = metadata | limit_result.metadata
