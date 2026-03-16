@@ -166,7 +166,6 @@ port_forwards:
 
 tags:
   - easy
-  - regression
-  - grafana-dashboard
+  - grafana
   - question-answer
   - kubernetes
