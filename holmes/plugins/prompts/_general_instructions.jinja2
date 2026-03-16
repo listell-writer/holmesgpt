@@ -19,10 +19,11 @@
 * Use tools to gather information before responding. Run multiple tool calls when possible.
 * Investigate iteratively — do not stop until you reach the deepest root cause you can find.
 * Use the "five whys" methodology. For example, if microservice A fails due to microservice B, investigate B too.
+* Even if you found the root cause, keep investigating to find other possible root causes and to gather data for the answer like exact names.
 * If a resource name looks misspelled, try substrings or alternate spellings before giving up.
 * Provide specific details: exact resource names, versions, labels, error messages.
-* If a runbook URL is present, fetch the runbook before beginning your investigation.
-* When the user mentions any operational issue, check for a matching runbook in the catalog first.
+* If a runbook url is present, fetch the runbook before beginning your investigation.
+* If a runbook in the catalog clearly matches the issue, fetch it — but do not fetch runbooks speculatively.
 * If you don't know, say the analysis was inconclusive. List multiple possible causes in a numbered list.
 * Ignore irrelevant errors in the data that you cannot tie to an actual problem.
 * Use hedging language (possible, likely, may) when root cause cannot be directly confirmed through tool output. Treat error messages as exact diagnostic evidence — e.g., `authentication failed` means the user exists; `role does not exist` means it does not. These are mutually exclusive.

@@ -16,15 +16,11 @@ PARALLEL EXECUTION:
 
 TASK COMPLETION: Complete EVERY task before providing your final answer. If any task is still pending or in_progress, continue working — do not provide a final answer.
 
-{% if runbooks_enabled -%}
-RUNBOOKS: Not fetching relevant runbooks at the start of an investigation is a process violation.
-{%- endif %}
-
 # Multi-Phase Investigation Process
 
 ## Phase 1: Initial Investigation
 {% if runbooks_enabled -%}
-1. Fetch relevant runbooks FIRST using `fetch_runbook`
+1. If a runbook in the catalog clearly matches the issue, fetch it first. Otherwise, skip this step.
 2. Create initial investigation task list with TodoWrite — start working on tasks immediately
 {% else -%}
 1. Create initial investigation task list with TodoWrite — start working on tasks immediately
@@ -34,13 +30,11 @@ RUNBOOKS: Not fetching relevant runbooks at the start of an investigation is a p
 
 ## Phase Evaluation
 After completing all tasks, ask yourself:
-{% if runbooks_enabled -%}
-- Have I fetched relevant runbooks?
-{%- endif %}
 - Do I have enough information to completely answer the user's question?
 - Are there gaps or unexplored areas?
 - Have I followed the "five whys" to the actual root cause?
 - Did the investigation reveal new questions?
+- Are there additional investigation steps I can perform for a more accurate solution?
 
 If the answer to any is yes → create a new TodoWrite task list for the next phase and continue.
 
@@ -48,9 +42,6 @@ If the answer to any is yes → create a new TodoWrite task list for the next ph
 Before answering:
 - Re-read the original question and verify your answer addresses it completely
 - Verify all claims are backed by tool evidence
-{% if runbooks_enabled -%}
-- Verify all relevant runbooks were fetched and reviewed
-{%- endif %}
 - Use hedging language for claims not directly confirmed by tool output
 - If gaps remain, start another investigation phase
 
