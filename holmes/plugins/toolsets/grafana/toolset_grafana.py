@@ -119,10 +119,10 @@ class GrafanaToolset(BaseGrafanaToolset):
         """Check if Grafana Image Renderer is available and add render tools."""
         try:
             config = self.grafana_config
-            base_url = config.url.rstrip("/")
+            base_url = config.api_url.rstrip("/")
             headers = build_headers(
                 api_key=config.api_key,
-                additional_headers=config.headers,
+                additional_headers=config.additional_headers,
             )
             renderer_detected = False
 
@@ -141,8 +141,8 @@ class GrafanaToolset(BaseGrafanaToolset):
                         f"Enabling render tools."
                     )
                     renderer_detected = True
-            except Exception:
-                pass
+            except Exception as e:
+                logger.debug(f"Failed to check renderer version API: {e}")
 
             # Fallback: check if GF_RENDERING_SERVER_URL is configured by attempting
             # a small render request. Some Grafana versions don't expose the version API
@@ -155,16 +155,18 @@ class GrafanaToolset(BaseGrafanaToolset):
                         timeout=15,
                         verify=config.verify_ssl,
                     )
-                    # If renderer is configured, we get a 500 (dashboard not found)
-                    # rather than a 404 (rendering not available)
-                    if response.status_code != 404:
+                    # If renderer is configured, we get a 200 (rendered image) or
+                    # 500 (dashboard not found but renderer is present).
+                    # 404 means rendering is not available. 401/403 means auth issues,
+                    # not renderer presence.
+                    if response.status_code in (200, 500):
                         logger.info(
                             f"Grafana Image Renderer detected via render endpoint "
                             f"(HTTP {response.status_code}). Enabling render tools."
                         )
                         renderer_detected = True
-                except Exception:
-                    pass
+                except Exception as e:
+                    logger.debug(f"Failed to check renderer via render endpoint: {e}")
 
             if renderer_detected:
                 self.tools.append(RenderPanel(self))
@@ -482,8 +484,8 @@ RENDER_COMMON_PARAMS: Dict[str, ToolParameter] = {
         required=False,
     ),
     "variables": ToolParameter(
-        description="Template variables as comma-separated key=value pairs. "
-        "Example: 'var-namespace=production,var-cluster=us-east-1'. "
+        description="Template variables as semicolon-separated key=value pairs. "
+        "Example: 'var-namespace=production;var-cluster=us-east-1'. "
         "Each variable must be prefixed with 'var-'.",
         type="string",
         required=False,
@@ -509,10 +511,10 @@ def _build_render_query_params(
     if timezone:
         query_params["tz"] = timezone
 
-    # Parse template variables: "var-namespace=prod,var-cluster=east"
+    # Parse template variables: "var-namespace=prod;var-cluster=east"
     variables_str = params.get("variables", "")
     if variables_str:
-        for var_pair in variables_str.split(","):
+        for var_pair in variables_str.split(";"):
             var_pair = var_pair.strip()
             if "=" in var_pair:
                 key, value = var_pair.split("=", 1)
@@ -548,11 +550,13 @@ class BaseGrafanaRenderTool(Tool, ABC):
             requests.HTTPError: If the request fails
         """
         config = self._toolset.grafana_config
-        base_url = config.url.rstrip("/")
-        url = f"{base_url}/{render_path}"
+        base_url = get_base_url(config)
+        if not base_url.endswith("/"):
+            base_url += "/"
+        url = urljoin(base_url, render_path)
         headers = build_headers(
             api_key=config.api_key,
-            additional_headers=config.headers,
+            additional_headers=config.additional_headers,
         )
         # Render API returns PNG, not JSON
         headers["Accept"] = "image/png"
@@ -582,22 +586,26 @@ class BaseGrafanaRenderTool(Tool, ABC):
             status_code = (
                 e.response.status_code if e.response is not None else "unknown"
             )
+            query_string = urlencode(query_params, doseq=True)
             return StructuredToolResult(
                 status=StructuredToolResultStatus.ERROR,
                 error=f"Grafana render API returned HTTP {status_code}: {e}. "
+                f"Render path: {render_path}?{query_string}. "
                 f"Ensure the grafana-image-renderer plugin is installed and running.",
                 params=params,
             )
         except requests.ConnectionError as e:
             return StructuredToolResult(
                 status=StructuredToolResultStatus.ERROR,
-                error=f"Failed to connect to Grafana render API: {e}",
+                error=f"Failed to connect to Grafana render API at {render_path}: {e}",
                 params=params,
             )
         except requests.Timeout:
+            query_string = urlencode(query_params, doseq=True)
             return StructuredToolResult(
                 status=StructuredToolResultStatus.ERROR,
-                error="Grafana render request timed out. The panel may be too complex or the renderer is overloaded.",
+                error=f"Grafana render request timed out for {render_path}?{query_string}. "
+                f"The panel may be too complex or the renderer is overloaded.",
                 params=params,
             )
 

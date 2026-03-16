@@ -51,17 +51,6 @@ For visual rendering, the [Grafana Image Renderer](https://grafana.com/grafana/p
             #   X-Custom-Header: "custom-value"
     ```
 
-## Capabilities
-
-| Tool Name | Description |
-|-----------|-------------|
-| grafana_search_dashboards | Search for dashboards and folders by query, tags, UIDs, or folder locations |
-| grafana_get_dashboard_by_uid | Retrieve complete dashboard JSON including all panels and queries |
-| grafana_get_home_dashboard | Get the home dashboard configuration |
-| grafana_get_dashboard_tags | List all tags used across dashboards for categorization |
-| grafana_render_panel | Render a single panel as a PNG screenshot for visual analysis (requires Image Renderer) |
-| grafana_render_dashboard | Render a full dashboard as a PNG screenshot for visual analysis (requires Image Renderer) |
-
 ## Visual Rendering
 
 When the Grafana Image Renderer is available, HolmesGPT can take screenshots of dashboards and panels and analyze them using the LLM's vision capabilities. This is useful for:
@@ -79,7 +68,7 @@ toolsets:
   grafana/dashboards:
     enabled: true
     config:
-      url: <your grafana url>
+      api_url: <your grafana url>
       api_key: <your api key>
       enable_rendering: false
 ```
