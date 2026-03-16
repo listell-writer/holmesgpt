@@ -7,10 +7,10 @@ Use the `bash` tool to execute shell commands. You must provide:
 ## Supported Command Types
 
 **Auto-approved** (if prefix is in the allow list):
-- Single commands: `kubectl get pods -n default`
+- Single commands: `aws ec2 describe-instances --region us-east-1`
 - Pipes (`|`): `kubectl get pods | grep Running | head -5`
-- AND operator (`&&`): `kubectl get pods && kubectl get services`
-- OR operator (`||`): `kubectl get pods || echo 'no pods found'`
+- AND operator (`&&`): `docker ps && docker stats --no-stream`
+- OR operator (`||`): `systemctl status nginx || echo 'service not found'`
 - Semicolon (`;`): `kubectl get pods; kubectl get services`
 - Background (`&`): `sleep 5 & echo done`
 - Environment variables: `echo $HOME`, `ls ${HOME}/projects`
@@ -29,8 +29,8 @@ When you need loops, conditionals, or subshells to accomplish a task, go ahead a
 ## Command Structure
 
 When constructing commands, **place parameter values at the end** so that prefixes can match effectively:
-- Good: `kubectl scale deployment nginx -n prod --replicas=3` (prefix `kubectl scale deployment nginx -n prod` matches)
-- Bad: `kubectl scale --replicas=3 deployment nginx -n prod` (prefix won't match)
+- Good: `aws autoscaling set-desired-capacity --auto-scaling-group-name my-asg --desired-capacity 3` (prefix matches)
+- Bad: `aws autoscaling set-desired-capacity --desired-capacity 3 --auto-scaling-group-name my-asg` (prefix won't match)
 
 General principle: identifiers first (what you're targeting), parameter values last (how you're affecting it).
 
