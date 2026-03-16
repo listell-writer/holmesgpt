@@ -154,3 +154,19 @@ class ChatResponse(BaseModel):
     follow_up_actions: Optional[List[FollowUpAction]] = []
     pending_approvals: Optional[List[PendingToolApproval]] = None
     metadata: Optional[Dict[Any, Any]] = None
+
+
+class TruncationMetadata(BaseModel):
+    """Metadata about a truncated tool message."""
+
+    tool_call_id: str
+    tool_name: str
+    original_size: int
+    truncated_size: int
+
+
+class TruncationResult(BaseModel):
+    """Result of truncating messages to fit context window."""
+
+    truncated_messages: List[Dict[str, Any]]
+    truncation_metadata: List[TruncationMetadata] = Field(default_factory=list)

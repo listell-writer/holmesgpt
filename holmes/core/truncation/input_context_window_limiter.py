@@ -17,7 +17,6 @@ from holmes.core.llm import (
 from holmes.core.llm_usage import RequestStats
 from holmes.core.models import TruncationMetadata, TruncationResult
 from holmes.core.truncation.compaction import compact_conversation_history
-from holmes.utils import sentry_helper
 from holmes.utils.stream import StreamEvents, StreamMessage
 
 
@@ -111,7 +110,7 @@ def _truncate_tool_message(
     )
 
 
-@sentry_helper.trace(desc="truncate_messages_to_fit_context")
+@sentry_sdk.trace
 def truncate_messages_to_fit_context(
     messages: list[dict],
     max_context_size: int,
@@ -166,10 +165,11 @@ def truncate_messages_to_fit_context(
     # Fair allocation algorithm
     num_tools = len(tool_indices)
     base_allocation = available_for_tools // num_tools
+    initial_remainder = available_for_tools % num_tools
     allocations = [base_allocation] * num_tools
 
     # Redistribute from tools that don't need full allocation
-    excess = 0
+    excess = initial_remainder  # Include remainder from integer division
     needs_more = []
     for i, size in enumerate(tool_sizes):
         if size <= allocations[i]:
