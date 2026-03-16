@@ -1982,15 +1982,15 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#multi-account-setup-alternative" class="md-nav__link">
+  <a href="#multi-account-setup" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Multi-Account Setup (Alternative)
+        Multi-Account Setup
       
     </span>
   </a>
   
-    <nav class="md-nav" aria-label="Multi-Account Setup (Alternative)">
+    <nav class="md-nav" aria-label="Multi-Account Setup">
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
@@ -4635,15 +4635,15 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#multi-account-setup-alternative" class="md-nav__link">
+  <a href="#multi-account-setup" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Multi-Account Setup (Alternative)
+        Multi-Account Setup
       
     </span>
   </a>
   
-    <nav class="md-nav" aria-label="Multi-Account Setup (Alternative)">
+    <nav class="md-nav" aria-label="Multi-Account Setup">
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
@@ -5010,8 +5010,12 @@
 </div>
 </div>
 </div>
-<h2 id="multi-account-setup-alternative">Multi-Account Setup (Alternative)<a class="headerlink" href="#multi-account-setup-alternative" title="Permanent link">&para;</a></h2>
-<p>If you need to access multiple AWS accounts from your EKS clusters, use this setup instead of the single account setup above.</p>
+<h2 id="multi-account-setup">Multi-Account Setup<a class="headerlink" href="#multi-account-setup" title="Permanent link">&para;</a></h2>
+<p>If you have a single Holmes agent that needs to query AWS resources across multiple accounts (e.g., a staging account and a production account), use this setup instead of the single account setup above.</p>
+<div class="admonition note">
+<p class="admonition-title">Alternative: One agent per account</p>
+<p>You can also deploy a separate Holmes agent in each AWS account. If you use <a href="https://home.robusta.dev/">Robusta</a>, you can manage a fleet of agents across environments from a single pane of glass. The multi-account setup below is for when you want <strong>one agent</strong> to reach into <strong>multiple accounts</strong>.</p>
+</div>
 <details class="info">
 <summary>How It Works</summary>
 <p>When multi-account mode is enabled, the MCP server:</p>
