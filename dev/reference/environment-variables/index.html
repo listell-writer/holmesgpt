@@ -4291,10 +4291,10 @@
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
-  <a href="#llms_with_strict_tool_calls" class="md-nav__link">
+  <a href="#holmes_disable_strict_tool_calls" class="md-nav__link">
     <span class="md-ellipsis">
       
-        LLMS_WITH_STRICT_TOOL_CALLS
+        HOLMES_DISABLE_STRICT_TOOL_CALLS
       
     </span>
   </a>
@@ -4988,10 +4988,10 @@
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
-  <a href="#llms_with_strict_tool_calls" class="md-nav__link">
+  <a href="#holmes_disable_strict_tool_calls" class="md-nav__link">
     <span class="md-ellipsis">
       
-        LLMS_WITH_STRICT_TOOL_CALLS
+        HOLMES_DISABLE_STRICT_TOOL_CALLS
       
     </span>
   </a>
@@ -5441,15 +5441,12 @@
 <li><code>GOOGLE_APPLICATION_CREDENTIALS</code> - Path to service account key JSON file</li>
 </ul>
 <h2 id="llm-tool-calling-configuration">LLM Tool Calling Configuration<a class="headerlink" href="#llm-tool-calling-configuration" title="Permanent link">&para;</a></h2>
-<h3 id="llms_with_strict_tool_calls">LLMS_WITH_STRICT_TOOL_CALLS<a class="headerlink" href="#llms_with_strict_tool_calls" title="Permanent link">&para;</a></h3>
-<p><strong>Default:</strong> <code>"azure/gpt-4.1, openai/*"</code></p>
-<p>Comma-separated list of model patterns that support strict tool calling. When a model matches one of these patterns, HolmesGPT will:
-- Enable the <code>strict</code> flag for function definitions
-- Set <code>additionalProperties: false</code> in tool parameter schemas
-- Enforce stricter schema validation for tool calls</p>
-<p>This improves reliability of tool calling for supported models by ensuring the LLM adheres more strictly to the defined tool schemas.</p>
+<h3 id="holmes_disable_strict_tool_calls">HOLMES_DISABLE_STRICT_TOOL_CALLS<a class="headerlink" href="#holmes_disable_strict_tool_calls" title="Permanent link">&para;</a></h3>
+<p><strong>Default:</strong> <code>false</code></p>
+<p>When set to <code>true</code>, disables strict tool calling for all models. By default, strict mode is enabled universally — HolmesGPT sets <code>strict: true</code> and <code>additionalProperties: false</code> on all tool schemas. This prevents LLMs from hallucinating parameter names or sending malformed arguments.</p>
+<p>Tools with dynamic-key parameters (<code>additionalProperties</code> with a schema, e.g., filter maps) are automatically excluded from strict mode on a per-tool basis, since both OpenAI and Anthropic require <code>additionalProperties: false</code> on all objects in strict mode.</p>
 <p><strong>Example:</strong>
-<div class="language-bash highlight"><pre><span></span><code><span id="__span-0-1"><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="nb">export</span><span class="w"> </span><span class="nv">LLMS_WITH_STRICT_TOOL_CALLS</span><span class="o">=</span><span class="s2">&quot;azure/gpt-4.1,openai/*,anthropic/claude-sonnet-4*&quot;</span>
+<div class="language-bash highlight"><pre><span></span><code><span id="__span-0-1"><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="nb">export</span><span class="w"> </span><span class="nv">HOLMES_DISABLE_STRICT_TOOL_CALLS</span><span class="o">=</span><span class="nb">true</span>
 </span></code></pre></div></p>
 <h3 id="tool_schema_no_param_object_if_no_params">TOOL_SCHEMA_NO_PARAM_OBJECT_IF_NO_PARAMS<a class="headerlink" href="#tool_schema_no_param_object_if_no_params" title="Permanent link">&para;</a></h3>
 <p><strong>Default:</strong> <code>false</code></p>
