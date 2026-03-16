@@ -475,6 +475,9 @@ class RemoteMCPToolset(Toolset):
         # Set icon from config if specified
         if self.icon_url is None and self.config:
             self.icon_url = self.config.get("icon_url")
+        # Render llm_instructions (may contain Jinja2 templates)
+        if self.llm_instructions:
+            self._load_llm_instructions(self.llm_instructions)
 
     @model_validator(mode="before")
     @classmethod

@@ -709,6 +709,11 @@ class Toolset(BaseModel):
             if field in self.__class__.model_fields and value not in (None, [], {}, ""):
                 setattr(self, field, value)
 
+        # Re-render llm_instructions after override, since they may contain Jinja2 templates
+        # that reference tool names or config values which could have changed.
+        if self.llm_instructions:
+            self._load_llm_instructions(self.llm_instructions)
+
     @model_validator(mode="before")
     def preprocess_tools(cls, values):
         transformers = values.get("transformers", None)
