@@ -840,18 +840,11 @@ class ToolCallingLLM:
 
             tools_to_call = getattr(response_message, "tool_calls", None)
             if not tools_to_call:
-                yield StreamMessage(
-                    event=StreamEvents.ANSWER_END,
-                    data={
-                        "content": response_message.content,
-                        "messages": messages,
-                        "metadata": metadata,
-                        "tool_calls": all_tool_calls,
-                        "num_llm_calls": i,
-                        "prompt": json.dumps(messages, indent=2),
-                        "costs": stats.model_dump(),
-                    },
-                )
+                data = self._build_stream_data(messages, i, stats, content=response_message.content)
+                data["metadata"] = metadata
+                data["tool_calls"] = all_tool_calls
+                data["prompt"] = json.dumps(messages, indent=2)
+                yield StreamMessage(event=StreamEvents.ANSWER_END, data=data)
                 return
 
             reasoning = getattr(response_message, "reasoning_content", None)
@@ -901,8 +894,6 @@ class ToolCallingLLM:
 
                     tool_call_result: ToolCallResult = future.result()
 
-                    tool_result_dict = tool_call_result.to_client_dict()
-
                     if (
                         tool_call_result.result.status
                         == StructuredToolResultStatus.APPROVAL_REQUIRED
@@ -917,6 +908,7 @@ class ToolCallingLLM:
                                 )
                             )
 
+                            tool_result_dict = tool_call_result.to_client_dict()
                             all_tool_calls.append(tool_result_dict)
                             yield StreamMessage(
                                 event=StreamEvents.TOOL_RESULT,
@@ -927,22 +919,18 @@ class ToolCallingLLM:
                                 StructuredToolResultStatus.ERROR
                             )
                             tool_call_result.result.error = f"Tool call rejected for security reasons: {tool_call_result.result.error}"
-                            tool_result_dict = tool_call_result.to_client_dict()
-
-                            tool_calls.append(tool_result_dict)
-                            all_tool_calls.append(tool_result_dict)
-                            messages.append(tool_call_result.to_llm_message())
-
+                            tool_result_dict = self._record_tool_result(
+                                tool_call_result, tool_calls, all_tool_calls, messages,
+                            )
                             yield StreamMessage(
                                 event=StreamEvents.TOOL_RESULT,
                                 data=tool_result_dict,
                             )
 
                     else:
-                        tool_calls.append(tool_result_dict)
-                        all_tool_calls.append(tool_result_dict)
-                        messages.append(tool_call_result.to_llm_message())
-
+                        tool_result_dict = self._record_tool_result(
+                            tool_call_result, tool_calls, all_tool_calls, messages,
+                        )
                         yield StreamMessage(
                             event=StreamEvents.TOOL_RESULT,
                             data=tool_result_dict,
@@ -961,18 +949,14 @@ class ToolCallingLLM:
                         tool_call["pending_approval"] = True
 
                     # End stream with approvals required
+                    data = self._build_stream_data(messages, i, stats)
+                    data["pending_approvals"] = [
+                        approval.model_dump() for approval in pending_approvals
+                    ]
+                    data["requires_approval"] = True
                     yield StreamMessage(
                         event=StreamEvents.APPROVAL_REQUIRED,
-                        data={
-                            "content": None,
-                            "messages": messages,
-                            "pending_approvals": [
-                                approval.model_dump() for approval in pending_approvals
-                            ],
-                            "requires_approval": True,
-                            "num_llm_calls": i,
-                            "costs": stats.model_dump(),
-                        },
+                        data=data,
                     )
                     return
 
@@ -991,6 +975,38 @@ class ToolCallingLLM:
         raise Exception(
             f"Too many LLM calls - exceeded max_steps: {i}/{self.max_steps}"
         )
+
+    @staticmethod
+    def _record_tool_result(
+        tool_call_result: ToolCallResult,
+        tool_calls: list[dict],
+        all_tool_calls: list[dict],
+        messages: list[dict],
+    ) -> dict:
+        """Record a completed tool result into all tracking lists and messages.
+
+        Returns the client dict for use in stream events.
+        """
+        tool_result_dict = tool_call_result.to_client_dict()
+        tool_calls.append(tool_result_dict)
+        all_tool_calls.append(tool_result_dict)
+        messages.append(tool_call_result.to_llm_message())
+        return tool_result_dict
+
+    @staticmethod
+    def _build_stream_data(
+        messages: list[dict],
+        iteration: int,
+        stats: RequestStats,
+        content: Any = None,
+    ) -> dict:
+        """Build the base data dict shared by ANSWER_END and APPROVAL_REQUIRED events."""
+        return {
+            "content": content,
+            "messages": messages,
+            "num_llm_calls": iteration,
+            "costs": stats.model_dump(),
+        }
 
     def find_assistant_tool_call_request(
         self, tool_call_id: str, messages: list[dict[str, Any]]

@@ -883,6 +883,26 @@ class Toolset(BaseModel):
 
         return False
 
+    def _check_static_prerequisite(self, prereq: "StaticPrerequisite") -> None:
+        """Check a static boolean prerequisite."""
+        if not prereq.enabled:
+            self.status = ToolsetStatusEnum.FAILED
+            self.error = f"{prereq.disabled_reason}"
+
+    def _check_env_prerequisite(self, prereq: "ToolsetEnvironmentPrerequisite") -> None:
+        """Check that all required environment variables are set."""
+        for env_var in prereq.env:
+            if env_var not in os.environ:
+                self.status = ToolsetStatusEnum.FAILED
+                self.error = f"Environment variable {env_var} was not set"
+
+    def _is_failed_or_disabled(self) -> bool:
+        return self.status in (ToolsetStatusEnum.DISABLED, ToolsetStatusEnum.FAILED)
+
+    def _log_failure(self, silent: bool) -> None:
+        if not silent:
+            logger.info(f"❌ Toolset {self.name}: {self.error}")
+
     def check_prerequisites(self, silent: bool = False):
         self.status = ToolsetStatusEnum.ENABLED
 
@@ -917,15 +937,10 @@ class Toolset(BaseModel):
                     self.error = f"`{prereq.command}` returned {e.returncode}"
 
             elif isinstance(prereq, ToolsetEnvironmentPrerequisite):
-                for env_var in prereq.env:
-                    if env_var not in os.environ:
-                        self.status = ToolsetStatusEnum.FAILED
-                        self.error = f"Environment variable {env_var} was not set"
+                self._check_env_prerequisite(prereq)
 
             elif isinstance(prereq, StaticPrerequisite):
-                if not prereq.enabled:
-                    self.status = ToolsetStatusEnum.FAILED
-                    self.error = f"{prereq.disabled_reason}"
+                self._check_static_prerequisite(prereq)
 
             elif isinstance(prereq, CallablePrerequisite):
                 try:
@@ -939,12 +954,8 @@ class Toolset(BaseModel):
                     self.status = ToolsetStatusEnum.FAILED
                     self.error = f"Prerequisite call failed unexpectedly: {str(e)}"
 
-            if (
-                self.status == ToolsetStatusEnum.DISABLED
-                or self.status == ToolsetStatusEnum.FAILED
-            ):
-                if not silent:
-                    logger.info(f"❌ Toolset {self.name}: {self.error}")
+            if self._is_failed_or_disabled():
+                self._log_failure(silent)
                 # no point checking further prerequisites if one failed
                 return
 
@@ -965,26 +976,17 @@ class Toolset(BaseModel):
 
         for prereq in sorted_prereqs:
             if isinstance(prereq, StaticPrerequisite):
-                if not prereq.enabled:
-                    self.status = ToolsetStatusEnum.FAILED
-                    self.error = f"{prereq.disabled_reason}"
+                self._check_static_prerequisite(prereq)
 
             elif isinstance(prereq, ToolsetEnvironmentPrerequisite):
-                for env_var in prereq.env:
-                    if env_var not in os.environ:
-                        self.status = ToolsetStatusEnum.FAILED
-                        self.error = f"Environment variable {env_var} was not set"
+                self._check_env_prerequisite(prereq)
 
             elif isinstance(prereq, (CallablePrerequisite, ToolsetCommandPrerequisite)):
                 has_deferred_prereqs = True
                 continue
 
-            if (
-                self.status == ToolsetStatusEnum.DISABLED
-                or self.status == ToolsetStatusEnum.FAILED
-            ):
-                if not silent:
-                    logger.info(f"❌ Toolset {self.name}: {self.error}")
+            if self._is_failed_or_disabled():
+                self._log_failure(silent)
                 return
 
         if has_deferred_prereqs:
