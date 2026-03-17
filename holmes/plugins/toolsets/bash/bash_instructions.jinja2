@@ -63,7 +63,7 @@ Provide prefixes for the **key operations** inside the script:
 - `if [ -f /tmp/test ]; then cat /tmp/test; fi` → `["cat"]`
 - `echo $(kubectl get pods -o name)` → `["kubectl get"]`
 
-## Allowed Commands
+## Pre-approved Commands
 
 Commands matching these prefixes will execute immediately without prompting:
 {% if config and config.allow %}
@@ -74,9 +74,13 @@ Commands matching these prefixes will execute immediately without prompting:
 - (No commands pre-approved - all commands require user approval)
 {% endif %}
 
+## Other Commands
+
+Commands not matching any pre-approved prefix above can still be used — they will trigger a user approval prompt before execution. Prefer pre-approved commands and built-in tools when they can accomplish the task, to avoid unnecessary approval prompts. But when the task requires a command that isn't pre-approved (e.g., `curl`, `python3`, or other commands), go ahead and use it.
+
 ## Blocked Commands
 
-These commands are blocked and cannot be executed:
+These commands are always blocked and cannot be executed, even with approval:
 {% if config and config.deny %}
 {% for prefix in config.deny %}
 - `{{ prefix }}`
