@@ -104,6 +104,37 @@ class ModelFamily(str, Enum):
     OTHER = "other"
 
 
+class Provider(str, Enum):
+    """Known hosting providers.  ``OTHER`` covers any provider not listed."""
+
+    ANTHROPIC = "anthropic"
+    OPENAI = "openai"
+    AZURE = "azure"
+    AZURE_AI = "azure_ai"
+    BEDROCK = "bedrock"
+    VERTEX_AI = "vertex_ai"
+    OPENROUTER = "openrouter"
+    WATSONX = "watsonx"
+    GITHUB = "github"
+    GITHUB_COPILOT = "github_copilot"
+    DATABRICKS = "databricks"
+    DEEPINFRA = "deepinfra"
+    OLLAMA = "ollama"
+    ROBUSTA = "robusta"
+    OTHER = "other"
+
+    @classmethod
+    def from_litellm(cls, raw: str) -> "Provider":
+        """Map a litellm provider string to a Provider enum member."""
+        # Normalise composite vertex_ai-* strings.
+        normalised = raw.split("-")[0] if raw.startswith("vertex_ai-") else raw
+        normalised = normalised.split("-")[0] if raw.startswith("bedrock_") else normalised
+        try:
+            return cls(normalised)
+        except ValueError:
+            return cls.OTHER
+
+
 class ModelInfo(NamedTuple):
     """Result of model detection: (family, provider).
 
@@ -112,7 +143,34 @@ class ModelInfo(NamedTuple):
     """
 
     family: ModelFamily
-    provider: str
+    provider: Provider
+
+
+# ---------------------------------------------------------------------------
+# Cache for model info lookups (avoids repeated litellm / probe calls).
+# ---------------------------------------------------------------------------
+
+_CACHE_TTL_SECONDS = 3600  # 1 hour
+
+_model_info_cache: Dict[str, Tuple[ModelInfo, float]] = {}
+_model_info_cache_lock = threading.Lock()
+
+
+def _cache_get(model_name: str) -> Optional[ModelInfo]:
+    with _model_info_cache_lock:
+        entry = _model_info_cache.get(model_name)
+        if entry is None:
+            return None
+        info, ts = entry
+        if time.monotonic() - ts > _CACHE_TTL_SECONDS:
+            del _model_info_cache[model_name]
+            return None
+        return info
+
+
+def _cache_put(model_name: str, info: ModelInfo) -> None:
+    with _model_info_cache_lock:
+        _model_info_cache[model_name] = (info, time.monotonic())
 
 
 # ---------------------------------------------------------------------------
@@ -125,11 +183,22 @@ class ModelInfo(NamedTuple):
 _ANTHROPIC_NAME_MARKERS = ("claude",)
 _OPENAI_NAME_MARKERS = ("gpt-", "gpt4", "o1-", "o3-", "o4-", "chatgpt", "dall-e")
 
-# Providers that *only* serve Anthropic models (or whose model IDs contain
-# an obvious Anthropic marker).  For multi-model proxies (openrouter, …) we
-# fall through to the name-marker check.
-_ANTHROPIC_ONLY_PROVIDERS = frozenset({"anthropic"})
-_OPENAI_ONLY_PROVIDERS = frozenset({"openai", "azure", "azure_ai"})
+# Providers whose *only* models come from a single maker.
+# Multi-model providers (azure, azure_ai, bedrock, vertex_ai, openrouter, …)
+# are NOT listed here; they fall through to name-marker inspection.
+_ANTHROPIC_ONLY_PROVIDERS = frozenset({Provider.ANTHROPIC})
+_OPENAI_ONLY_PROVIDERS = frozenset({Provider.OPENAI})
+
+
+def _family_from_name(name_lower: str) -> Optional[ModelFamily]:
+    """Return the model family if *name_lower* contains a known maker marker."""
+    for marker in _ANTHROPIC_NAME_MARKERS:
+        if marker in name_lower:
+            return ModelFamily.ANTHROPIC
+    for marker in _OPENAI_NAME_MARKERS:
+        if marker in name_lower:
+            return ModelFamily.OPENAI
+    return None
 
 
 def _static_detect_model_info(model_name: str) -> Optional[ModelInfo]:
@@ -138,52 +207,46 @@ def _static_detect_model_info(model_name: str) -> Optional[ModelInfo]:
     Returns ``None`` when the family cannot be determined with confidence.
     """
     # Strip the robusta/ prefix – litellm does not recognise it.
-    lookup_name = model_name
-    if lookup_name.lower().startswith("robusta/"):
-        lookup_name = lookup_name[len("robusta/"):]
+    is_robusta = model_name.lower().startswith("robusta/")
+    lookup_name = model_name[len("robusta/"):] if is_robusta else model_name
 
     # 1. Ask litellm for the hosting provider.
     try:
         result = litellm.get_llm_provider(lookup_name)
         if result:
-            resolved_model, provider = result[0], result[1]
+            resolved_model, raw_provider = result[0], result[1]
         else:
-            resolved_model, provider = lookup_name, "unknown"
+            resolved_model, raw_provider = lookup_name, "unknown"
     except Exception:
-        resolved_model, provider = lookup_name, "unknown"
+        resolved_model, raw_provider = lookup_name, "unknown"
 
-    # 2. Easy case: provider itself is definitive.
+    provider = Provider.ROBUSTA if is_robusta else Provider.from_litellm(raw_provider)
+
+    # 2. Easy case: provider itself is definitive (single-maker provider).
     if provider in _ANTHROPIC_ONLY_PROVIDERS:
         return ModelInfo(ModelFamily.ANTHROPIC, provider)
     if provider in _OPENAI_ONLY_PROVIDERS:
         return ModelInfo(ModelFamily.OPENAI, provider)
 
-    # 3. For multi-model providers (bedrock, vertex_ai, openrouter, …)
+    # 3. Multi-model providers (azure, azure_ai, bedrock, vertex_ai, openrouter, …):
     #    inspect the resolved model name for maker markers.
     name_lower = resolved_model.lower()
 
     # Bedrock Anthropic models always have an 'anthropic.' prefix.
-    if provider == "bedrock" and "anthropic." in name_lower:
+    if provider == Provider.BEDROCK and "anthropic." in name_lower:
         return ModelInfo(ModelFamily.ANTHROPIC, provider)
 
-    for marker in _ANTHROPIC_NAME_MARKERS:
-        if marker in name_lower:
-            return ModelInfo(ModelFamily.ANTHROPIC, provider)
-
-    for marker in _OPENAI_NAME_MARKERS:
-        if marker in name_lower:
-            return ModelInfo(ModelFamily.OPENAI, provider)
+    family = _family_from_name(name_lower)
+    if family is not None:
+        return ModelInfo(family, provider)
 
     # 4. Also check the original (un-stripped) name – covers e.g.
     #    "robusta/anthropic/claude-…" where only the original has the hint.
     orig_lower = model_name.lower()
     if orig_lower != name_lower:
-        for marker in _ANTHROPIC_NAME_MARKERS:
-            if marker in orig_lower:
-                return ModelInfo(ModelFamily.ANTHROPIC, provider)
-        for marker in _OPENAI_NAME_MARKERS:
-            if marker in orig_lower:
-                return ModelInfo(ModelFamily.OPENAI, provider)
+        family = _family_from_name(orig_lower)
+        if family is not None:
+            return ModelInfo(family, provider)
 
     return None  # cannot determine – caller should probe
 
@@ -208,11 +271,11 @@ def _probe_detect_model_info(
 
     Cost: ~8 input tokens + 1 output token.  Latency: ~1-2 s.
     """
-    provider = "unknown"
+    provider = Provider.OTHER
     try:
         result = litellm.get_llm_provider(model_name)
         if result:
-            provider = result[1]
+            provider = Provider.from_litellm(result[1])
     except Exception:
         pass
 
@@ -238,12 +301,9 @@ def _probe_detect_model_info(
 
     # Signal 2: response.model often contains the maker name.
     resp_model = (getattr(response, "model", "") or "").lower()
-    for marker in _ANTHROPIC_NAME_MARKERS:
-        if marker in resp_model:
-            return ModelInfo(ModelFamily.ANTHROPIC, provider)
-    for marker in _OPENAI_NAME_MARKERS:
-        if marker in resp_model:
-            return ModelInfo(ModelFamily.OPENAI, provider)
+    family = _family_from_name(resp_model)
+    if family is not None:
+        return ModelInfo(family, provider)
 
     # Signal 3: Anthropic never sets system_fingerprint; OpenAI always does.
     # (Not 100 % reliable – Gemini also returns None – so we only use it as
@@ -260,18 +320,27 @@ def detect_model_info(
 ) -> ModelInfo:
     """Detect model family and hosting provider.
 
+    Results are cached for 1 hour to avoid repeated work.
+
     1. Try static detection (name + litellm metadata) – instant, free.
     2. If that fails, send a tiny probe completion and fingerprint the response.
     """
+    cached = _cache_get(model_name)
+    if cached is not None:
+        return cached
+
     info = _static_detect_model_info(model_name)
     if info is not None:
+        _cache_put(model_name, info)
         return info
 
     logging.info(
         "Could not statically determine model family for '%s', sending probe call…",
         model_name,
     )
-    return _probe_detect_model_info(model_name, api_key, api_base, api_version)
+    info = _probe_detect_model_info(model_name, api_key, api_base, api_version)
+    _cache_put(model_name, info)
+    return info
 
 
 def is_anthropic_model(model_name: str) -> bool:
@@ -607,32 +676,27 @@ class DefaultLLM(LLM):
 
         Uses static detection first; if that fails and this is not a robusta
         model, sends a single lightweight probe completion (~1-2 s, ~9 tokens).
+        Results are cached both on the instance and in a global 1-hour TTL cache.
         """
         if self._model_info is not None:
             return self._model_info
 
-        # Try static (free, instant) detection first.
-        info = _static_detect_model_info(self.model)
-        if info is not None:
+        # For robusta models we cannot probe (no direct API key), so fall back
+        # to OTHER.  The robusta proxy model name (e.g. "anthropic/claude-…")
+        # should normally be caught by static detection via detect_model_info.
+        if self.is_robusta_model:
+            # Still try static detection (covers "robusta/anthropic/claude-…").
+            info = _static_detect_model_info(self.model)
+            if info is None:
+                info = ModelInfo(ModelFamily.OTHER, Provider.ROBUSTA)
             self._model_info = info
             return info
 
-        # For robusta models we cannot probe (no direct API key), so fall back
-        # to OTHER.  The robusta proxy model name (e.g. "anthropic/claude-…")
-        # should normally be caught by static detection above.
-        if self.is_robusta_model:
-            self._model_info = ModelInfo(ModelFamily.OTHER, "robusta")
-            return self._model_info
-
-        # Static detection failed – probe the API.
-        logging.info(
-            "Could not statically determine model family for '%s', sending probe call…",
-            self.model,
-        )
-        self._model_info = _probe_detect_model_info(
+        # detect_model_info handles global cache + static + probe.
+        self._model_info = detect_model_info(
             self.model, self.api_key, self.api_base, self.api_version
         )
-        logging.info("Detected model info: %s", self._model_info)
+        logging.info("Detected model info for '%s': %s", self.model, self._model_info)
         return self._model_info
 
     def _is_anthropic_model(self) -> bool:

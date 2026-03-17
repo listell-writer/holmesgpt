@@ -7,6 +7,7 @@ from holmes.core.llm import (
     DefaultLLM,
     ModelFamily,
     ModelInfo,
+    Provider,
     _anthropic_image_token_count,
     _get_image_dimensions,
     _static_detect_model_info,
@@ -98,26 +99,31 @@ def test_is_anthropic_model(model_name: str, expected: bool):
     "model_name, expected_family, expected_provider",
     [
         # Anthropic – direct
-        ("anthropic/claude-sonnet-4-5-20250929", ModelFamily.ANTHROPIC, "anthropic"),
-        ("claude-sonnet-4-5-20250929", ModelFamily.ANTHROPIC, "anthropic"),
+        ("anthropic/claude-sonnet-4-5-20250929", ModelFamily.ANTHROPIC, Provider.ANTHROPIC),
+        ("claude-sonnet-4-5-20250929", ModelFamily.ANTHROPIC, Provider.ANTHROPIC),
         ("claude-3-5-haiku-20241022", ModelFamily.ANTHROPIC, None),
         # Anthropic – via hosting providers
-        ("vertex_ai/claude-3-5-sonnet", ModelFamily.ANTHROPIC, "vertex_ai"),
-        ("bedrock/anthropic.claude-3-sonnet-20240229-v1:0", ModelFamily.ANTHROPIC, "bedrock"),
-        ("bedrock/us.anthropic.claude-3-5-sonnet-20241022-v2:0", ModelFamily.ANTHROPIC, "bedrock"),
-        ("openrouter/anthropic/claude-3.5-haiku", ModelFamily.ANTHROPIC, "openrouter"),
-        ("robusta/anthropic/claude-sonnet-4-5-20250929", ModelFamily.ANTHROPIC, "anthropic"),
+        ("vertex_ai/claude-3-5-sonnet", ModelFamily.ANTHROPIC, Provider.VERTEX_AI),
+        ("bedrock/anthropic.claude-3-sonnet-20240229-v1:0", ModelFamily.ANTHROPIC, Provider.BEDROCK),
+        ("bedrock/us.anthropic.claude-3-5-sonnet-20241022-v2:0", ModelFamily.ANTHROPIC, Provider.BEDROCK),
+        ("openrouter/anthropic/claude-3.5-haiku", ModelFamily.ANTHROPIC, Provider.OPENROUTER),
+        ("robusta/anthropic/claude-sonnet-4-5-20250929", ModelFamily.ANTHROPIC, Provider.ROBUSTA),
         # OpenAI – direct
-        ("gpt-4.1", ModelFamily.OPENAI, "openai"),
-        ("gpt-4o", ModelFamily.OPENAI, "openai"),
-        ("gpt-4o-mini", ModelFamily.OPENAI, "openai"),
+        ("gpt-4.1", ModelFamily.OPENAI, Provider.OPENAI),
+        ("gpt-4o", ModelFamily.OPENAI, Provider.OPENAI),
+        ("gpt-4o-mini", ModelFamily.OPENAI, Provider.OPENAI),
         ("o1-preview", ModelFamily.OPENAI, None),
-        ("o3-mini", ModelFamily.OPENAI, "openai"),
+        ("o3-mini", ModelFamily.OPENAI, Provider.OPENAI),
         # OpenAI – via hosting providers
-        ("azure/gpt-4o", ModelFamily.OPENAI, "azure"),
-        ("openrouter/openai/gpt-4o-mini", ModelFamily.OPENAI, "openrouter"),
-        ("robusta/openai/gpt-4.1", ModelFamily.OPENAI, "openai"),
-        ("robusta/azure/gpt-4.1", ModelFamily.OPENAI, "azure"),
+        ("azure/gpt-4o", ModelFamily.OPENAI, Provider.AZURE),
+        ("openrouter/openai/gpt-4o-mini", ModelFamily.OPENAI, Provider.OPENROUTER),
+        ("robusta/openai/gpt-4.1", ModelFamily.OPENAI, Provider.ROBUSTA),
+        ("robusta/azure/gpt-4.1", ModelFamily.OPENAI, Provider.ROBUSTA),
+        # Azure AI is multi-model – needs name markers to determine family
+        ("azure_ai/claude-3-sonnet", ModelFamily.ANTHROPIC, Provider.AZURE_AI),
+        # litellm resolves azure_ai/gpt-4o to provider="azure" (known OpenAI model)
+        ("azure_ai/gpt-4o", ModelFamily.OPENAI, Provider.AZURE),
+        ("azure_ai/llama-3-70b", None, None),
         # Other / unknown – returns None (probe needed)
         ("gemini-pro", None, None),
         ("gemini/gemini-2.0-flash", None, None),
@@ -126,7 +132,7 @@ def test_is_anthropic_model(model_name: str, expected: bool):
 def test_static_detect_model_info(
     model_name: str,
     expected_family: ModelFamily | None,
-    expected_provider: str | None,
+    expected_provider: Provider | None,
 ):
     info = _static_detect_model_info(model_name)
     if expected_family is None:
