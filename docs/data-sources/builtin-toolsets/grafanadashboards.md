@@ -8,7 +8,7 @@ A [Grafana service account token](https://grafana.com/docs/grafana/latest/admini
 
 - Basic role → Viewer
 
-For visual rendering, the [Grafana Image Renderer](https://grafana.com/grafana/plugins/grafana-image-renderer/) plugin must be installed on your Grafana instance. HolmesGPT auto-detects the renderer — if it's not installed, visual rendering tools are simply not registered and everything else works normally.
+For visual rendering, the [Grafana Image Renderer](https://grafana.com/grafana/plugins/grafana-image-renderer/) plugin must be installed on your Grafana instance and `enable_rendering: true` must be set in the config. HolmesGPT auto-detects the renderer — if it's not installed, visual rendering tools are simply not registered and everything else works normally.
 
 ## Configuration
 
@@ -61,7 +61,7 @@ When the Grafana Image Renderer is available, HolmesGPT can take screenshots of 
 
 The LLM controls all rendering parameters — time range, dimensions, theme, timezone, and template variables — so it can zoom in on specific time windows or adjust the view as needed during investigation.
 
-Rendering is **enabled by default** and auto-detected. To disable it:
+Rendering is **disabled by default**. To enable it:
 
 ```yaml
 toolsets:
@@ -70,8 +70,10 @@ toolsets:
     config:
       api_url: <your grafana url>
       api_key: <your api key>
-      enable_rendering: false
+      enable_rendering: true
 ```
+
+When rendering a full dashboard, HolmesGPT captures the entire page (all rows) so that panels at the bottom are not cropped.
 
 ## Advanced Configuration
 

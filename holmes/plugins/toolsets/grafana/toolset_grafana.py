@@ -31,7 +31,7 @@ class GrafanaDashboardConfig(GrafanaConfig):
     """Configuration specific to Grafana Dashboard toolset."""
 
     enable_rendering: bool = Field(
-        default=True,
+        default=False,
         title="Enable Rendering",
         description="Enable panel/dashboard image rendering via Grafana Image Renderer. "
         "Requires the grafana-image-renderer plugin to be installed on the Grafana instance.",
@@ -45,11 +45,6 @@ class GrafanaDashboardConfig(GrafanaConfig):
         default=400,
         title="Default Render Height",
         description="Default height in pixels for rendered panel images",
-    )
-    default_dashboard_render_height: int = Field(
-        default=1200,
-        title="Default Dashboard Render Height",
-        description="Default height in pixels for rendered full dashboard images",
     )
 
 
@@ -708,16 +703,22 @@ class RenderDashboard(BaseGrafanaRenderTool):
         query_params = _build_render_query_params(
             params,
             default_width=config.default_render_width,
-            default_height=config.default_dashboard_render_height,
+            default_height=config.default_render_height,
         )
+        # Use full-page rendering (height=-1) to capture the entire dashboard
+        # regardless of how many panels/rows it has. The Grafana Image Renderer
+        # scrolls the full page and stitches the result into one image.
+        if "height" not in params:
+            query_params["height"] = -1
 
         render_path = f"render/d/{dashboard_uid}/_"
         dashboard_url = _build_grafana_dashboard_url(config, uid=dashboard_uid)
 
+        height_desc = "full-page" if query_params["height"] == -1 else f"{query_params['height']}px"
         description = (
             f"Rendered screenshot of full dashboard {dashboard_uid}. "
             f"Time range: {query_params['from']} to {query_params['to']}, "
-            f"size: {query_params['width']}x{query_params['height']}px."
+            f"width: {query_params['width']}px, height: {height_desc}."
         )
 
         return self._render_to_result(
