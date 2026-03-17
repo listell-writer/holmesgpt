@@ -5,8 +5,11 @@ import pytest
 
 from holmes.core.llm import (
     DefaultLLM,
+    ModelFamily,
+    ModelInfo,
     _anthropic_image_token_count,
     _get_image_dimensions,
+    _static_detect_model_info,
     is_anthropic_model,
 )
 
@@ -69,7 +72,7 @@ def _make_llm(model: str) -> DefaultLLM:
         return DefaultLLM(model=model, api_key="fake-key")
 
 
-# ---------- is_anthropic_model ----------
+# ---------- is_anthropic_model (backwards-compat wrapper) ----------
 
 @pytest.mark.parametrize(
     "model_name, expected",
@@ -87,6 +90,53 @@ def _make_llm(model: str) -> DefaultLLM:
 )
 def test_is_anthropic_model(model_name: str, expected: bool):
     assert is_anthropic_model(model_name) == expected
+
+
+# ---------- _static_detect_model_info ----------
+
+@pytest.mark.parametrize(
+    "model_name, expected_family, expected_provider",
+    [
+        # Anthropic – direct
+        ("anthropic/claude-sonnet-4-5-20250929", ModelFamily.ANTHROPIC, "anthropic"),
+        ("claude-sonnet-4-5-20250929", ModelFamily.ANTHROPIC, "anthropic"),
+        ("claude-3-5-haiku-20241022", ModelFamily.ANTHROPIC, None),
+        # Anthropic – via hosting providers
+        ("vertex_ai/claude-3-5-sonnet", ModelFamily.ANTHROPIC, "vertex_ai"),
+        ("bedrock/anthropic.claude-3-sonnet-20240229-v1:0", ModelFamily.ANTHROPIC, "bedrock"),
+        ("bedrock/us.anthropic.claude-3-5-sonnet-20241022-v2:0", ModelFamily.ANTHROPIC, "bedrock"),
+        ("openrouter/anthropic/claude-3.5-haiku", ModelFamily.ANTHROPIC, "openrouter"),
+        ("robusta/anthropic/claude-sonnet-4-5-20250929", ModelFamily.ANTHROPIC, "anthropic"),
+        # OpenAI – direct
+        ("gpt-4.1", ModelFamily.OPENAI, "openai"),
+        ("gpt-4o", ModelFamily.OPENAI, "openai"),
+        ("gpt-4o-mini", ModelFamily.OPENAI, "openai"),
+        ("o1-preview", ModelFamily.OPENAI, None),
+        ("o3-mini", ModelFamily.OPENAI, "openai"),
+        # OpenAI – via hosting providers
+        ("azure/gpt-4o", ModelFamily.OPENAI, "azure"),
+        ("openrouter/openai/gpt-4o-mini", ModelFamily.OPENAI, "openrouter"),
+        ("robusta/openai/gpt-4.1", ModelFamily.OPENAI, "openai"),
+        ("robusta/azure/gpt-4.1", ModelFamily.OPENAI, "azure"),
+        # Other / unknown – returns None (probe needed)
+        ("gemini-pro", None, None),
+        ("gemini/gemini-2.0-flash", None, None),
+    ],
+)
+def test_static_detect_model_info(
+    model_name: str,
+    expected_family: ModelFamily | None,
+    expected_provider: str | None,
+):
+    info = _static_detect_model_info(model_name)
+    if expected_family is None:
+        assert info is None, f"Expected None for {model_name}, got {info}"
+    else:
+        assert info is not None, f"Expected detection for {model_name}, got None"
+        assert info.family == expected_family
+        # Provider may vary by litellm version; only check when we specify it.
+        if expected_provider is not None:
+            assert info.provider == expected_provider
 
 
 # ---------- _get_image_dimensions ----------
