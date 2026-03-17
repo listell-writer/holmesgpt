@@ -4397,6 +4397,17 @@
   
 </li>
         
+          <li class="md-nav__item">
+  <a href="#tool-approval-behavior" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Tool Approval Behavior
+      
+    </span>
+  </a>
+  
+</li>
+        
       </ul>
     </nav>
   
@@ -4872,6 +4883,17 @@
   
 </li>
         
+          <li class="md-nav__item">
+  <a href="#tool-approval-behavior" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Tool Approval Behavior
+      
+    </span>
+  </a>
+  
+</li>
+        
       </ul>
     </nav>
   
@@ -5278,7 +5300,7 @@
 <td>No</td>
 <td>false</td>
 <td>boolean</td>
-<td>Require approval for certain tool executions</td>
+<td>Require approval for certain tool executions (see <a href="#tool-approval-behavior">Tool Approval Behavior</a>)</td>
 </tr>
 <tr>
 <td>additional_system_prompt</td>
@@ -5563,6 +5585,13 @@
 </tr>
 </tbody>
 </table>
+<h4 id="tool-approval-behavior">Tool Approval Behavior<a class="headerlink" href="#tool-approval-behavior" title="Permanent link">&para;</a></h4>
+<p>The <code>enable_tool_approval</code> field controls how HolmesGPT handles tools that require approval (e.g., bash commands not in the allow list, or commands that bashlex cannot parse).</p>
+<p><strong>When <code>enable_tool_approval: true</code> (interactive clients):</strong></p>
+<p>The stream pauses and emits an <code>approval_required</code> event with the pending tool calls. The client must send a follow-up request with <code>tool_decisions</code> to approve or deny each tool call. See the <a href="#approval_required">approval_required</a> event for details.</p>
+<p><strong>When <code>enable_tool_approval: false</code> (default, server/automation):</strong></p>
+<p>Tools that would require approval are automatically converted to errors. The error message is fed back to the LLM as a tool result, giving it a chance to self-correct and retry with a valid command. For example, if the LLM generates a bash command with unquoted special characters that can't be parsed, it receives an error and can retry with proper quoting.</p>
+<p>This means server-mode integrations (e.g., Keep workflows) do not need a human in the loop — the LLM handles recoverable validation failures automatically.</p>
 <hr />
 <h3 id="apimodel-get"><code>/api/model</code> (GET)<a class="headerlink" href="#apimodel-get" title="Permanent link">&para;</a></h3>
 <p><strong>Description:</strong> Returns a list of available AI models that can be used for chat.</p>
