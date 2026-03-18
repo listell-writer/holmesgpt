@@ -470,11 +470,6 @@ class AgenticProgressRenderer:
         self._live_tasks: Optional[list] = None
         self._summary_printed = False
 
-        # AI messages received mid-stream (e.g. Claude saying "I'll investigate...")
-        # These are stored and printed when the live display stops, rather than
-        # killing the live display immediately.
-        self._ai_messages: List[tuple] = []  # (reasoning, content) pairs
-
         # Approval state: when True, everything dims and scrolling stops
         self._approval_pending = False
         self._pending_approval_descriptions: List[str] = []
@@ -1105,17 +1100,23 @@ class AgenticProgressRenderer:
 
             elif event.event == StreamEvents.AI_MESSAGE:
                 self._thinking = False
+                if self._completed:
+                    self._process_completed()
+
                 reasoning = event.data.get("reasoning")
                 content = event.data.get("content")
-                # Store AI messages to print when the live display stops.
-                # Printing to console while Rich Live is active would corrupt
-                # the display, and stopping the live display here would kill
-                # the Data pane for models (like Claude/Bedrock) that emit
-                # AI messages alongside tool calls.
-                if reasoning or (content and content.strip()):
-                    self._ai_messages.append((reasoning, content))
-                if self._live is not None:
-                    self._live.update(self._build_display())
+                if reasoning:
+                    self._console.print(
+                        f"  [italic dim]{reasoning}[/italic dim]"
+                    )
+                if content and content.strip():
+                    self._console.print(
+                        f"  [dim]{content}[/dim]"
+                    )
+
+                # Ensure live display is running for subsequent tool events
+                if self._live is None:
+                    self.start()
 
     def flush(self) -> None:
         """Ensure any remaining in-flight display is cleaned up."""
@@ -1127,7 +1128,6 @@ class AgenticProgressRenderer:
             # Reset all state for next invocation
             self._data_lines.clear()
             self._tool_history.clear()
-            self._ai_messages.clear()
             self._scroll_offset = 0
             self._scroll_pause = 0
             self._total_bytes = 0

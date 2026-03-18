@@ -1191,7 +1191,7 @@ class TestRendererEndToEnd(unittest.TestCase):
         assert any("line 1" in l for l in renderer._data_lines)
 
     def test_ai_message_keeps_live_active(self):
-        """AI_MESSAGE event should NOT stop Live — the data pane must stay visible."""
+        """AI_MESSAGE should keep Live running so the data pane survives for subsequent tools."""
         console = self._make_console()
         renderer = AgenticProgressRenderer(console, tool_number_offset=0)
 
@@ -1213,7 +1213,7 @@ class TestRendererEndToEnd(unittest.TestCase):
             all_tool_calls, [],
         )
 
-        # AI message should NOT stop Live (models like Claude emit AI messages mid-stream)
+        # AI message should NOT stop Live — summary is deferred to flush()
         renderer.handle_event(
             self._make_event(StreamEvents.AI_MESSAGE, {
                 "content": "Here is my analysis.",
@@ -1221,16 +1221,11 @@ class TestRendererEndToEnd(unittest.TestCase):
             all_tool_calls, [],
         )
 
-        assert renderer._live is not None, "Live display should stay active after AI_MESSAGE"
-        assert len(renderer._ai_messages) == 1, "AI message should be stored"
-        assert renderer._ai_messages[0] == (None, "Here is my analysis.")
-
-        # flush() should print everything including the stored AI message
-        renderer.flush()
-        assert renderer._summary_printed is True
+        # Live should still be running (never stopped)
+        assert renderer._live is not None, "Live display should remain active after AI_MESSAGE"
+        assert renderer._summary_printed is False, "Summary should be deferred to flush()"
 
         output = console.export_text()
-        assert "test tool description" in output, f"Tool not in summary:\n{output}"
         assert "Here is my analysis." in output, f"AI message not printed:\n{output}"
 
     def test_multiple_tool_rounds_no_duplicate_summary(self):
@@ -1257,7 +1252,7 @@ class TestRendererEndToEnd(unittest.TestCase):
                 all_tool_calls, [],
             )
 
-        # AI message (stored, not printed immediately)
+        # AI message
         renderer.handle_event(
             self._make_event(StreamEvents.AI_MESSAGE, {"content": "Done."}),
             all_tool_calls, [],
@@ -1269,7 +1264,7 @@ class TestRendererEndToEnd(unittest.TestCase):
         output = console.export_text()
         # Count occurrences of "Tools" panel header
         tools_count = output.count("Tools")
-        assert tools_count <= 2, (  # Title + border
+        assert tools_count <= 2, (  # Title + border from single flush
             f"Tools panel printed multiple times ({tools_count}):\n{output}"
         )
 
