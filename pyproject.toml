@@ -14,7 +14,7 @@ python = "^3.10"
 openai = "^2.8.0"
 jiter = "!=0.13.0"  # Exclude 0.13.0 due to corrupted Windows wheel (RECORD file issue)
 jinja2 = "^3.1.2"
-typer = "^0.15.4"
+typer = "^0.21.0"
 python-benedict = "^0.33.1"
 humanize = "^4.9.0"
 rich = "^13.7.1"
@@ -159,7 +159,7 @@ markers = [
     "coralogix: Runs coralogix evals",
     "fast: Fast cloud-only tests that don't require Kubernetes infrastructure",
     "frontend: Run frontend tests",
-    "grafana-dashboard: Tests involving Grafana dashboard interactions",
+    "grafana: Tests involving Grafana dashboard interactions",
     "elasticsearch: Tests for Elasticsearch/OpenSearch toolset functionality",
     "integration: Integration tests requiring external services (e.g., running server, real APIs)",
     "confluence: Tests for Confluence page fetching toolset",
