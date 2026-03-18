@@ -17,7 +17,10 @@ from holmes.core.tracing import (
     get_experiment_name,
     get_machine_state_tags,
 )
-from tests.llm.utils.test_case_utils import AskHolmesTestCase, HolmesTestCase  # type: ignore
+from tests.llm.utils.test_case_utils import (  # type: ignore
+    AskHolmesTestCase,
+    HolmesTestCase,
+)
 
 braintrust_enabled = False
 if BRAINTRUST_API_KEY:
@@ -232,8 +235,7 @@ def log_to_braintrust(
         ):
             # Find the first message with role "system"
             system_msg = next(
-                (m for m in result.messages if m.get("role") == "system"),
-                None
+                (m for m in result.messages if m.get("role") == "system"), None
             )
             prompt = system_msg["content"] if system_msg else "<NO SYSTEM PROMPT FOUND>"
 

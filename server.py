@@ -1,30 +1,16 @@
 # ruff: noqa: E402
-import os
-
-from holmes.utils.cert_utils import add_custom_certificate
-
-ADDITIONAL_CERTIFICATE: str = os.environ.get("CERTIFICATE", "")
-if add_custom_certificate(ADDITIONAL_CERTIFICATE):
-    print("added custom certificate")
-
-# DO NOT ADD ANY IMPORTS OR CODE ABOVE THIS LINE
-# IMPORTING ABOVE MIGHT INITIALIZE AN HTTPS CLIENT THAT DOESN'T TRUST THE CUSTOM CERTIFICATE
-import json
-import logging
-import threading
-import time
-from pathlib import Path
-from typing import List, Optional
-
-import colorlog
-import litellm
-import sentry_sdk
-import uvicorn
-from fastapi import FastAPI, HTTPException, Request
-from fastapi.responses import StreamingResponse
-from litellm.exceptions import AuthenticationError
-
-from holmes import get_version, is_official_release
+from holmes.utils.stream import stream_chat_formatter
+from holmes.utils.log import EndpointFilter
+from holmes.utils.holmes_sync_toolsets import holmes_sync_toolsets_status
+from holmes.utils.holmes_status import update_holmes_status_in_db
+from holmes.utils.connection_utils import patch_socket_create_connection
+from holmes.core.tools_utils.filesystem_result_storage import tool_result_storage
+from holmes.core.tools import ToolsetStatusEnum, ToolsetType
+from holmes.core.scheduled_prompts import ScheduledPromptsExecutor
+from holmes.core.prompt import PromptComponent
+from holmes.core.models import ChatRequest, ChatResponse, FollowUpAction
+from holmes.core.conversations import build_chat_messages
+from holmes.config import DEFAULT_CONFIG_LOCATION, Config
 from holmes.common.env_vars import (
     DEVELOPMENT_MODE,
     ENABLE_CONNECTION_KEEPALIVE,
@@ -38,25 +24,32 @@ from holmes.common.env_vars import (
     SENTRY_TRACES_SAMPLE_RATE,
     TOOLSET_STATUS_REFRESH_INTERVAL_SECONDS,
 )
-from holmes.config import DEFAULT_CONFIG_LOCATION, Config
-from holmes.core.conversations import (
-    build_chat_messages,
-)
-from holmes.core.models import (
-    ChatRequest,
-    ChatResponse,
-    FollowUpAction,
-)
-from holmes.core.prompt import PromptComponent
-from holmes.core.tools import ToolsetStatusEnum, ToolsetType
-from holmes.core.scheduled_prompts import ScheduledPromptsExecutor
-from holmes.utils.connection_utils import patch_socket_create_connection
-from holmes.utils.holmes_status import update_holmes_status_in_db
-from holmes.utils.holmes_sync_toolsets import holmes_sync_toolsets_status
-from holmes.utils.log import EndpointFilter
 from holmes.checks.checks_api import init_checks_app
-from holmes.core.tools_utils.filesystem_result_storage import tool_result_storage
-from holmes.utils.stream import stream_chat_formatter
+from holmes import get_version, is_official_release
+from litellm.exceptions import AuthenticationError
+from fastapi.responses import StreamingResponse
+from fastapi import FastAPI, HTTPException, Request
+import uvicorn
+import sentry_sdk
+import litellm
+import colorlog
+from typing import List, Optional
+from pathlib import Path
+import time
+import threading
+import logging
+import json
+import os
+
+from holmes.utils.cert_utils import add_custom_certificate
+
+ADDITIONAL_CERTIFICATE: str = os.environ.get("CERTIFICATE", "")
+if add_custom_certificate(ADDITIONAL_CERTIFICATE):
+    print("added custom certificate")
+
+# DO NOT ADD ANY IMPORTS OR CODE ABOVE THIS LINE
+# IMPORTING ABOVE MIGHT INITIALIZE AN HTTPS CLIENT THAT DOESN'T TRUST THE CUSTOM CERTIFICATE
+
 
 # removed: add_runbooks_to_user_prompt
 
@@ -302,17 +295,18 @@ def extract_passthrough_headers(request: Request) -> dict:
     return {"headers": passthrough_headers} if passthrough_headers else {}
 
 
-def _stream_with_storage_cleanup(storage, stream_generator, req_info):
-    """Wrap a stream generator to clean up tool result files after streaming completes."""
+async def _stream_with_storage_cleanup(storage, stream_generator, req_info):
+    """Wrap an async stream generator to clean up tool result files after streaming completes."""
     try:
-        yield from stream_generator
+        async for item in stream_generator:
+            yield item
     finally:
         logging.info(f"Stream request end: {req_info}")
         storage.__exit__(None, None, None)
 
 
 @app.post("/api/chat")
-def chat(chat_request: ChatRequest, http_request: Request):
+async def chat(chat_request: ChatRequest, http_request: Request):
     try:
         # Log incoming request details
         has_images = bool(chat_request.images)

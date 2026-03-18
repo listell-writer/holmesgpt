@@ -1,8 +1,4 @@
-import os
-
 from holmes.plugins.runbooks import (
-    DEFAULT_RUNBOOK_SEARCH_PATH,
-    get_runbook_by_path,
     load_runbook_catalog,
 )
 

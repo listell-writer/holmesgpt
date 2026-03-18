@@ -64,7 +64,9 @@ def extract_usage_from_response(response: ModelResponse) -> dict:
                 cached_tokens = _extract_detail_field(prompt_details, "cached_tokens")
             completion_details = usage.get("completion_tokens_details", None)
             if completion_details:
-                reasoning_tokens = _extract_detail_field(completion_details, "reasoning_tokens") or 0
+                reasoning_tokens = (
+                    _extract_detail_field(completion_details, "reasoning_tokens") or 0
+                )
     except (AttributeError, TypeError, KeyError):
         logging.debug("Could not extract token usage from LLM response")
 

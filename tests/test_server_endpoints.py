@@ -392,7 +392,9 @@ class TestExtractPassthroughHeaders:
     def test_custom_blocked_headers_via_env(self, monkeypatch):
         """Test that HOLMES_PASSTHROUGH_BLOCKED_HEADERS env var works"""
         # Set custom blocked headers via environment variable
-        monkeypatch.setenv("HOLMES_PASSTHROUGH_BLOCKED_HEADERS", "x-internal-token,x-secret")
+        monkeypatch.setenv(
+            "HOLMES_PASSTHROUGH_BLOCKED_HEADERS", "x-internal-token,x-secret"
+        )
 
         scope = {
             "type": "http",

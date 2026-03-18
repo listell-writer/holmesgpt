@@ -5,6 +5,7 @@ from abc import ABC
 from typing import Any, ClassVar, Dict, List, Optional, Tuple, Type
 from urllib.parse import urlparse
 
+import sqlalchemy
 from pydantic import ConfigDict, Field
 
 from holmes.core.tools import (
@@ -19,8 +20,6 @@ from holmes.core.tools import (
 )
 from holmes.plugins.toolsets.utils import toolset_name_for_one_liner
 from holmes.utils.pydantic_utils import ToolsetConfig
-
-import sqlalchemy
 
 logger = logging.getLogger(__name__)
 
@@ -187,7 +186,6 @@ class DatabaseToolset(Toolset):
                 + self._user_llm_instructions
             )
 
-
     def prerequisites_callable(self, config: Dict[str, Any]) -> Tuple[bool, str]:
         try:
             self.config = DatabaseConfig(**config)
@@ -238,9 +236,7 @@ class DatabaseToolset(Toolset):
                 connect_args["TrustServerCertificate"] = "yes"
 
         return sqlalchemy.create_engine(
-            url,
-            pool_pre_ping=True,
-            connect_args=connect_args
+            url, pool_pre_ping=True, connect_args=connect_args
         )
 
     @property
@@ -274,7 +270,9 @@ class DatabaseToolset(Toolset):
                     f"Received: {sql[:80]}"
                 )
 
-        effective_limit = min(limit or self.database_config.max_rows, self.database_config.max_rows)
+        effective_limit = min(
+            limit or self.database_config.max_rows, self.database_config.max_rows
+        )
         url = _normalise_url(self.database_config.connection_url)
         engine = self._create_engine(url)
         try:
@@ -310,7 +308,9 @@ class DatabaseToolset(Toolset):
                         "rows": [],
                         "row_count": 0,
                         "truncated": False,
-                        "rows_affected": result.rowcount if result.rowcount >= 0 else None,
+                        "rows_affected": result.rowcount
+                        if result.rowcount >= 0
+                        else None,
                     }
         finally:
             engine.dispose()

@@ -88,10 +88,7 @@ class TestDatadogToolsetCheckPrerequisites:
         assert toolset.dd_config is not None
         assert toolset.dd_config.api_key == "test-api-key"
         assert toolset.dd_config.app_key == "test-app-key"
-        assert (
-            str(toolset.dd_config.api_url).rstrip("/")
-            == "https://api.datadoghq.com"
-        )
+        assert str(toolset.dd_config.api_url).rstrip("/") == "https://api.datadoghq.com"
         assert toolset.dd_config.storage_tiers == DEFAULT_STORAGE_TIERS
 
         # Verify healthcheck was called with correct params

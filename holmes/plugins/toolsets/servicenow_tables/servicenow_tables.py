@@ -66,7 +66,9 @@ class ServiceNowTablesConfig(ToolsetConfig):
 
 
 class ServiceNowTablesToolset(Toolset):
-    config_classes: ClassVar[list[Type[ServiceNowTablesConfig]]] = [ServiceNowTablesConfig]
+    config_classes: ClassVar[list[Type[ServiceNowTablesConfig]]] = [
+        ServiceNowTablesConfig
+    ]
 
     def __init__(self):
         super().__init__(
@@ -105,7 +107,10 @@ class ServiceNowTablesToolset(Toolset):
                 query_params={"sysparm_limit": 1},
                 timeout=10,
             )
-            return True, f"ServiceNow configuration is valid and API is accessible. (checked table: {table_name})"
+            return (
+                True,
+                f"ServiceNow configuration is valid and API is accessible. (checked table: {table_name})",
+            )
 
         except requests.exceptions.HTTPError as e:
             if e.response.status_code == 401:

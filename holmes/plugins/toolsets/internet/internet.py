@@ -3,10 +3,10 @@ import os
 import re
 from typing import Any, ClassVar, Dict, List, Optional, Tuple, Type
 
-from pydantic import Field
 import requests  # type: ignore
 from bs4 import BeautifulSoup
 from markdownify import markdownify
+from pydantic import Field
 from requests import RequestException, Timeout  # type: ignore
 
 from holmes.core.tools import (
@@ -193,7 +193,9 @@ class FetchWebpage(Tool):
         url: str = params["url"]
 
         additional_headers = (
-            self.toolset.internet_config.additional_headers if self.toolset.internet_config.additional_headers else {}
+            self.toolset.internet_config.additional_headers
+            if self.toolset.internet_config.additional_headers
+            else {}
         )
         content, mime_type = scrape(url, additional_headers)
 
@@ -233,11 +235,13 @@ class InternetBaseToolsetConfig(ToolsetConfig):
             {"Authorization": "Bearer <token>"},
         ],
     )
+
+
 class InternetBaseToolset(Toolset):
     config_classes: ClassVar[list[Type[InternetBaseToolsetConfig]]] = [
         InternetBaseToolsetConfig
     ]
-    
+
     internet_config: Optional[InternetBaseToolsetConfig] = None
 
     def __init__(

@@ -1,4 +1,34 @@
 # ruff: noqa: E402
+from holmes.utils.stream import StreamEvents, StreamMessage
+from holmes.core.models import ChatRequest
+from holmes.core.conversations import build_chat_messages
+from holmes.config import Config
+from holmes.common.env_vars import HOLMES_HOST, HOLMES_PORT
+from starlette.responses import PlainTextResponse
+from fastapi.responses import JSONResponse, StreamingResponse
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi import FastAPI, Request
+from ag_ui.encoder import EventEncoder
+from ag_ui.core import (
+    AssistantMessage,
+    EventType,
+    RunAgentInput,
+    RunErrorEvent,
+    RunFinishedEvent,
+    RunStartedEvent,
+    TextMessageContentEvent,
+    TextMessageEndEvent,
+    TextMessageStartEvent,
+    ToolCallArgsEvent,
+    ToolCallEndEvent,
+    ToolCallStartEvent,
+)
+import uvicorn
+import colorlog
+import uuid
+import time
+import logging
+import json
 import os
 
 from holmes.utils.cert_utils import add_custom_certificate
@@ -11,46 +41,6 @@ if add_custom_certificate(ADDITIONAL_CERTIFICATE):
 # IMPORTING ABOVE MIGHT INITIALIZE AN HTTPS CLIENT THAT DOESN'T TRUST THE CUSTOM CERTIFICATE
 
 # Safe to import networked libs below
-import json
-import logging
-import time
-import uuid
-import uvicorn
-import colorlog
-
-from fastapi import FastAPI, Request
-from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import StreamingResponse, JSONResponse
-from starlette.responses import PlainTextResponse
-
-from holmes.utils.stream import StreamMessage, StreamEvents
-from holmes.common.env_vars import (
-    HOLMES_HOST,
-    HOLMES_PORT,
-)
-from holmes.config import Config
-from holmes.core.conversations import (
-    build_chat_messages,
-)
-from holmes.core.models import (
-    ChatRequest,
-)
-
-from ag_ui.core import (
-    AssistantMessage,
-    RunAgentInput,
-    EventType,
-    RunStartedEvent,
-    RunFinishedEvent,
-    TextMessageStartEvent,
-    TextMessageContentEvent,
-    TextMessageEndEvent,
-    ToolCallStartEvent,
-    ToolCallArgsEvent,
-    ToolCallEndEvent,
-    RunErrorEvent,
-)
-from ag_ui.encoder import EventEncoder
 
 
 def init_logging():
@@ -135,7 +125,7 @@ def agui_chat(input_data: RunAgentInput, request: Request):
                 msgs=message_history,
                 enable_tool_approval=chat_request.enable_tool_approval or False,
             )
-            for chunk in hgpt_chat_stream_response:
+            async for chunk in hgpt_chat_stream_response:
                 if hasattr(chunk, "event"):
                     event_type = (
                         chunk.event.value

@@ -50,7 +50,9 @@ class ConfluenceConfig(ToolsetConfig):
     @model_validator(mode="after")
     def validate_auth(self) -> "ConfluenceConfig":
         if self.auth_type == "basic" and not self.user:
-            raise ValueError("'user' is required when auth_type is 'basic'. For PATs, set auth_type to 'bearer'.")
+            raise ValueError(
+                "'user' is required when auth_type is 'basic'. For PATs, set auth_type to 'bearer'."
+            )
         return self
 
 
@@ -98,7 +100,9 @@ class ConfluenceToolset(Toolset):
         if self._conf.cloud_id:
             return self._conf.cloud_id
         try:
-            resp = requests.get(f"{self._conf.api_url.rstrip('/')}/_edge/tenant_info", timeout=10)
+            resp = requests.get(
+                f"{self._conf.api_url.rstrip('/')}/_edge/tenant_info", timeout=10
+            )
             resp.raise_for_status()
             cloud_id = resp.json().get("cloudId")
             if cloud_id:
@@ -114,7 +118,9 @@ class ConfluenceToolset(Toolset):
 
     # ── Health check ──
 
-    def _probe_request(self, path: str, query_params: Optional[Dict[str, str]] = None) -> Dict[str, Any]:
+    def _probe_request(
+        self, path: str, query_params: Optional[Dict[str, str]] = None
+    ) -> Dict[str, Any]:
         """Direct HTTP request for health-check probing."""
         base = (self._gateway_base_url or self._conf.api_url).rstrip("/")
         prefix = self._conf.api_path_prefix.rstrip("/")
@@ -127,7 +133,9 @@ class ConfluenceToolset(Toolset):
         else:
             auth = (self._conf.user or "", self._conf.api_key)
 
-        response = requests.get(url, params=query_params, auth=auth, headers=headers, timeout=30)
+        response = requests.get(
+            url, params=query_params, auth=auth, headers=headers, timeout=30
+        )
         response.raise_for_status()
         return response.json()
 
@@ -140,13 +148,20 @@ class ConfluenceToolset(Toolset):
             return True, "Confluence API is accessible."
         except requests.exceptions.HTTPError as e:
             status = e.response.status_code
-            if status in (401, 403) and self._is_cloud_url() and not self._gateway_base_url:
+            if (
+                status in (401, 403)
+                and self._is_cloud_url()
+                and not self._gateway_base_url
+            ):
                 ok, msg = self._try_gateway_fallback()
                 if ok:
                     return True, msg
             return False, f"Confluence API error: HTTP {status}: {e.response.text}"
         except requests.exceptions.ConnectionError as e:
-            return False, f"Failed to connect to Confluence at {self._conf.api_url}: {e}"
+            return (
+                False,
+                f"Failed to connect to Confluence at {self._conf.api_url}: {e}",
+            )
         except requests.exceptions.Timeout:
             return False, "Confluence health check timed out"
         except Exception as e:
@@ -160,7 +175,10 @@ class ConfluenceToolset(Toolset):
         self._activate_gateway(cloud_id)
         try:
             self._probe_request("/rest/api/space", query_params={"limit": "1"})
-            return True, "Confluence API is accessible via Atlassian API gateway (scoped token)."
+            return (
+                True,
+                "Confluence API is accessible via Atlassian API gateway (scoped token).",
+            )
         except Exception as e:
             self._gateway_base_url = None
             return False, f"Confluence API gateway fallback failed: {e}"
@@ -180,7 +198,11 @@ class ConfluenceToolset(Toolset):
         if self._conf.auth_type == "bearer" or self._gateway_base_url:
             auth = AuthConfig(type="bearer", token=self._conf.api_key)
         else:
-            auth = AuthConfig(type="basic", username=self._conf.user or "", password=self._conf.api_key)
+            auth = AuthConfig(
+                type="basic",
+                username=self._conf.user or "",
+                password=self._conf.api_key,
+            )
 
         return EndpointConfig(
             hosts=[host],
@@ -226,7 +248,9 @@ Base URL: {base}
         )
         ok, msg = http_toolset.prerequisites_callable(http_config.model_dump())
         if not ok:
-            raise RuntimeError(f"Failed to initialize HTTP toolset for Confluence: {msg}")
+            raise RuntimeError(
+                f"Failed to initialize HTTP toolset for Confluence: {msg}"
+            )
 
         self.tools = http_toolset.tools
         self.llm_instructions = http_toolset.llm_instructions

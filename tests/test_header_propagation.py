@@ -9,11 +9,7 @@ with request_context and propagated to:
 5. ToolInvokeContext (pre-rendered headers)
 """
 
-import os
-from typing import Any, Dict, Optional, Tuple
 from unittest.mock import Mock, patch
-
-import pytest
 
 from holmes.core.tools import (
     StructuredToolResultStatus,
@@ -22,10 +18,10 @@ from holmes.core.tools import (
 )
 from holmes.utils.header_rendering import render_header_templates
 
-
 # ---------------------------------------------------------------------------
 # Shared utility tests
 # ---------------------------------------------------------------------------
+
 
 class TestRenderTemplateHeaders:
     def test_static_value(self):
@@ -34,9 +30,7 @@ class TestRenderTemplateHeaders:
 
     def test_env_var(self, monkeypatch):
         monkeypatch.setenv("TEST_HEADER_VAR", "from-env")
-        result = render_header_templates(
-            {"X-Env": "{{ env.TEST_HEADER_VAR }}"}
-        )
+        result = render_header_templates({"X-Env": "{{ env.TEST_HEADER_VAR }}"})
         assert result == {"X-Env": "from-env"}
 
     def test_request_context_header(self):
@@ -92,6 +86,7 @@ class TestRenderTemplateHeaders:
 # YAML tool Jinja2 template context (request_context + env)
 # ---------------------------------------------------------------------------
 
+
 class TestYAMLToolTemplateContext:
     def test_command_renders_request_context_header(self):
         """request_context.headers is available in command Jinja2 templates."""
@@ -101,8 +96,12 @@ class TestYAMLToolTemplateContext:
             command="echo {{ request_context.headers['X-Tenant-Id'] }}",
         )
         ctx = ToolInvokeContext.model_construct(
-            tool_number=1, user_approved=False, llm=Mock(),
-            max_token_count=1000, tool_call_id="c1", tool_name="t",
+            tool_number=1,
+            user_approved=False,
+            llm=Mock(),
+            max_token_count=1000,
+            tool_call_id="c1",
+            tool_name="t",
             request_context={"headers": {"X-Tenant-Id": "tenant-abc"}},
         )
         result = tool._invoke({}, ctx)
@@ -118,8 +117,12 @@ class TestYAMLToolTemplateContext:
             command="echo Bearer {{ env.MY_TOKEN }}",
         )
         ctx = ToolInvokeContext.model_construct(
-            tool_number=1, user_approved=False, llm=Mock(),
-            max_token_count=1000, tool_call_id="c1", tool_name="t",
+            tool_number=1,
+            user_approved=False,
+            llm=Mock(),
+            max_token_count=1000,
+            tool_call_id="c1",
+            tool_name="t",
         )
         result = tool._invoke({}, ctx)
         assert result.status == StructuredToolResultStatus.SUCCESS
@@ -133,8 +136,12 @@ class TestYAMLToolTemplateContext:
             command="echo hello",
         )
         ctx = ToolInvokeContext.model_construct(
-            tool_number=1, user_approved=False, llm=Mock(),
-            max_token_count=1000, tool_call_id="c1", tool_name="t",
+            tool_number=1,
+            user_approved=False,
+            llm=Mock(),
+            max_token_count=1000,
+            tool_call_id="c1",
+            tool_name="t",
         )
         result = tool._invoke({}, ctx)
         assert result.status == StructuredToolResultStatus.SUCCESS
@@ -148,8 +155,12 @@ class TestYAMLToolTemplateContext:
             script="#!/bin/bash\necho {{ request_context.headers['X-Auth'] }}",
         )
         ctx = ToolInvokeContext.model_construct(
-            tool_number=1, user_approved=False, llm=Mock(),
-            max_token_count=1000, tool_call_id="c1", tool_name="t",
+            tool_number=1,
+            user_approved=False,
+            llm=Mock(),
+            max_token_count=1000,
+            tool_call_id="c1",
+            tool_name="t",
             request_context={"headers": {"X-Auth": "Bearer secret"}},
         )
         result = tool._invoke({}, ctx)
@@ -164,8 +175,12 @@ class TestYAMLToolTemplateContext:
             command="echo {{ request_context.headers['x-tenant-id'] }}",
         )
         ctx = ToolInvokeContext.model_construct(
-            tool_number=1, user_approved=False, llm=Mock(),
-            max_token_count=1000, tool_call_id="c1", tool_name="t",
+            tool_number=1,
+            user_approved=False,
+            llm=Mock(),
+            max_token_count=1000,
+            tool_call_id="c1",
+            tool_name="t",
             request_context={"headers": {"X-Tenant-Id": "tenant-abc"}},
         )
         result = tool._invoke({}, ctx)
@@ -176,6 +191,7 @@ class TestYAMLToolTemplateContext:
 # ---------------------------------------------------------------------------
 # ToolInvokeContext tests
 # ---------------------------------------------------------------------------
+
 
 class TestToolInvokeContextHeaders:
     def test_model_dump_redacts_request_context_headers(self):
@@ -193,35 +209,32 @@ class TestToolInvokeContextHeaders:
         assert dumped["request_context"] == {"headers": "***REDACTED***"}
 
 
-
-
 # ---------------------------------------------------------------------------
 # HTTP toolset header propagation tests
 # ---------------------------------------------------------------------------
+
 
 class TestHttpToolsetHeaderPropagation:
     @patch("holmes.plugins.toolsets.http.http_toolset.requests.request")
     def test_extra_headers_merged_into_request(self, mock_request):
         """Verify that config-level extra_headers are merged into HTTP requests."""
-        from holmes.plugins.toolsets.http.http_toolset import HttpRequest, HttpToolset
+        from holmes.plugins.toolsets.http.http_toolset import HttpToolset
 
         # Create an HTTP toolset with extra_headers in config
         toolset = HttpToolset(
             name="test_http",
             enabled=True,
             config={
-                "endpoints": [
-                    {"hosts": ["api.example.com"], "methods": ["GET"]}
-                ],
+                "endpoints": [{"hosts": ["api.example.com"], "methods": ["GET"]}],
                 "extra_headers": {"X-Custom": "static-val"},
             },
         )
-        ok, _ = toolset.prerequisites_callable({
-            "endpoints": [
-                {"hosts": ["api.example.com"], "methods": ["GET"]}
-            ],
-            "extra_headers": {"X-Custom": "static-val"},
-        })
+        ok, _ = toolset.prerequisites_callable(
+            {
+                "endpoints": [{"hosts": ["api.example.com"], "methods": ["GET"]}],
+                "extra_headers": {"X-Custom": "static-val"},
+            }
+        )
         assert ok
 
         mock_response = Mock()
@@ -248,26 +261,24 @@ class TestHttpToolsetHeaderPropagation:
     @patch("holmes.plugins.toolsets.http.http_toolset.requests.request")
     def test_extra_headers_override_defaults(self, mock_request):
         """Verify that extra_headers override default headers."""
-        from holmes.plugins.toolsets.http.http_toolset import HttpRequest, HttpToolset
+        from holmes.plugins.toolsets.http.http_toolset import HttpToolset
 
         toolset = HttpToolset(
             name="test_http",
             enabled=True,
             config={
-                "endpoints": [
-                    {"hosts": ["api.example.com"], "methods": ["GET"]}
-                ],
+                "endpoints": [{"hosts": ["api.example.com"], "methods": ["GET"]}],
                 "default_headers": {"X-Default": "original"},
                 "extra_headers": {"X-Default": "overridden"},
             },
         )
-        ok, _ = toolset.prerequisites_callable({
-            "endpoints": [
-                {"hosts": ["api.example.com"], "methods": ["GET"]}
-            ],
-            "default_headers": {"X-Default": "original"},
-            "extra_headers": {"X-Default": "overridden"},
-        })
+        ok, _ = toolset.prerequisites_callable(
+            {
+                "endpoints": [{"hosts": ["api.example.com"], "methods": ["GET"]}],
+                "default_headers": {"X-Default": "original"},
+                "extra_headers": {"X-Default": "overridden"},
+            }
+        )
         assert ok
 
         mock_response = Mock()
@@ -293,6 +304,7 @@ class TestHttpToolsetHeaderPropagation:
 # ---------------------------------------------------------------------------
 # MCP config-level extra_headers tests
 # ---------------------------------------------------------------------------
+
 
 class TestMCPConfigExtraHeaders:
     def test_config_level_extra_headers_rendered(self):

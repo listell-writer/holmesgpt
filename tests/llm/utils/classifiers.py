@@ -233,5 +233,3 @@ Possible choices:
         return classifier(
             input=prompt_prefix, output=output, expected=expected_elements_str
         )
-
-

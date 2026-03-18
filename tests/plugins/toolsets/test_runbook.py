@@ -7,9 +7,7 @@ from holmes.plugins.toolsets.runbook.runbook_fetcher import (
 )
 from tests.conftest import create_mock_tool_invoke_context
 
-TEST_RUNBOOKS_PATH = os.path.join(
-    os.path.dirname(__file__), "fixtures", "runbooks"
-)
+TEST_RUNBOOKS_PATH = os.path.join(os.path.dirname(__file__), "fixtures", "runbooks")
 
 
 def test_RunbookFetcher():

@@ -26,9 +26,6 @@ from typing import (
 )
 
 from jinja2 import Template
-
-from holmes.core.json_schema_coerce import coerce_params
-from requests.structures import CaseInsensitiveDict
 from pydantic import (
     BaseModel,
     ConfigDict,
@@ -37,9 +34,11 @@ from pydantic import (
     PrivateAttr,
     model_validator,
 )
+from requests.structures import CaseInsensitiveDict
 from rich.console import Console
 from rich.table import Table
 
+from holmes.core.json_schema_coerce import coerce_params
 from holmes.core.llm import LLM
 from holmes.core.openai_formatting import format_tool_to_open_ai_standard
 from holmes.core.transformers import (
@@ -117,7 +116,9 @@ class StructuredToolResult(BaseModel):
                 return self.data.model_dump_json(indent=None if compact else 2), True
             else:
                 if compact:
-                    return json.dumps(self.data, separators=(",", ":"), ensure_ascii=False), True
+                    return json.dumps(
+                        self.data, separators=(",", ":"), ensure_ascii=False
+                    ), True
                 else:
                     return json.dumps(self.data, indent=2, ensure_ascii=False), True
         except Exception:
@@ -197,7 +198,10 @@ class ToolParameter(BaseModel):
         are incompatible with strict mode.
         """
         # If this parameter has additionalProperties with a schema or True, it's not strict-compatible
-        if self.additional_properties is not None and self.additional_properties is not False:
+        if (
+            self.additional_properties is not None
+            and self.additional_properties is not False
+        ):
             return False
         # Recursively check nested properties
         if self.properties:
@@ -678,7 +682,14 @@ class ToolsetEnvironmentPrerequisite(BaseModel):
     env: List[str] = []  # optional
 
 
-def _prereq_priority(prereq: Union[StaticPrerequisite, ToolsetCommandPrerequisite, ToolsetEnvironmentPrerequisite, CallablePrerequisite]) -> int:
+def _prereq_priority(
+    prereq: Union[
+        StaticPrerequisite,
+        ToolsetCommandPrerequisite,
+        ToolsetEnvironmentPrerequisite,
+        CallablePrerequisite,
+    ],
+) -> int:
     """Priority ordering for prerequisite checks. Lower number = higher priority.
 
     Static checks and env vars are fast config-validity checks (0-1).

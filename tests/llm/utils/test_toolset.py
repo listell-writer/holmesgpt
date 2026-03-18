@@ -2,7 +2,7 @@
 import logging
 import os
 from pathlib import Path
-from typing import List, Optional, Type
+from typing import List, Optional
 
 from holmes.core.tools import (
     Toolset,

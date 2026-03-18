@@ -338,7 +338,10 @@ class TestMCPGeneral:
                     "include": ToolParameter(
                         type="array",
                         description="List of additional information to include in the response. Available options: 'users', 'services', 'assignments', 'acknowledgers', 'custom_fields', 'teams', 'escalation_policies', 'notes', 'urgencies', 'priorities'",
-                        required=False, items=ToolParameter(type="string", required=True, description=None),
+                        required=False,
+                        items=ToolParameter(
+                            type="string", required=True, description=None
+                        ),
                         json_schema_extra={"default": None},
                     ),
                 },
@@ -365,35 +368,65 @@ class TestMCPGeneral:
                             {
                                 "type": "object",
                                 "properties": {
-                                    "id": {"type": "string", "description": "The ID of the user"},
-                                    "name": {"type": "string", "description": "The name of the user"}
+                                    "id": {
+                                        "type": "string",
+                                        "description": "The ID of the user",
+                                    },
+                                    "name": {
+                                        "type": "string",
+                                        "description": "The name of the user",
+                                    },
                                 },
-                                "required": ["id"]
+                                "required": ["id"],
                             },
                             {
                                 "type": "object",
                                 "properties": {
-                                    "email": {"type": "string", "description": "The email of the user"},
-                                    "age": {"type": "integer", "description": "The age of the user"}
+                                    "email": {
+                                        "type": "string",
+                                        "description": "The email of the user",
+                                    },
+                                    "age": {
+                                        "type": "integer",
+                                        "description": "The age of the user",
+                                    },
                                 },
-                                "required": ["email"]
-                            }
+                                "required": ["email"],
+                            },
                         ]
                     }
                 },
-                "required": ["user_data"]
+                "required": ["user_data"],
             },
             description="Update user data",
             annotations=None,
         )
 
         expected_schema = {
-            "user_data": ToolParameter(type="object", required=True, properties={
-                "id": ToolParameter(type="string", required=True, description="The ID of the user"),
-                "name": ToolParameter(type="string", required=False, description="The name of the user"),
-                "email": ToolParameter(type="string", required=True, description="The email of the user"),
-                "age": ToolParameter(type="integer", required=False, description="The age of the user"),
-            }),
+            "user_data": ToolParameter(
+                type="object",
+                required=True,
+                properties={
+                    "id": ToolParameter(
+                        type="string", required=True, description="The ID of the user"
+                    ),
+                    "name": ToolParameter(
+                        type="string",
+                        required=False,
+                        description="The name of the user",
+                    ),
+                    "email": ToolParameter(
+                        type="string",
+                        required=True,
+                        description="The email of the user",
+                    ),
+                    "age": ToolParameter(
+                        type="integer",
+                        required=False,
+                        description="The age of the user",
+                    ),
+                },
+            ),
         }
 
         mock_toolset = RemoteMCPToolset(
@@ -625,7 +658,9 @@ class TestMCPSchemaPreservation:
 
         # Verify it flows through to OpenAI format
         openai_format = tool.get_openai_format()
-        filters_schema = openai_format["function"]["parameters"]["properties"]["filters"]
+        filters_schema = openai_format["function"]["parameters"]["properties"][
+            "filters"
+        ]
         assert "additionalProperties" in filters_schema
         assert "anyOf" in filters_schema["additionalProperties"]
         assert len(filters_schema["additionalProperties"]["anyOf"]) == 2
@@ -678,10 +713,18 @@ class TestMCPSchemaPreservation:
         assert metrics_param.json_schema_extra == {"minItems": 1, "maxItems": 12}
 
         limit_param = tool.parameters["limit"]
-        assert limit_param.json_schema_extra == {"minimum": 1, "maximum": 1000, "default": 100}
+        assert limit_param.json_schema_extra == {
+            "minimum": 1,
+            "maximum": 1000,
+            "default": 100,
+        }
 
         name_param = tool.parameters["name_pattern"]
-        assert name_param.json_schema_extra == {"pattern": "^[a-z]+$", "minLength": 1, "maxLength": 255}
+        assert name_param.json_schema_extra == {
+            "pattern": "^[a-z]+$",
+            "minLength": 1,
+            "maxLength": 255,
+        }
 
         # Verify they flow through to OpenAI format
         openai_format = tool.get_openai_format()

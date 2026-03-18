@@ -9,11 +9,11 @@ from pydantic import ValidationError
 sqlalchemy = pytest.importorskip("sqlalchemy")
 
 from holmes.plugins.toolsets.database.database import (  # noqa: E402
-    DatabaseConfig,
-    DatabaseToolset,
     _READONLY_PATTERN,
     _WRITE_ANYWHERE_PATTERN,
     _WRITE_PATTERN,
+    DatabaseConfig,
+    DatabaseToolset,
     _normalise_url,
     _serialize_value,
 )

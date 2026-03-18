@@ -1,25 +1,25 @@
 """Tests for the smart auto-enable logic for toolsets."""
 
-from typing import ClassVar, Dict, List, Optional, Type
+from typing import List, Optional, Type
 
-import pytest
 from pydantic import BaseModel, Field
 
 from holmes.core.tools import Toolset, ToolsetTag
 from holmes.utils.pydantic_utils import ToolsetConfig
-
 
 # --- Test config classes ---
 
 
 class AllOptionalConfig(ToolsetConfig):
     """Config where every field has a default."""
+
     url: Optional[str] = Field(default=None)
     timeout: int = Field(default=30)
 
 
 class RequiredFieldConfig(ToolsetConfig):
     """Config with a required field (no default)."""
+
     api_url: str = Field(title="API URL")
     api_key: Optional[str] = Field(default=None)
 

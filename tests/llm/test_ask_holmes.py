@@ -9,6 +9,7 @@ from typing import Optional
 from unittest.mock import patch
 
 import pytest
+
 from holmes.config import Config
 from holmes.core.conversations import build_chat_messages
 from holmes.core.models import ChatRequest
@@ -23,7 +24,6 @@ from tests.llm.utils.commands import apply_env_config, set_test_env_vars
 from tests.llm.utils.env_config import EnvConfig, get_env_configs
 from tests.llm.utils.iteration_utils import get_test_cases
 from tests.llm.utils.mock_dal import load_test_dal
-from tests.llm.utils.test_toolset import TestToolsetManager
 from tests.llm.utils.property_manager import (
     handle_test_error,
     set_initial_properties,
@@ -37,6 +37,7 @@ from tests.llm.utils.test_case_utils import (
     create_eval_llm,
     get_models,
 )
+from tests.llm.utils.test_toolset import TestToolsetManager
 
 TEST_CASES_FOLDER = Path(
     path.abspath(path.join(path.dirname(__file__), "fixtures", "test_ask_holmes"))
@@ -196,8 +197,7 @@ def ask_holmes(
         )
 
         test_type = (
-            test_case.test_type
-            or os.environ.get("ASK_HOLMES_TEST_TYPE", "cli").lower()
+            test_case.test_type or os.environ.get("ASK_HOLMES_TEST_TYPE", "cli").lower()
         )
         if test_type == "cli":
             if test_case.conversation_history:
@@ -231,9 +231,7 @@ def ask_holmes(
             if test_case.cluster_name:
                 config.cluster_name = test_case.cluster_name
 
-            dal = load_test_dal(
-                Path(test_case.folder), initialize_base=False
-            )
+            dal = load_test_dal(Path(test_case.folder), initialize_base=False)
             runbooks = load_runbook_catalog(dal)
             global_instructions = dal.get_global_instructions_for_account()
 

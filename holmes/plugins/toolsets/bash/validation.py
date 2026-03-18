@@ -15,7 +15,6 @@ import bashlex
 from bashlex import ast
 
 from holmes.common.env_vars import HOLMES_TOOL_RESULT_STORAGE_PATH, load_bool
-
 from holmes.plugins.toolsets.bash.common.config import (
     HARDCODED_BLOCKS,
     BashExecutorConfig,
@@ -160,7 +159,9 @@ def check_hardcoded_blocks(segment: str) -> Optional[str]:
     return None
 
 
-def check_blocked_in_raw_command(command: str, blocked_list: List[str]) -> Optional[str]:
+def check_blocked_in_raw_command(
+    command: str, blocked_list: List[str]
+) -> Optional[str]:
     """
     Check for blocked patterns anywhere in a raw command string using word boundaries.
 

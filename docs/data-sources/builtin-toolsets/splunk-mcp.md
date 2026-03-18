@@ -161,4 +161,3 @@ holmes ask "Search Splunk for the most recent 10 error events"
 
 - [Splunk MCP Server on Splunkbase](https://splunkbase.splunk.com/app/7931)
 - [Splunk MCP Server Tools Reference](https://help.splunk.com/en/splunk-cloud-platform/mcp-server-for-splunk-platform/mcp-server-tools)
-

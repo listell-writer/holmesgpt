@@ -348,7 +348,10 @@ class RemoteMCPTool(Tool):
                                             if req not in reqs:
                                                 reqs.append(req)
                                     elif k == "type":
-                                        if "type" not in merged or merged["type"] == "null":
+                                        if (
+                                            "type" not in merged
+                                            or merged["type"] == "null"
+                                        ):
                                             merged["type"] = v
                                     else:
                                         merged[k] = v
@@ -418,13 +421,20 @@ class RemoteMCPTool(Tool):
         # OpenAI-formatted schema so the LLM sees constraints like array
         # length limits, numeric ranges, and string patterns.
         _PASSTHROUGH_KEYWORDS = {
-            "minItems", "maxItems",
-            "minimum", "maximum", "exclusiveMinimum", "exclusiveMaximum",
-            "minLength", "maxLength",
+            "minItems",
+            "maxItems",
+            "minimum",
+            "maximum",
+            "exclusiveMinimum",
+            "exclusiveMaximum",
+            "minLength",
+            "maxLength",
             "pattern",
             "default",
         }
-        json_schema_extra = {k: v for k, v in schema.items() if k in _PASSTHROUGH_KEYWORDS}
+        json_schema_extra = {
+            k: v for k, v in schema.items() if k in _PASSTHROUGH_KEYWORDS
+        }
 
         return ToolParameter(
             description=schema.get("description"),

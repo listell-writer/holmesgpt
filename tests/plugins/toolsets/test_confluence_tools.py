@@ -45,7 +45,9 @@ class TestGatewayAutoDetection:
         }
 
         with (
-            patch.object(ConfluenceToolset, "_probe_request", return_value={"results": []}),
+            patch.object(
+                ConfluenceToolset, "_probe_request", return_value={"results": []}
+            ),
             patch.object(ConfluenceToolset, "_setup_http_tools"),
         ):
             ok, msg = ts.prerequisites_callable(config)
@@ -84,7 +86,10 @@ class TestGatewayAutoDetection:
 
         with (
             patch.object(ConfluenceToolset, "_probe_request", side_effect=side_effect),
-            patch("holmes.plugins.toolsets.confluence.confluence.requests.get", return_value=tenant_resp),
+            patch(
+                "holmes.plugins.toolsets.confluence.confluence.requests.get",
+                return_value=tenant_resp,
+            ),
             patch.object(ConfluenceToolset, "_setup_http_tools"),
         ):
             ok, msg = ts.prerequisites_callable(config)
@@ -141,7 +146,9 @@ class TestGatewayAutoDetection:
 
         forbidden_resp = MagicMock()
         forbidden_resp.status_code = 403
-        forbidden_resp.text = '{"message":"Current user not permitted to use Confluence"}'
+        forbidden_resp.text = (
+            '{"message":"Current user not permitted to use Confluence"}'
+        )
 
         # Both direct and gateway calls fail with 403
         with (
@@ -150,7 +157,9 @@ class TestGatewayAutoDetection:
                 "_probe_request",
                 side_effect=requests.exceptions.HTTPError(response=forbidden_resp),
             ),
-            patch("holmes.plugins.toolsets.confluence.confluence.requests.get") as mock_get,
+            patch(
+                "holmes.plugins.toolsets.confluence.confluence.requests.get"
+            ) as mock_get,
         ):
             tenant_resp = MagicMock()
             tenant_resp.status_code = 200
@@ -174,7 +183,9 @@ class TestGatewayAutoDetection:
 
         forbidden_resp = MagicMock()
         forbidden_resp.status_code = 403
-        forbidden_resp.text = '{"message":"Current user not permitted to use Confluence"}'
+        forbidden_resp.text = (
+            '{"message":"Current user not permitted to use Confluence"}'
+        )
 
         with (
             patch.object(
@@ -255,7 +266,9 @@ class TestHttpToolsetDelegation:
             api_key="api-token",
         )
 
-        with patch("holmes.plugins.toolsets.http.http_toolset.requests.get") as mock_get:
+        with patch(
+            "holmes.plugins.toolsets.http.http_toolset.requests.get"
+        ) as mock_get:
             mock_resp = MagicMock()
             mock_resp.ok = True
             mock_get.return_value = mock_resp

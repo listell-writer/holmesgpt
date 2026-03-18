@@ -1,8 +1,9 @@
 import json
-import yaml
 import logging
 from datetime import datetime
 from typing import Any, List
+
+import yaml
 
 from holmes.config import Config
 from holmes.core.supabase_dal import SupabaseDal
@@ -73,6 +74,7 @@ def get_config_schema_for_toolset(toolset: Toolset) -> str:
         "schema": toolset.get_config_schema(),
     }
     return json.dumps(res)
+
 
 def render_default_installation_instructions_for_toolset(toolset: Toolset) -> str:
     env_vars = toolset.get_environment_variables()

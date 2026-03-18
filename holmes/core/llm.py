@@ -234,6 +234,28 @@ class LLM:
     ) -> Union[ModelResponse, CustomStreamWrapper]:
         pass
 
+    async def acompletion(
+        self,
+        messages: List[Dict[str, Any]],
+        tools: Optional[List[Dict[str, Any]]] = [],
+        tool_choice: Optional[Union[str, dict]] = None,
+        response_format: Optional[Union[dict, Type[BaseModel]]] = None,
+        temperature: Optional[float] = None,
+        drop_params: Optional[bool] = None,
+        stream: Optional[bool] = None,
+    ) -> Union[ModelResponse, CustomStreamWrapper]:
+        """Async version of completion. Subclasses may override for true async.
+        Default implementation falls back to sync completion."""
+        return self.completion(
+            messages=messages,
+            tools=tools,
+            tool_choice=tool_choice,
+            response_format=response_format,
+            temperature=temperature,
+            drop_params=drop_params,
+            stream=stream,
+        )
+
 
 class DefaultLLM(LLM):
     model: str
@@ -324,7 +346,10 @@ class DefaultLLM(LLM):
             if (
                 os.environ.get("AWS_PROFILE")
                 or os.environ.get("AWS_BEARER_TOKEN_BEDROCK")
-                or (os.environ.get("AWS_ROLE_ARN") and os.environ.get("AWS_WEB_IDENTITY_TOKEN_FILE"))
+                or (
+                    os.environ.get("AWS_ROLE_ARN")
+                    and os.environ.get("AWS_WEB_IDENTITY_TOKEN_FILE")
+                )
             ):
                 model_requirements = {"keys_in_environment": True, "missing_keys": []}
             elif args.get("aws_access_key_id") and args.get("aws_secret_access_key"):
@@ -336,7 +361,10 @@ class DefaultLLM(LLM):
                     session = boto3.Session()
                     credentials = session.get_credentials()
                     if credentials is not None:
-                        model_requirements = {"keys_in_environment": True, "missing_keys": []}
+                        model_requirements = {
+                            "keys_in_environment": True,
+                            "missing_keys": [],
+                        }
                     else:
                         model_requirements = litellm.validate_environment(
                             model=model, api_key=api_key, api_base=api_base
@@ -359,7 +387,10 @@ class DefaultLLM(LLM):
                 if key in os.environ and key in model_requirements["missing_keys"]:
                     model_requirements["missing_keys"].remove(key)  # type: ignore
             # When using Azure AD token auth, AZURE_API_KEY is not required
-            if AZURE_AD_TOKEN_AUTH and "AZURE_API_KEY" in model_requirements["missing_keys"]:
+            if (
+                AZURE_AD_TOKEN_AUTH
+                and "AZURE_API_KEY" in model_requirements["missing_keys"]
+            ):
                 model_requirements["missing_keys"].remove("AZURE_API_KEY")  # type: ignore
 
             if not model_requirements["missing_keys"]:
@@ -490,7 +521,9 @@ class DefaultLLM(LLM):
         # wrong 85-per-image estimate. We add back the correct image tokens
         # (already computed in the per-message loop) after.
         if is_anthropic:
-            bulk_messages = [_strip_images(m) if _has_images(m) else m for m in messages]
+            bulk_messages = [
+                _strip_images(m) if _has_images(m) else m for m in messages
+            ]
         else:
             bulk_messages = messages
 
@@ -537,22 +570,23 @@ class DefaultLLM(LLM):
         else:
             return self.model
 
-    def completion(
+    def _prepare_completion_kwargs(
         self,
         messages: List[Dict[str, Any]],
-        tools: Optional[List[Dict[str, Any]]] = None,
-        tool_choice: Optional[Union[str, dict]] = None,
-        response_format: Optional[Union[dict, Type[BaseModel]]] = None,
-        temperature: Optional[float] = None,
-        drop_params: Optional[bool] = None,
-        stream: Optional[bool] = None,
-    ) -> Union[ModelResponse, CustomStreamWrapper]:
-        tools_args = {}
+        tools: Optional[List[Dict[str, Any]]],
+        tool_choice: Optional[Union[str, dict]],
+        response_format: Optional[Union[dict, Type[BaseModel]]],
+        temperature: Optional[float],
+        drop_params: Optional[bool],
+        stream: Optional[bool],
+    ) -> Dict[str, Any]:
+        """Build the kwargs dict shared by completion() and acompletion()."""
+        tools_args: Dict[str, Any] = {}
         allowed_openai_params = None
 
         if tools and len(tools) > 0 and tool_choice == "auto":
             tools_args["tools"] = tools
-            tools_args["tool_choice"] = tool_choice  # type: ignore
+            tools_args["tool_choice"] = tool_choice
 
         if THINKING:
             self.args.setdefault("thinking", json.loads(THINKING))
@@ -576,9 +610,6 @@ class DefaultLLM(LLM):
 
         self.args.setdefault("temperature", temperature)
 
-        # Get the litellm module to use (wrapped or unwrapped)
-        litellm_to_use = self.tracer.wrap_llm(litellm) if self.tracer else litellm
-
         # Strip internal fields (e.g. token_count cache) so provider APIs only
         # receive valid message schema fields.  Shallow-copy only when needed to
         # avoid mutating the caller's dicts (which would invalidate the cache).
@@ -596,14 +627,10 @@ class DefaultLLM(LLM):
         # and pass it to litellm instead of an API key.
         azure_ad_kwargs: Dict[str, Any] = {}
         if AZURE_AD_TOKEN_AUTH and litellm_model_name.startswith("azure/"):
-            # For LiteLLM Azure provider, pass the bearer token via azure_ad_token
-            # LiteLLM will send it as Authorization: Bearer <token>
             azure_ad_kwargs["azure_ad_token"] = get_azure_ad_token()
-            # Also, ensure we do not leak stale API keys when using Entra ID
-            # Leave api_key as None in completion call when AZURE_AD_TOKEN_AUTH is enabled
             self.api_key = None
 
-        result = litellm_to_use.completion(
+        return dict(
             model=litellm_model_name,
             api_key=self.api_key,
             base_url=self.api_base,
@@ -625,12 +652,61 @@ class DefaultLLM(LLM):
             ],
         )
 
+    @staticmethod
+    def _validate_completion_result(
+        result: Any,
+    ) -> Union[ModelResponse, CustomStreamWrapper]:
         if isinstance(result, ModelResponse):
             return result
         elif isinstance(result, CustomStreamWrapper):
             return result
         else:
             raise Exception(f"Unexpected type returned by the LLM {type(result)}")
+
+    def completion(
+        self,
+        messages: List[Dict[str, Any]],
+        tools: Optional[List[Dict[str, Any]]] = None,
+        tool_choice: Optional[Union[str, dict]] = None,
+        response_format: Optional[Union[dict, Type[BaseModel]]] = None,
+        temperature: Optional[float] = None,
+        drop_params: Optional[bool] = None,
+        stream: Optional[bool] = None,
+    ) -> Union[ModelResponse, CustomStreamWrapper]:
+        kwargs = self._prepare_completion_kwargs(
+            messages,
+            tools,
+            tool_choice,
+            response_format,
+            temperature,
+            drop_params,
+            stream,
+        )
+        litellm_to_use = self.tracer.wrap_llm(litellm) if self.tracer else litellm
+        result = litellm_to_use.completion(**kwargs)
+        return self._validate_completion_result(result)
+
+    async def acompletion(
+        self,
+        messages: List[Dict[str, Any]],
+        tools: Optional[List[Dict[str, Any]]] = None,
+        tool_choice: Optional[Union[str, dict]] = None,
+        response_format: Optional[Union[dict, Type[BaseModel]]] = None,
+        temperature: Optional[float] = None,
+        drop_params: Optional[bool] = None,
+        stream: Optional[bool] = None,
+    ) -> Union[ModelResponse, CustomStreamWrapper]:
+        kwargs = self._prepare_completion_kwargs(
+            messages,
+            tools,
+            tool_choice,
+            response_format,
+            temperature,
+            drop_params,
+            stream,
+        )
+        result = await litellm.acompletion(**kwargs)
+        return self._validate_completion_result(result)
 
     def get_maximum_output_token(self) -> int:
         max_output_tokens = floor(min(64000, self.get_context_window_size() / 5))

@@ -48,8 +48,8 @@ from holmes.core.feedback import (
     FeedbackCallback,
     UserFeedback,
 )
-from holmes.core.prompt import PromptComponent, build_initial_ask_messages
 from holmes.core.models import PendingToolApproval
+from holmes.core.prompt import PromptComponent, build_initial_ask_messages
 from holmes.core.tool_calling_llm import (
     ApprovalCallback,
     LLMInterruptedError,
@@ -65,6 +65,7 @@ from holmes.plugins.toolsets.bash.common.cli_prefixes import (
 from holmes.plugins.toolsets.bash.common.cli_prefixes import (
     save_cli_bash_tools_approved_prefixes as _save_approved_prefixes,
 )
+from holmes.toolset_config_tui import run_toolset_config_tui
 from holmes.utils.colors import (
     AI_COLOR,
     ERROR_COLOR,
@@ -73,7 +74,6 @@ from holmes.utils.colors import (
     TOOLS_COLOR,
     USER_COLOR,
 )
-from holmes.toolset_config_tui import run_toolset_config_tui
 from holmes.utils.console.consts import agent_name
 from holmes.utils.file_utils import write_json_file
 from holmes.version import check_version_async
@@ -1138,9 +1138,7 @@ def _wait_for_completion_or_escape(
                 ch = sys.stdin.read(1)
                 if ch == "\x1b":
                     # Disambiguate standalone Escape from escape sequences (arrow keys etc.)
-                    ready2, _, _ = select_module.select(
-                        [sys.stdin], [], [], 0.05
-                    )
+                    ready2, _, _ = select_module.select([sys.stdin], [], [], 0.05)
                     if ready2:
                         # Part of an escape sequence — consume and discard
                         sys.stdin.read(1)
@@ -1196,6 +1194,7 @@ def run_interactive_loop(
     if bash_always_allow:
         approval_callback = lambda _: (True, None)
     elif not bash_always_deny:
+
         def approval_handler(
             pending_approval: PendingToolApproval,
         ) -> tuple[bool, Optional[str]]:
@@ -1530,7 +1529,9 @@ def run_interactive_loop(
                 ai_thread.start()
 
                 interrupted = _wait_for_completion_or_escape(
-                    ai_thread, cancel_event, approval_active,
+                    ai_thread,
+                    cancel_event,
+                    approval_active,
                     terminal_restored,
                 )
 

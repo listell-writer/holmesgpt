@@ -139,8 +139,6 @@ class Config(RobustaBaseConfig):
             self._llm_model_registry = LLMModelRegistry(self, dal=self.dal)
         return self._llm_model_registry
 
-
-
     def log_useful_info(self):
         if self.llm_model_registry.models:
             logging.info(
@@ -545,9 +543,6 @@ class SourceFactory(BaseModel):
         ticket_id: Optional[str],
         model: Optional[str] = None,
     ) -> TicketSource:
-        from holmes.plugins.sources.jira import JiraServiceManagementSource
-        from holmes.plugins.sources.pagerduty import PagerDutySource
-
         TicketSource.model_rebuild()
         supported_sources = [s.value for s in SupportedTicketSources]
         if source not in supported_sources:

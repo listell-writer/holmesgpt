@@ -67,7 +67,9 @@ class ToolExecutor:
 
         if toolset.needs_initialization:
             if not toolset.lazy_initialize():
-                error_msg = f"Toolset '{toolset.name}' failed to initialize: {toolset.error}"
+                error_msg = (
+                    f"Toolset '{toolset.name}' failed to initialize: {toolset.error}"
+                )
                 logging.error(error_msg)
                 return error_msg
         elif toolset.status == ToolsetStatusEnum.FAILED:

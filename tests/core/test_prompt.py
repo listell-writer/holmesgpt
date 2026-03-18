@@ -314,6 +314,7 @@ class TestServerFlows:
             expected_global_instructions=extract_instructions(global_instructions),
         )
 
+
 class TestUserPromptComponents:
     """Test that user prompts include all expected components via generate_user_prompt."""
 

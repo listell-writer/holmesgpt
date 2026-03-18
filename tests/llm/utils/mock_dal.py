@@ -92,9 +92,7 @@ class TestSupabaseDal(SupabaseDal):
                     data = json.load(f)
                     return Instructions(**data)
             except Exception as e:
-                logging.warning(
-                    f"Failed to read global instructions fixture file: {e}"
-                )
+                logging.warning(f"Failed to read global instructions fixture file: {e}")
 
         return None
 
@@ -140,7 +138,9 @@ class TestSupabaseDal(SupabaseDal):
                     if not include_external and item_cluster == "external":
                         continue
                 else:
-                    allowed = target_clusters + (["external"] if include_external else [])
+                    allowed = target_clusters + (
+                        ["external"] if include_external else []
+                    )
                     if item_cluster not in allowed:
                         continue
                 if workload:

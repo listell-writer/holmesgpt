@@ -1,3 +1,4 @@
+import asyncio
 import json
 import logging
 import os
@@ -17,9 +18,7 @@ from holmes.common.env_vars import (
     SCHEDULED_PROMPTS_INACTIVE_POLL_INTERVAL_SECONDS,
 )
 from holmes.core.models import ChatRequest, ChatResponse
-from holmes.core.scheduled_prompts.heartbeat_tracer import (
-    ScheduledPromptsHeartbeatSpan,
-)
+from holmes.core.scheduled_prompts.heartbeat_tracer import ScheduledPromptsHeartbeatSpan
 from holmes.core.scheduled_prompts.models import ScheduledPrompt
 from holmes.core.supabase_dal import RunStatus
 
@@ -30,9 +29,12 @@ if TYPE_CHECKING:
     from holmes.config import Config
     from holmes.core.supabase_dal import SupabaseDal
 
-ChatFunction = Callable[[ChatRequest, Request], Union["ChatResponse", "StreamingResponse"]]
+ChatFunction = Callable[
+    [ChatRequest, Request], Union["ChatResponse", "StreamingResponse"]
+]
 
 ADDITIONAL_SYSTEM_PROMPT_URL = f"{ROBUSTA_UI_DOMAIN}/api/additional-system-prompt.json"
+
 
 class ScheduledPromptsExecutor:
     def __init__(
@@ -201,7 +203,12 @@ class ScheduledPromptsExecutor:
         )
 
         empty_request = Request(scope={"type": "http", "headers": []})
-        response = self.chat_function(chat_request, empty_request)
+        result = self.chat_function(chat_request, empty_request)
+        # chat_function may be async (returns a coroutine)
+        if asyncio.iscoroutine(result):
+            response = asyncio.run(result)
+        else:
+            response = result
         duration_seconds = time.perf_counter() - start
 
         if isinstance(response, ChatResponse):

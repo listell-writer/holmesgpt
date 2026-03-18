@@ -57,7 +57,6 @@ class BenchmarkMetrics:
     cached_tokens: Optional[int] = None
 
 
-
 @dataclass
 class HistoricalComparison:
     """Comparison data between current and benchmark metrics."""
@@ -298,7 +297,9 @@ def get_benchmark_baseline() -> (
     try:
         api_key = _get_api_key()
         if not api_key:
-            details.status = "No Braintrust API key (BRAINTRUST_API_KEY or BRAINTRUST_SERVICE_TOKEN)"
+            details.status = (
+                "No Braintrust API key (BRAINTRUST_API_KEY or BRAINTRUST_SERVICE_TOKEN)"
+            )
             return {}, details
 
         project_id = _get_project_id()
