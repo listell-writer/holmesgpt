@@ -1,0 +1,58 @@
+# Regression test: read-only kubectl describe via bash tool
+#
+# Verifies that Holmes can use "kubectl describe deployment" through the bash
+# tool without being blocked or requiring approval. This is a regression test
+# for the issue where configuring a kubernetes-remediation MCP server with
+# approval_required_tools: ['*'] caused read-only kubectl operations to trigger
+# confirmation dialogs.
+#
+# The test disables all kubernetes toolsets and only enables bash with read-only
+# kubectl commands in the allow list. Holmes must discover deployment details
+# (including a unique verification code in annotations) using kubectl describe.
+
+user_prompt: "Use kubectl describe to inspect the deployment 'data-pipeline' in namespace app-234. What is the value of the 'release-tag' annotation and how many replicas are configured?"
+
+include_tool_calls: true
+
+expected_output:
+  - "Must call the bash tool with kubectl describe"
+  - "Must report the release-tag annotation value: v4.7.2-rc.h8q3nw"
+  - "Must report that the deployment has 3 replicas"
+
+description: |
+  Regression test for read-only kubectl describe via bash tool.
+  Validates that kubectl describe works through bash without approval issues.
+  The deployment has a unique annotation (release-tag: v4.7.2-rc.h8q3nw) that
+  can only be discovered by running kubectl describe, ruling out hallucination.
+
+before_test: |
+  set -e
+  kubectl create namespace app-234 --dry-run=client -o yaml | kubectl apply -f -
+  kubectl apply -f manifest.yaml
+  # Wait for deployment to be ready
+  DEPLOY_READY=false
+  for i in {1..60}; do
+    if kubectl rollout status deployment/data-pipeline -n app-234 --timeout=2s 2>/dev/null; then
+      echo "✅ Deployment ready!"
+      DEPLOY_READY=true
+      break
+    fi
+    sleep 1
+  done
+  if [ "$DEPLOY_READY" = false ]; then
+    echo "❌ Deployment not ready after 60 seconds"
+    kubectl get pods -n app-234
+    exit 1
+  fi
+  # Verify the needle is discoverable
+  kubectl describe deployment data-pipeline -n app-234 | grep -q 'h8q3nw'
+  echo "✅ Verification code discoverable via kubectl describe"
+
+after_test: |
+  kubectl delete namespace app-234 --ignore-not-found
+
+tags:
+  - kubernetes
+  - question-answer
+  - easy
+  - regression

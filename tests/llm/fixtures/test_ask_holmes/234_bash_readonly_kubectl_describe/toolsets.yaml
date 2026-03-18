@@ -1,0 +1,23 @@
+# Only bash with read-only kubectl commands enabled.
+# Kubernetes toolsets are disabled to force Holmes to use bash for kubectl operations.
+# This mirrors the scenario where the old k8s toolsets were removed.
+toolsets:
+  bash:
+    enabled: true
+    config:
+      allow:
+        - "kubectl describe"
+        - "kubectl get"
+        - "kubectl logs"
+        - "kubectl top"
+      deny: []
+  kubernetes/core:
+    enabled: false
+  kubernetes/logs:
+    enabled: false
+  kubernetes/live-metrics:
+    enabled: false
+  kubernetes/kube-prometheus-stack:
+    enabled: false
+  kubernetes/krew-extras:
+    enabled: false
