@@ -955,20 +955,9 @@ class AgenticProgressRenderer:
 
         if self._summary_printed:
             return
-        if not self._live_tasks and not self._tool_history and not self._ai_messages:
+        if not self._live_tasks and not self._tool_history:
             return
         self._summary_printed = True
-
-        # Print AI messages that arrived during the live display
-        for reasoning, content in self._ai_messages:
-            if reasoning:
-                self._console.print(
-                    f"  [italic dim]{reasoning}[/italic dim]"
-                )
-            if content and content.strip():
-                self._console.print(
-                    f"  [dim]{content}[/dim]"
-                )
 
         # Print the task list
         if self._live_tasks:
