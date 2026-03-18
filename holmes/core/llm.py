@@ -691,6 +691,12 @@ class LLMModelRegistry:
                     f"Couldn't find default Robusta AI model: {self._default_robusta_model} in model list"
                 )
 
+            # Prefer the model set via config/env (e.g. MODEL=sonnet-4.5) over
+            # the first entry in the model list file.
+            if self.config.model and self.config.model in self._llms:
+                logging.debug(f"Using config model: {self.config.model}")
+                return self._llms[self.config.model].model_copy()
+
             model_key, first_model_params = next(iter(self._llms.items()))
             logging.debug(f"Using first available model: {model_key}")
             return first_model_params.model_copy()

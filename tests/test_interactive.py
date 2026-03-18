@@ -1190,8 +1190,8 @@ class TestRendererEndToEnd(unittest.TestCase):
         assert len(renderer._data_lines) > 0, "Data buffer should have content"
         assert any("line 1" in l for l in renderer._data_lines)
 
-    def test_ai_message_stops_live_and_prints_summary(self):
-        """AI_MESSAGE event should stop Live and print the summary."""
+    def test_ai_message_keeps_live_active(self):
+        """AI_MESSAGE event should NOT stop Live — the data pane must stay visible."""
         console = self._make_console()
         renderer = AgenticProgressRenderer(console, tool_number_offset=0)
 
@@ -1213,7 +1213,7 @@ class TestRendererEndToEnd(unittest.TestCase):
             all_tool_calls, [],
         )
 
-        # AI message should stop Live and print summary
+        # AI message should NOT stop Live (models like Claude emit AI messages mid-stream)
         renderer.handle_event(
             self._make_event(StreamEvents.AI_MESSAGE, {
                 "content": "Here is my analysis.",
@@ -1221,7 +1221,12 @@ class TestRendererEndToEnd(unittest.TestCase):
             all_tool_calls, [],
         )
 
-        assert renderer._live is None, "Live display not stopped after AI_MESSAGE"
+        assert renderer._live is not None, "Live display should stay active after AI_MESSAGE"
+        assert len(renderer._ai_messages) == 1, "AI message should be stored"
+        assert renderer._ai_messages[0] == (None, "Here is my analysis.")
+
+        # flush() should print everything including the stored AI message
+        renderer.flush()
         assert renderer._summary_printed is True
 
         output = console.export_text()
@@ -1229,7 +1234,7 @@ class TestRendererEndToEnd(unittest.TestCase):
         assert "Here is my analysis." in output, f"AI message not printed:\n{output}"
 
     def test_multiple_tool_rounds_no_duplicate_summary(self):
-        """Multiple tool rounds followed by AI message should print summary once."""
+        """Multiple tool rounds followed by flush should print summary once."""
         console = self._make_console()
         renderer = AgenticProgressRenderer(console, tool_number_offset=0)
 
@@ -1252,13 +1257,13 @@ class TestRendererEndToEnd(unittest.TestCase):
                 all_tool_calls, [],
             )
 
-        # AI message
+        # AI message (stored, not printed immediately)
         renderer.handle_event(
             self._make_event(StreamEvents.AI_MESSAGE, {"content": "Done."}),
             all_tool_calls, [],
         )
 
-        # flush should not duplicate
+        # flush should print summary exactly once
         renderer.flush()
 
         output = console.export_text()
