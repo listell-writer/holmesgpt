@@ -92,6 +92,7 @@ RUN apt-get update \
     apt-transport-https \
     gnupg2 \
     tcpdump \
+    unzip \
     && apt-get purge -y --auto-remove \
     && apt-get install -y --no-install-recommends libexpat1 \
     && rm -rf /var/lib/apt/lists/*
@@ -103,6 +104,14 @@ RUN cat Release.key |  gpg --dearmor -o /etc/apt/keyrings/kubernetes-apt-keyring
     && apt-get update
 RUN apt-get install -y kubectl
 
+# Set up AWS CLI v2 (required for EKS kubeconfig exec-based authentication)
+RUN ARCH=$(dpkg --print-architecture) && \
+    if [ "$ARCH" = "amd64" ]; then AWS_ARCH="x86_64"; else AWS_ARCH="aarch64"; fi && \
+    curl -sSL "https://awscli.amazonaws.com/awscli-exe-linux-${AWS_ARCH}.zip" -o /tmp/awscliv2.zip && \
+    unzip -q /tmp/awscliv2.zip -d /tmp && \
+    /tmp/aws/install && \
+    rm -rf /tmp/awscliv2.zip /tmp/aws
+RUN aws --version
 
 # Microsoft ODBC for Azure SQL. Required for azure/sql toolset
 RUN VERSION_ID=$(grep VERSION_ID /etc/os-release | cut -d '"' -f 2 | cut -d '.' -f 1) && \

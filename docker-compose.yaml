@@ -10,12 +10,14 @@ services:
       - OPENAI_API_KEY=${OPENAI_API_KEY:-}
       # - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}
       # - GEMINI_API_KEY=${GEMINI_API_KEY:-}
-      # - AWS_ACCESS_KEY_ID=${AWS_ACCESS_KEY_ID:-}
-      # - AWS_SECRET_ACCESS_KEY=${AWS_SECRET_ACCESS_KEY:-}
-      # - AWS_DEFAULT_REGION=${AWS_DEFAULT_REGION:-}
       # - AZURE_API_KEY=${AZURE_API_KEY:-}
       # - AZURE_API_BASE=${AZURE_API_BASE:-}
       # - AZURE_API_VERSION=${AZURE_API_VERSION:-}
+      # AWS credentials for EKS kubeconfig authentication and Bedrock LLM access:
+      # - AWS_ACCESS_KEY_ID=${AWS_ACCESS_KEY_ID:-}
+      # - AWS_SECRET_ACCESS_KEY=${AWS_SECRET_ACCESS_KEY:-}
+      # - AWS_DEFAULT_REGION=${AWS_DEFAULT_REGION:-}
+      # - AWS_PROFILE=${AWS_PROFILE:-}
     volumes:
       - ~/.holmes:/root/.holmes
       - ~/.kube/config:/tmp/.kube/config:ro
@@ -28,3 +30,24 @@ services:
       timeout: 10s
       retries: 3
       start_period: 15s
+
+  # Optional: AWS MCP server for deep AWS investigation (CloudWatch, CloudTrail, etc.)
+  # Uncomment the section below to enable. See docs/data-sources/builtin-toolsets/aws.md
+  #
+  # aws-mcp-server:
+  #   image: us-central1-docker.pkg.dev/genuine-flight-317411/mcp/aws-api-mcp-server:2.0.1
+  #   environment:
+  #     - AWS_REGION=${AWS_DEFAULT_REGION:-us-east-1}
+  #     - READ_OPERATIONS_ONLY=true
+  #     - AWS_ACCESS_KEY_ID=${AWS_ACCESS_KEY_ID:-}
+  #     - AWS_SECRET_ACCESS_KEY=${AWS_SECRET_ACCESS_KEY:-}
+  #   volumes:
+  #     - ~/.aws:/root/.aws:ro
+  #   ports:
+  #     - "127.0.0.1:8000:8000"
+  #
+  # Then add the following to ~/.holmes/config.yaml to connect Holmes to the AWS MCP:
+  #   mcp_servers:
+  #     aws_api:
+  #       config:
+  #         url: http://aws-mcp-server:8000

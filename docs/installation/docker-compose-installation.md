@@ -47,6 +47,33 @@ Edit `docker-compose.yaml` to configure your setup:
 
     If your kubeconfig points to `127.0.0.1` or `localhost` (common with Docker Desktop, minikube, kind), the container automatically rewrites the Kubernetes API server address to `host.docker.internal` on startup so the cluster is reachable. Remote clusters (EKS, GKE, AKS, etc.) are not affected.
 
+### EKS Clusters
+
+For Amazon EKS clusters, the AWS CLI is included in the Docker image to support exec-based kubeconfig authentication (`aws eks get-token`). Uncomment the AWS environment variables in `docker-compose.yaml`:
+
+```yaml
+environment:
+  - AWS_ACCESS_KEY_ID=${AWS_ACCESS_KEY_ID:-}
+  - AWS_SECRET_ACCESS_KEY=${AWS_SECRET_ACCESS_KEY:-}
+  - AWS_DEFAULT_REGION=${AWS_DEFAULT_REGION:-}
+  - AWS_PROFILE=${AWS_PROFILE:-}
+```
+
+The `~/.aws` directory is already mounted read-only, so named profiles and SSO credentials work automatically.
+
+### AWS MCP Server (Optional)
+
+For deeper AWS investigation capabilities (CloudWatch logs, CloudTrail events, etc.), you can run the AWS MCP server alongside Holmes. Uncomment the `aws-mcp-server` service in `docker-compose.yaml` and add the MCP configuration to `~/.holmes/config.yaml`:
+
+```yaml
+mcp_servers:
+  aws_api:
+    config:
+      url: http://aws-mcp-server:8000
+```
+
+See [AWS Integration](../data-sources/builtin-toolsets/aws.md) for full setup details.
+
 ## API Reference
 
 See the [HTTP API Reference](../reference/http-api.md) for full documentation on available endpoints, request/response formats, and usage examples.
