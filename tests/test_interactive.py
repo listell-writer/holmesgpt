@@ -931,7 +931,7 @@ class TestRendererEndToEnd(unittest.TestCase):
     """
 
     def _make_console(self):
-        return Console(width=100, record=True, force_terminal=True, color_system=None)
+        return Console(width=100, record=True, force_terminal=True, color_system=None, file=StringIO())
 
     def _make_event(self, event_type, data=None):
         return StreamMessage(event=event_type, data=data or {})
@@ -1005,7 +1005,7 @@ class TestRendererEndToEnd(unittest.TestCase):
 
     def test_no_data_pane_before_tool_output(self):
         """Data pane should not appear until tools produce output."""
-        console = Console(width=100, force_terminal=True, color_system=None)
+        console = Console(width=100, force_terminal=True, color_system=None, file=StringIO())
         renderer = AgenticProgressRenderer(console, tool_number_offset=0)
         renderer._thinking = True
         renderer._start_time = time.time()
@@ -1040,7 +1040,7 @@ class TestRendererEndToEnd(unittest.TestCase):
 
     def test_data_pane_fixed_width(self):
         """Data pane should take 50% of terminal width regardless of content."""
-        console = Console(width=100, force_terminal=True, color_system=None)
+        console = Console(width=100, force_terminal=True, color_system=None, file=StringIO())
         renderer = AgenticProgressRenderer(console, tool_number_offset=0)
         renderer._thinking = True
         renderer._start_time = time.time()
@@ -1063,7 +1063,7 @@ class TestRendererEndToEnd(unittest.TestCase):
 
     def test_error_tool_shows_token_count(self):
         """Error tools with output should show both token count and (error)."""
-        console = Console(width=120, force_terminal=True, color_system=None)
+        console = Console(width=120, force_terminal=True, color_system=None, file=StringIO())
         renderer = AgenticProgressRenderer(console, tool_number_offset=0)
         all_tool_calls = []
 
@@ -1100,7 +1100,7 @@ class TestRendererEndToEnd(unittest.TestCase):
 
     def test_empty_output_shows_red_marker(self):
         """Empty tool output should show a visible red marker, not dim text."""
-        console = Console(width=100, force_terminal=True, color_system=None)
+        console = Console(width=100, force_terminal=True, color_system=None, file=StringIO())
         renderer = AgenticProgressRenderer(console, tool_number_offset=0)
         renderer._thinking = True
         renderer._start_time = time.time()
@@ -1307,7 +1307,7 @@ class TestRendererEndToEnd(unittest.TestCase):
 
     def test_approval_pending_shows_paused_status(self):
         """When approval is pending, status line should show static paused text."""
-        console = Console(width=100, force_terminal=True, color_system=None)
+        console = Console(width=100, force_terminal=True, color_system=None, file=StringIO())
         renderer = AgenticProgressRenderer(console, tool_number_offset=0)
         renderer._thinking = True
         renderer._start_time = time.time()
@@ -1328,7 +1328,7 @@ class TestRendererEndToEnd(unittest.TestCase):
 
     def test_approval_pending_replaces_data_pane(self):
         """When approval is pending, data pane should show 'Waiting for approval'."""
-        console = Console(width=100, force_terminal=True, color_system=None)
+        console = Console(width=100, force_terminal=True, color_system=None, file=StringIO())
         renderer = AgenticProgressRenderer(console, tool_number_offset=0)
         renderer._thinking = True
         renderer._start_time = time.time()
@@ -1347,7 +1347,7 @@ class TestRendererEndToEnd(unittest.TestCase):
 
     def test_approval_pending_dims_task_panel(self):
         """When approval is pending, tasks should all be dim (no bold yellow)."""
-        console = Console(width=100, force_terminal=True, color_system=None)
+        console = Console(width=100, force_terminal=True, color_system=None, file=StringIO())
         renderer = AgenticProgressRenderer(console, tool_number_offset=0)
         renderer._thinking = True
         renderer._start_time = time.time()
@@ -1365,7 +1365,7 @@ class TestRendererEndToEnd(unittest.TestCase):
 
     def test_approval_clears_on_new_tool(self):
         """APPROVAL_REQUIRED then START_TOOL should clear the pending state."""
-        console = Console(width=100, force_terminal=True, color_system=None)
+        console = Console(width=100, force_terminal=True, color_system=None, file=StringIO())
         renderer = AgenticProgressRenderer(console, tool_number_offset=0)
         all_tool_calls = []
 
@@ -1399,7 +1399,7 @@ class TestRendererEndToEnd(unittest.TestCase):
 
     def test_approval_shows_command_description(self):
         """When approval is pending with descriptions, the command should be shown."""
-        console = Console(width=100, force_terminal=True, color_system=None)
+        console = Console(width=100, force_terminal=True, color_system=None, file=StringIO())
         renderer = AgenticProgressRenderer(console, tool_number_offset=0)
         renderer._thinking = True
         renderer._start_time = time.time()
@@ -1415,7 +1415,7 @@ class TestRendererEndToEnd(unittest.TestCase):
 
     def test_approval_event_stores_descriptions(self):
         """APPROVAL_REQUIRED event should store descriptions from pending_approvals."""
-        console = Console(width=100, force_terminal=True, color_system=None)
+        console = Console(width=100, force_terminal=True, color_system=None, file=StringIO())
         renderer = AgenticProgressRenderer(console, tool_number_offset=0)
         renderer._thinking = True
         renderer._start_time = time.time()
@@ -1431,7 +1431,7 @@ class TestRendererEndToEnd(unittest.TestCase):
 
     def test_approval_pending_hides_data_stats(self):
         """When approval is pending, data pane title should not show stats."""
-        console = Console(width=100, force_terminal=True, color_system=None)
+        console = Console(width=100, force_terminal=True, color_system=None, file=StringIO())
         renderer = AgenticProgressRenderer(console, tool_number_offset=0)
         renderer._thinking = True
         renderer._start_time = time.time()
@@ -1446,7 +1446,7 @@ class TestRendererEndToEnd(unittest.TestCase):
 
     def _render_to_text(self, renderer):
         """Render the display to plain text using a recording console."""
-        capture = Console(width=100, record=True, force_terminal=True, color_system=None)
+        capture = Console(width=100, record=True, force_terminal=True, color_system=None, file=StringIO())
         display = renderer._build_display()
         capture.print(display)
         return capture.export_text()
@@ -1523,7 +1523,7 @@ class TestLiveDisplayNoGhostFrames(unittest.TestCase):
         """AgenticProgressRenderer.start() should use the _FixedLive subclass."""
         from rich.live import Live
 
-        console = Console(width=120, force_terminal=True, color_system=None)
+        console = Console(width=120, force_terminal=True, color_system=None, file=StringIO())
         renderer = AgenticProgressRenderer(console, tool_number_offset=0)
         renderer.start()
         try:

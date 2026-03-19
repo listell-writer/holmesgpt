@@ -32,13 +32,6 @@ class ToolCallResult(BaseModel):
         result_dump = self.result.model_dump()
         result_dump["data"] = self.result.get_stringified_data()
 
-        if self.tool_name == "TodoWrite":
-            logging.debug(
-                f"[TodoDebug] to_client_dict: result.params={self.result.params!r} "
-                f"result_dump_params_type={type(result_dump.get('params')).__name__} "
-                f"result_dump_params={result_dump.get('params')!r}"
-            )
-
         d = {
             "tool_call_id": self.tool_call_id,
             "tool_name": self.tool_name,

@@ -1046,21 +1046,9 @@ class AgenticProgressRenderer:
                 if tool_name == _TODO_WRITE_TOOL_NAME:
                     params = result_data.get("params") or {}
                     todos = params.get("todos")
-                    logging.debug(
-                        f"[TodoDebug] Renderer: tool_name={tool_name} "
-                        f"result_data_keys={list(result_data.keys())} "
-                        f"params_keys={list(params.keys()) if params else 'empty'} "
-                        f"todos_type={type(todos).__name__} "
-                        f"todos={todos!r}"
-                    )
                     if isinstance(todos, list):
                         extra = todos
                         self._live_tasks = todos
-                    else:
-                        logging.debug(
-                            f"[TodoDebug] Renderer: SKIPPED - todos is not a list! "
-                            f"Full result_data={result_data!r}"
-                        )
 
                 # Ingest raw output into scrolling data buffer (skip TodoWrite)
                 if tool_name != _TODO_WRITE_TOOL_NAME:

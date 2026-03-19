@@ -1,8 +1,6 @@
 import logging
-import os
 import warnings
 from enum import Enum
-from pathlib import Path
 from typing import List, Optional
 
 from rich.console import Console
@@ -52,43 +50,53 @@ def init_logging(verbose_flags: Optional[List[bool]] = None, log_costs: bool = F
         cost_logger.setLevel(logging.DEBUG)
 
     if verbosity == Verbosity.VERY_VERBOSE:
-        console_level = logging.DEBUG
+        logging.basicConfig(
+            force=True,
+            level=logging.DEBUG,
+            format="%(message)s",
+            handlers=[
+                RichHandler(
+                    show_level=False,
+                    markup=True,
+                    show_time=False,
+                    show_path=False,
+                    console=Console(width=None),
+                )
+            ],
+        )
     elif verbosity == Verbosity.VERBOSE:
-        console_level = logging.DEBUG
-    else:
-        console_level = logging.INFO
-
-    console_handler = RichHandler(
-        show_level=False,
-        markup=True,
-        show_time=False,
-        show_path=False,
-        console=Console(width=None),
-        level=console_level,
-    )
-
-    logging.basicConfig(
-        force=True,
-        level=console_level,
-        format="%(message)s",
-        handlers=[console_handler],
-    )
-
-    if verbosity != Verbosity.VERY_VERBOSE:
-        suppress_noisy_logs()
-
-    # Always add a debug file handler to ~/.holmes/debug.log for diagnostics
-    debug_log_path = Path.home() / ".holmes" / "debug.log"
-    debug_log_path.parent.mkdir(parents=True, exist_ok=True)
-    file_handler = logging.FileHandler(str(debug_log_path), mode="w", encoding="utf-8")
-    file_handler.setLevel(logging.DEBUG)
-    file_handler.setFormatter(
-        logging.Formatter("%(asctime)s %(name)s %(levelname)s %(message)s")
-    )
-    logging.getLogger().addHandler(file_handler)
-    # Ensure root logger level allows DEBUG through to the file handler
-    if logging.getLogger().level > logging.DEBUG:
+        logging.basicConfig(
+            force=True,
+            level=logging.INFO,
+            format="%(message)s",
+            handlers=[
+                RichHandler(
+                    show_level=False,
+                    markup=True,
+                    show_time=False,
+                    show_path=False,
+                    console=Console(width=None),
+                )
+            ],
+        )
         logging.getLogger().setLevel(logging.DEBUG)
+        suppress_noisy_logs()
+    else:
+        logging.basicConfig(
+            force=True,
+            level=logging.INFO,
+            format="%(message)s",
+            handlers=[
+                RichHandler(
+                    show_level=False,
+                    markup=True,
+                    show_time=False,
+                    show_path=False,
+                    console=Console(width=None),
+                )
+            ],
+        )
+        suppress_noisy_logs()
 
     logging.debug(f"verbosity is {verbosity}")
 
