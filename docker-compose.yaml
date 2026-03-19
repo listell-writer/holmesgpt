@@ -23,7 +23,8 @@ services:
       - ~/.kube/config:/tmp/.kube/config:ro
       - ~/.aws:/root/.aws:ro
       - ~/.config/gcloud:/root/.config/gcloud:ro
-    entrypoint: ["/bin/sh", "-c", "mkdir -p /root/.kube && cp /tmp/.kube/config /root/.kube/config && sed -i 's|server: https://127\\.0\\.0\\.1|server: https://host.docker.internal|g; s|server: https://localhost|server: https://host.docker.internal|g' /root/.kube/config && exec python -u server.py"]
+      - ./docker-compose-entrypoint.sh:/app/docker-compose-entrypoint.sh:ro
+    entrypoint: ["/bin/sh", "/app/docker-compose-entrypoint.sh"]
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:5050/healthz"]
       interval: 30s

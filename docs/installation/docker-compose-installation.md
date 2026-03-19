@@ -49,7 +49,7 @@ Edit `docker-compose.yaml` to configure your setup:
 
 ### EKS Clusters
 
-For Amazon EKS clusters, the AWS CLI is included in the Docker image to support exec-based kubeconfig authentication (`aws eks get-token`). Uncomment the AWS environment variables in `docker-compose.yaml`:
+For Amazon EKS clusters, the Docker Compose entrypoint automatically detects exec-based kubeconfig authentication (`aws eks get-token`) and installs the AWS CLI at startup. Uncomment the AWS environment variables in `docker-compose.yaml`:
 
 ```yaml
 environment:
