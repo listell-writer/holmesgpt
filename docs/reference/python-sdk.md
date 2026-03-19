@@ -287,8 +287,28 @@ Main configuration class (`holmes.config.Config`).
 |--------|---------|-------------|
 | `Config.load_from_file(config_file, **kwargs)` | `Config` | Load configuration from a YAML file. |
 | `Config.load_from_env()` | `Config` | Load configuration from environment variables. |
-| `create_toolcalling_llm(toolset_tags, ...)` | `ToolCallingLLM` | Create an AI instance with explicit toolset filtering, caching, and model controls. |
+| `create_toolcalling_llm(...)` | `ToolCallingLLM` | Create an AI instance. See parameters below. |
+| `create_tool_executor(...)` | `ToolExecutor` | Create a tool executor without an LLM. Same toolset parameters as `create_toolcalling_llm`. |
 | `get_runbook_catalog()` | `RunbookCatalog` or `None` | Get the loaded runbook catalog. |
+
+### `create_toolcalling_llm()` / `create_tool_executor()`
+
+Both methods accept the same toolset parameters. `create_toolcalling_llm` additionally accepts `model`, `tracer`, and `tool_results_dir`.
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `toolset_tags` | `list[ToolsetTag]` | `[CORE]` | Which toolsets to load, filtered by tag. Each toolset declares tags like `CORE`, `CLI`, or `CLUSTER`. Only toolsets with at least one matching tag are included. |
+| `enable_all_toolsets` | `bool` | `True` | When `True`, auto-enable every toolset that doesn't require unconfigured settings. When `False`, only toolsets explicitly enabled in config are loaded. |
+| `use_status_cache` | `bool` | `True` | When `True`, toolset prerequisite results (health checks, API pings) are read from/written to a local cache file (`~/.holmes/toolset_status.json`). On repeat runs, only config validity is re-checked; full prerequisites are deferred until first tool use. When `False`, all prerequisites are checked eagerly every time with no disk caching. |
+| `refresh_status` | `bool` | `False` | Force re-run all prerequisite checks and overwrite the cache file. Only has effect when `use_status_cache=True`. |
+| `cache` | `bool` | `False` | When `True`, the created executor is cached in memory on the `Config` instance. Subsequent calls return the cached executor without reloading toolsets. |
+| `model` | `str` | *None* | Model override for this LLM instance. |
+
+**`ToolsetTag` values** (`holmes.core.tools.ToolsetTag`):
+
+- `ToolsetTag.CORE` — Foundational toolsets (Kubernetes, etc.)
+- `ToolsetTag.CLI` — Tools for interactive CLI use (filesystem, local commands)
+- `ToolsetTag.CLUSTER` — Tools for server/cluster deployments (cluster-wide monitoring)
 
 ### `ToolCallingLLM`
 
