@@ -43,7 +43,7 @@ class TestToolsetConfig:
 
     def test_deprecated_field_name_migrated(self, caplog):
         """Test that deprecated field names are migrated to new names."""
-        with caplog.at_level(logging.WARNING):
+        with caplog.at_level(logging.WARNING, logger="holmes.utils.pydantic_utils"):
             config = SampleConfig(old_field="migrated_value")
 
         assert config.new_field == "migrated_value"
@@ -51,7 +51,7 @@ class TestToolsetConfig:
 
     def test_multiple_deprecated_fields(self, caplog):
         """Test that multiple deprecated fields are migrated."""
-        with caplog.at_level(logging.WARNING):
+        with caplog.at_level(logging.WARNING, logger="holmes.utils.pydantic_utils"):
             config = SampleConfig(old_field="value1", another_old=42)
 
         assert config.new_field == "value1"
@@ -61,7 +61,7 @@ class TestToolsetConfig:
 
     def test_new_field_takes_precedence(self, caplog):
         """Test that new field takes precedence over deprecated field."""
-        with caplog.at_level(logging.WARNING):
+        with caplog.at_level(logging.WARNING, logger="holmes.utils.pydantic_utils"):
             config = SampleConfig(old_field="old_value", new_field="new_value")
 
         # New field should take precedence
@@ -69,7 +69,7 @@ class TestToolsetConfig:
 
     def test_removed_field_logged(self, caplog):
         """Test that removed fields are logged but not cause errors."""
-        with caplog.at_level(logging.WARNING):
+        with caplog.at_level(logging.WARNING, logger="holmes.utils.pydantic_utils"):
             config = SampleConfig(removed_field="some_value")
 
         # Config should still be valid
@@ -78,7 +78,7 @@ class TestToolsetConfig:
 
     def test_no_warning_for_new_fields(self, caplog):
         """Test that using new field names doesn't trigger warnings."""
-        with caplog.at_level(logging.WARNING):
+        with caplog.at_level(logging.WARNING, logger="holmes.utils.pydantic_utils"):
             _ = SampleConfig(new_field="test", another_new=5)
 
         assert "deprecated" not in caplog.text.lower()
@@ -99,7 +99,7 @@ class TestPrometheusConfigBackwardCompatibility:
 
     def test_deprecated_prometheus_fields(self, caplog):
         """Test that deprecated Prometheus config fields are migrated."""
-        with caplog.at_level(logging.WARNING):
+        with caplog.at_level(logging.WARNING, logger="holmes.utils.pydantic_utils"):
             config = PrometheusConfig(
                 prometheus_url="http://prometheus:9090",
                 headers={"Authorization": "Bearer test"},
@@ -123,7 +123,7 @@ class TestPrometheusConfigBackwardCompatibility:
         self, caplog: LogCaptureFixture
     ) -> None:
         """Test that headers is properly migrated to additional_headers."""
-        with caplog.at_level(logging.WARNING):
+        with caplog.at_level(logging.WARNING, logger="holmes.utils.pydantic_utils"):
             # Create config using deprecated headers field
             old_config = PrometheusConfig(
                 prometheus_url="http://prometheus:9090",
@@ -143,7 +143,7 @@ class TestPrometheusConfigBackwardCompatibility:
 
     def test_new_prometheus_fields_no_warning(self, caplog):
         """Test that new Prometheus field names don't trigger warnings."""
-        with caplog.at_level(logging.WARNING):
+        with caplog.at_level(logging.WARNING, logger="holmes.utils.pydantic_utils"):
             config = PrometheusConfig(
                 prometheus_url="http://prometheus:9090",
                 query_timeout_seconds_default=30,
@@ -162,7 +162,7 @@ class TestDatadogConfigBackwardCompatibility:
 
     def test_deprecated_datadog_fields(self, caplog: Any) -> None:
         """Test that deprecated Datadog config fields are migrated."""
-        with caplog.at_level(logging.WARNING):
+        with caplog.at_level(logging.WARNING, logger="holmes.utils.pydantic_utils"):
             config = DatadogBaseConfig(
                 dd_api_key="test-api-key",
                 dd_app_key="test-app-key",
@@ -181,7 +181,7 @@ class TestDatadogConfigBackwardCompatibility:
 
     def test_new_datadog_fields_no_warning(self, caplog: Any) -> None:
         """Test that new Datadog field names don't trigger warnings."""
-        with caplog.at_level(logging.WARNING):
+        with caplog.at_level(logging.WARNING, logger="holmes.utils.pydantic_utils"):
             config = DatadogBaseConfig(
                 api_key="test-api-key",
                 app_key="test-app-key",
@@ -196,7 +196,7 @@ class TestDatadogConfigBackwardCompatibility:
 
     def test_old_and_new_datadog_fields_new_takes_precedence(self, caplog: Any) -> None:
         """Test that new Datadog field names take precedence over deprecated ones."""
-        with caplog.at_level(logging.WARNING):
+        with caplog.at_level(logging.WARNING, logger="holmes.utils.pydantic_utils"):
             config = DatadogBaseConfig(
                 dd_api_key="old-api-key",
                 api_key="new-api-key",
@@ -244,7 +244,7 @@ class TestElasticsearchConfigBackwardCompatibility:
 
     def test_deprecated_elasticsearch_fields(self, caplog):
         """Test that deprecated Elasticsearch config fields are migrated."""
-        with caplog.at_level(logging.WARNING):
+        with caplog.at_level(logging.WARNING, logger="holmes.utils.pydantic_utils"):
             config = ElasticsearchConfig(
                 url="https://elasticsearch:9200",
                 timeout=30,
@@ -257,7 +257,7 @@ class TestElasticsearchConfigBackwardCompatibility:
 
     def test_new_elasticsearch_fields_no_warning(self, caplog):
         """Test that new Elasticsearch field names don't trigger warnings."""
-        with caplog.at_level(logging.WARNING):
+        with caplog.at_level(logging.WARNING, logger="holmes.utils.pydantic_utils"):
             config = ElasticsearchConfig(
                 api_url="https://elasticsearch:9200",
                 timeout_seconds=15,
@@ -297,7 +297,7 @@ class TestKafkaConfigBackwardCompatibility:
 
     def test_deprecated_kafka_cluster_fields(self, caplog):
         """Test that deprecated KafkaClusterConfig fields are migrated."""
-        with caplog.at_level(logging.WARNING):
+        with caplog.at_level(logging.WARNING, logger="holmes.utils.pydantic_utils"):
             config = KafkaClusterConfig(
                 name="test-cluster",
                 kafka_broker="broker1:9092,broker2:9092",
@@ -323,7 +323,7 @@ class TestKafkaConfigBackwardCompatibility:
 
     def test_new_kafka_cluster_fields_no_warning(self, caplog):
         """Test that new KafkaClusterConfig field names don't trigger warnings."""
-        with caplog.at_level(logging.WARNING):
+        with caplog.at_level(logging.WARNING, logger="holmes.utils.pydantic_utils"):
             config = KafkaClusterConfig(
                 name="test-cluster",
                 broker="broker1:9092",
@@ -344,7 +344,7 @@ class TestKafkaConfigBackwardCompatibility:
 
     def test_deprecated_kafka_config_clusters_field(self, caplog):
         """Test that deprecated KafkaConfig.kafka_clusters field is migrated."""
-        with caplog.at_level(logging.WARNING):
+        with caplog.at_level(logging.WARNING, logger="holmes.utils.pydantic_utils"):
             config = KafkaConfig(
                 kafka_clusters=[
                     {"name": "cluster1", "broker": "broker1:9092"},
@@ -360,7 +360,7 @@ class TestKafkaConfigBackwardCompatibility:
 
     def test_new_kafka_config_clusters_field_no_warning(self, caplog):
         """Test that new KafkaConfig.clusters field doesn't trigger warnings."""
-        with caplog.at_level(logging.WARNING):
+        with caplog.at_level(logging.WARNING, logger="holmes.utils.pydantic_utils"):
             config = KafkaConfig(
                 clusters=[
                     {"name": "cluster1", "broker": "broker1:9092"},
@@ -373,7 +373,7 @@ class TestKafkaConfigBackwardCompatibility:
 
     def test_mixed_old_and_new_field_names_kafka(self, caplog):
         """Test that old KafkaConfig fields with old KafkaClusterConfig fields work."""
-        with caplog.at_level(logging.WARNING):
+        with caplog.at_level(logging.WARNING, logger="holmes.utils.pydantic_utils"):
             # Use old field names throughout
             config = KafkaConfig(
                 kafka_clusters=[
@@ -450,7 +450,7 @@ class TestRabbitMQConfigBackwardCompatibility:
 
     def test_deprecated_rabbitmq_fields(self, caplog):
         """Test that deprecated RabbitMQ config fields are migrated."""
-        with caplog.at_level(logging.WARNING):
+        with caplog.at_level(logging.WARNING, logger="holmes.utils.pydantic_utils"):
             # Use old field names (deprecated)
             old_config = RabbitMQClusterConfig(
                 management_url="http://rabbitmq:15672",
@@ -465,7 +465,7 @@ class TestRabbitMQConfigBackwardCompatibility:
 
     def test_new_rabbitmq_fields_no_warning(self, caplog):
         """Test that new RabbitMQ field names don't trigger warnings."""
-        with caplog.at_level(logging.WARNING):
+        with caplog.at_level(logging.WARNING, logger="holmes.utils.pydantic_utils"):
             # Use new field names (current)
             new_config = RabbitMQClusterConfig(
                 api_url="http://rabbitmq:15672",
@@ -478,7 +478,7 @@ class TestRabbitMQConfigBackwardCompatibility:
 
     def test_old_and_new_configs_produce_same_result(self, caplog):
         """Test that configs created with old and new field names produce identical results."""
-        with caplog.at_level(logging.WARNING):
+        with caplog.at_level(logging.WARNING, logger="holmes.utils.pydantic_utils"):
             # Create config using old field names
             old_config = RabbitMQClusterConfig(
                 id="test-cluster",
@@ -509,7 +509,7 @@ class TestRabbitMQConfigBackwardCompatibility:
 
     def test_new_field_takes_precedence_over_deprecated(self, caplog):
         """Test that new field takes precedence if both old and new are provided."""
-        with caplog.at_level(logging.WARNING):
+        with caplog.at_level(logging.WARNING, logger="holmes.utils.pydantic_utils"):
             config = RabbitMQClusterConfig(
                 management_url="http://old-url:15672",
                 api_url="http://new-url:15672",
@@ -527,7 +527,7 @@ class TestServiceNowConfigBackwardCompatibility:
 
     def test_deprecated_servicenow_fields(self, caplog):
         """Test that deprecated ServiceNow config fields are migrated."""
-        with caplog.at_level(logging.WARNING):
+        with caplog.at_level(logging.WARNING, logger="holmes.utils.pydantic_utils"):
             old_config = ServiceNowTablesConfig(
                 api_key="now_test123",
                 instance_url="https://test.service-now.com",
@@ -539,7 +539,7 @@ class TestServiceNowConfigBackwardCompatibility:
 
     def test_new_servicenow_fields_no_warning(self, caplog):
         """Test that new ServiceNow field names don't trigger warnings."""
-        with caplog.at_level(logging.WARNING):
+        with caplog.at_level(logging.WARNING, logger="holmes.utils.pydantic_utils"):
             new_config = ServiceNowTablesConfig(
                 api_key="now_test123",
                 api_url="https://test.service-now.com",
@@ -551,7 +551,7 @@ class TestServiceNowConfigBackwardCompatibility:
     def test_deprecated_and_new_servicenow_configs_equivalent(self, caplog):
         """Test that configs created with old and new fields are equivalent."""
         # Create config using deprecated field name
-        with caplog.at_level(logging.WARNING):
+        with caplog.at_level(logging.WARNING, logger="holmes.utils.pydantic_utils"):
             old_config = ServiceNowTablesConfig(
                 api_key="now_test123",
                 instance_url="https://test.service-now.com",
@@ -561,7 +561,7 @@ class TestServiceNowConfigBackwardCompatibility:
         caplog.clear()
 
         # Create config using new field name
-        with caplog.at_level(logging.WARNING):
+        with caplog.at_level(logging.WARNING, logger="holmes.utils.pydantic_utils"):
             new_config = ServiceNowTablesConfig(
                 api_key="now_test123",
                 api_url="https://test.service-now.com",
@@ -588,7 +588,7 @@ class TestNewrelicConfigBackwardCompatibility:
 
     def test_deprecated_newrelic_fields(self, caplog):
         """Test that deprecated New Relic config fields are migrated."""
-        with caplog.at_level(logging.WARNING):
+        with caplog.at_level(logging.WARNING, logger="holmes.utils.pydantic_utils"):
             config = NewrelicConfig(
                 nr_api_key="NRAK-TESTKEY123",
                 nr_account_id="1234567",
@@ -601,7 +601,7 @@ class TestNewrelicConfigBackwardCompatibility:
 
     def test_new_newrelic_fields_no_warning(self, caplog):
         """Test that new New Relic field names don't trigger warnings."""
-        with caplog.at_level(logging.WARNING):
+        with caplog.at_level(logging.WARNING, logger="holmes.utils.pydantic_utils"):
             config = NewrelicConfig(
                 api_key="NRAK-TESTKEY123",
                 account_id="1234567",
@@ -614,7 +614,7 @@ class TestNewrelicConfigBackwardCompatibility:
     def test_old_and_new_fields_mixed(self, caplog):
         """Test that deprecated and new configs produce equivalent results."""
         # Create config with old field names
-        with caplog.at_level(logging.WARNING):
+        with caplog.at_level(logging.WARNING, logger="holmes.utils.pydantic_utils"):
             old_config = NewrelicConfig(
                 nr_api_key="NRAK-TESTKEY123",
                 nr_account_id="1234567",

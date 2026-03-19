@@ -1,6 +1,8 @@
 import logging
 import sys
 from pathlib import Path
+
+logger = logging.getLogger(__name__)
 from typing import (
     Annotated,
     Any,
@@ -89,7 +91,7 @@ class ToolsetConfig(BaseModel):
                     deprecated_used.append(f"{old_name} (removed)")
 
         if deprecated_used:
-            logging.warning(
+            logger.warning(
                 f"{cls.__name__} uses deprecated field names. "
                 f"Please update: {', '.join(deprecated_used)}"
             )
