@@ -1069,9 +1069,9 @@ class AgenticProgressRenderer:
                     self._ingest_output(tool_name, output_str, description=description)
 
                 # Remove from in-flight
-                self._in_flight.pop(tool_number, None)
-                # Also try to match by order if number didn't match
-                if not self._in_flight.get(tool_number):
+                removed = self._in_flight.pop(tool_number, None)
+                # Also try to match by order only if number didn't match
+                if removed is None:
                     for k in sorted(self._in_flight.keys()):
                         self._in_flight.pop(k, None)
                         break
@@ -2217,7 +2217,7 @@ def _wait_for_completion_or_escape(
                             # CSI sequence — read until final alpha byte
                             while True:
                                 ch3 = sys.stdin.read(1)
-                                if ch3.isalpha() or ch3 == "~":
+                                if not ch3 or ch3.isalpha() or ch3 == "~":
                                     break
                         elif ch2 == "O":
                             sys.stdin.read(1)  # SS3: one more byte
@@ -2579,6 +2579,7 @@ def run_interactive_loop(
                     _cancel_event=cancel_event,
                     _has_approval=approval_callback is not None,
                     _tool_number_offset=tool_number_offset,
+                    _iteration_offset=0,
                 ) -> None:
                     try:
                         # Replicate the approval loop from call()
@@ -2591,19 +2592,29 @@ def run_interactive_loop(
                                 trace_span=_trace_span,
                                 cancel_event=_cancel_event,
                                 tool_number_offset=_tool_number_offset,
+                                iteration_offset=_iteration_offset,
                             )
                             tool_decisions = None
+                            last_event = None
                             for event in stream:
+                                last_event = event
                                 _event_queue.put(event)
                                 if event.event == StreamEvents.TOOL_RESULT:
                                     _tool_number_offset += 1
                                 if event.event in (StreamEvents.ANSWER_END, StreamEvents.APPROVAL_REQUIRED):
                                     break
 
+                            if last_event is None:
+                                raise Exception("Stream ended without yielding any events")
+
                             # Check if we got an approval-required event
-                            if event.event == StreamEvents.APPROVAL_REQUIRED:
-                                td = event.data
+                            if last_event.event == StreamEvents.APPROVAL_REQUIRED:
+                                td = last_event.data
                                 _messages[:] = td["messages"]
+                                # call_stream returns absolute iteration count;
+                                # carry it forward so the next call_stream
+                                # enforces the global max_steps limit.
+                                _iteration_offset = td.get("num_llm_calls", _iteration_offset)
                                 # Hand off to main thread for interactive prompt
                                 approval_data[0] = td["pending_approvals"]
                                 approval_done_event.clear()
@@ -2665,9 +2676,13 @@ def run_interactive_loop(
 
                     if event.event == StreamEvents.ANSWER_END:
                         terminal_data = event.data
-                        total_num_llm_calls += terminal_data.get("num_llm_calls", 0)
+                        total_num_llm_calls = terminal_data.get("num_llm_calls", 0)
                         accumulated_stats += RequestStats(**terminal_data.get("costs", {}))
                     elif event.event == StreamEvents.APPROVAL_REQUIRED:
+                        # Accumulate stats from the pre-approval segment
+                        # (num_llm_calls is absolute, so assign not accumulate)
+                        total_num_llm_calls = event.data.get("num_llm_calls", 0)
+                        accumulated_stats += RequestStats(**event.data.get("costs", {}))
                         # Wait for bg thread to signal it's ready
                         approval_pending_event.wait(timeout=5.0)
                         approval_pending_event.clear()
