@@ -16,6 +16,7 @@ from mcp.types import Tool as MCP_Tool
 from pydantic import AnyUrl, Field, model_validator
 
 from holmes.common.env_vars import SSE_READ_TIMEOUT
+from holmes.core.config import config_path_dir
 from holmes.core.tools import (
     CallablePrerequisite,
     StructuredToolResult,
@@ -176,8 +177,6 @@ def _get_mcp_log_file(server_name: str) -> TextIO:
     Redirects MCP subprocess stderr to ~/.holmes/logs/mcp/<server_name>.log
     so it doesn't pollute the CLI output.
     """
-    from holmes.core.config import config_path_dir
-
     log_dir = os.path.join(config_path_dir, "logs", "mcp")
     os.makedirs(log_dir, exist_ok=True)
     log_path = os.path.join(log_dir, f"{server_name}.log")
@@ -199,13 +198,16 @@ async def get_initialized_mcp_session(
             env=toolset._mcp_config.env,
         )
         errlog = _get_mcp_log_file(toolset.name)
-        async with stdio_client(server_params, errlog=errlog) as (
-            read_stream,
-            write_stream,
-        ):
-            async with ClientSession(read_stream, write_stream) as session:
-                _ = await session.initialize()
-                yield session
+        try:
+            async with stdio_client(server_params, errlog=errlog) as (
+                read_stream,
+                write_stream,
+            ):
+                async with ClientSession(read_stream, write_stream) as session:
+                    _ = await session.initialize()
+                    yield session
+        finally:
+            errlog.close()
     elif toolset._mcp_config.mode == MCPMode.SSE:
         url = str(toolset._mcp_config.url)
         httpx_factory = create_mcp_http_client_factory(toolset._mcp_config.verify_ssl)

@@ -1,4 +1,5 @@
 import logging
+import math
 import os
 import queue
 import re
@@ -9,6 +10,7 @@ import threading
 import time
 from collections import defaultdict
 from enum import Enum
+from io import StringIO
 from pathlib import Path
 from typing import Any, DefaultDict, Dict, List, Optional
 
@@ -37,10 +39,13 @@ from prompt_toolkit.shortcuts.prompt import CompleteStyle
 from prompt_toolkit.styles import Style
 from prompt_toolkit.widgets import TextArea
 from pygments.lexers import guess_lexer
-from rich.console import Console
+from rich.console import Console, Group
+from rich.control import Control
+from rich.live import Live
 from rich.markdown import Markdown, Panel
 from rich.markup import escape
 from rich.table import Table
+from rich.text import Text
 
 from holmes.config import Config
 from holmes.core.config import config_path_dir
@@ -132,8 +137,6 @@ def _make_live(renderable: Any, **kwargs: Any) -> Any:
     stays on the last content line and ``height - 1`` cursor-ups correctly
     reaches line 1.
     """
-    from rich.control import Control
-    from rich.live import Live
 
     class _FixedLive(Live):
         def refresh(self) -> None:
@@ -172,7 +175,7 @@ class InitProgressRenderer:
 
     def _build_display(self) -> "Text":
         """Build the Rich renderable for the current state."""
-        from rich.text import Text
+
 
         now = time.time()
         elapsed = now - self._start_time
@@ -351,8 +354,6 @@ def _size_bar(output_len: int, max_width: int = 12) -> str:
     Uses a log scale so small results still get a visible bar.
     Returns a string like '▰▰▰▰ 39K' — no empty blocks.
     """
-    import math
-
     if not output_len or output_len <= 0:
         return ""
     # log scale: 100 tokens → 1 block, 100K → max blocks
@@ -364,8 +365,6 @@ def _size_bar(output_len: int, max_width: int = 12) -> str:
 
 def _build_task_panel(tasks: list) -> Panel:
     """Build a Rich Panel showing the task list with checkbox-style icons."""
-    from rich.text import Text
-
     completed = sum(1 for t in tasks if t.get("status") == "completed")
     total = len(tasks)
 
@@ -530,7 +529,7 @@ class AgenticProgressRenderer:
 
     def _build_data_pane(self) -> "Text":
         """Build the scrolling data feed pane."""
-        from rich.text import Text
+
 
         pane = Text(no_wrap=True, overflow="ellipsis")
 
@@ -624,7 +623,7 @@ class AgenticProgressRenderer:
 
     def _build_left_pane(self, show_analyzing: bool = False) -> Any:
         """Build the left-side status pane with separate tasks and tools sections."""
-        from rich.text import Text
+
 
         now = time.time()
         sections = []
@@ -753,12 +752,11 @@ class AgenticProgressRenderer:
         if not sections:
             return Text("  Waiting…", style="dim italic")
 
-        from rich.console import Group
         return Group(*sections)
 
     def _build_approval_data_pane(self) -> Any:
         """Build a data pane showing the command awaiting approval."""
-        from rich.text import Text
+
 
         pane = Text()
         pane.append("\n")
@@ -946,7 +944,7 @@ class AgenticProgressRenderer:
 
     def _print_investigation_summary(self) -> None:
         """Print full task list + tools as a permanent record before the answer."""
-        from rich.text import Text
+
 
         if self._summary_printed:
             return
@@ -1719,8 +1717,6 @@ def _run_inline_menu(
     Returns:
         Index of selected option (0-based), or ``None`` if cancelled.
     """
-    from io import StringIO
-
     selected = [0]
     result: List[Optional[int]] = [None]
 
