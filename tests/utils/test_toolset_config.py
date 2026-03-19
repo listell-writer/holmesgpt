@@ -130,16 +130,16 @@ class TestPrometheusConfigBackwardCompatibility:
                 headers={"Authorization": "Bearer token123"},
             )
 
-        # Create config using new additional_headers field
-        new_config = PrometheusConfig(
-            prometheus_url="http://prometheus:9090",
-            additional_headers={"Authorization": "Bearer token123"},
-        )
+            # Create config using new additional_headers field
+            new_config = PrometheusConfig(
+                prometheus_url="http://prometheus:9090",
+                additional_headers={"Authorization": "Bearer token123"},
+            )
 
-        # Both should result in the same additional_headers value
-        assert old_config.additional_headers == new_config.additional_headers
-        assert old_config.additional_headers == {"Authorization": "Bearer token123"}
-        assert "headers -> additional_headers" in caplog.text
+            # Both should result in the same additional_headers value
+            assert old_config.additional_headers == new_config.additional_headers
+            assert old_config.additional_headers == {"Authorization": "Bearer token123"}
+            assert "headers -> additional_headers" in caplog.text
 
     def test_new_prometheus_fields_no_warning(self, caplog):
         """Test that new Prometheus field names don't trigger warnings."""
