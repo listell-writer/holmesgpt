@@ -1132,7 +1132,7 @@ EXPECTED_ANSWER_END_KEYS = {
 }
 
 EXPECTED_APPROVAL_REQUIRED_KEYS = {
-    "content", "messages", "pending_approvals",
+    "content", "messages", "pending_approvals", "pending_frontend_tool_calls",
     "requires_approval", "num_llm_calls", "costs",
 }
 

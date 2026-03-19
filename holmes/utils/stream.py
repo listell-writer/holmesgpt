@@ -90,6 +90,11 @@ def stream_chat_formatter(
                 response_data["pending_approvals"] = message.data.get(
                     "pending_approvals", []
                 )
+                pending_frontend = message.data.get(
+                    "pending_frontend_tool_calls", []
+                )
+                if pending_frontend:
+                    response_data["pending_frontend_tool_calls"] = pending_frontend
 
                 yield create_sse_message(
                     StreamEvents.APPROVAL_REQUIRED.value, response_data

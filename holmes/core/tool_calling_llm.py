@@ -22,6 +22,8 @@ from holmes.core.llm import LLM
 from holmes.core.llm_usage import RequestStats
 
 from holmes.core.models import (
+    FrontendToolResult,
+    PendingFrontendToolCall,
     PendingToolApproval,
     ToolApprovalDecision,
     ToolCallResult,
@@ -188,6 +190,53 @@ class ToolCallingLLM:
                     return config.builtin_allowlist != "none"
                 return False
         return False
+
+    @staticmethod
+    def _inject_frontend_tool_results(
+        messages: List[Dict[str, Any]],
+        frontend_tool_results: List[FrontendToolResult],
+    ) -> tuple[List[Dict[str, Any]], list[StreamMessage]]:
+        """Inject frontend tool results into the conversation as tool messages.
+
+        Finds the pending frontend tool calls in assistant messages and inserts
+        the corresponding tool result messages right after them.
+
+        Returns updated messages and stream events for each result.
+        """
+        events: list[StreamMessage] = []
+        results_by_id = {r.tool_call_id: r for r in frontend_tool_results}
+
+        # Find pending frontend tool calls and clear their markers
+        insertion_points: list[tuple[int, FrontendToolResult]] = []
+        for i in reversed(range(len(messages))):
+            msg = messages[i]
+            if msg.get("role") == "assistant" and msg.get("tool_calls"):
+                for tool_call in msg.get("tool_calls", []):
+                    tc_id = tool_call.get("id")
+                    if tool_call.get("pending_frontend") and tc_id in results_by_id:
+                        del tool_call["pending_frontend"]
+                        insertion_points.append((i, results_by_id[tc_id]))
+
+        # Insert results after the assistant message (in order)
+        for msg_index, result in insertion_points:
+            tool_call_result = ToolCallResult(
+                tool_call_id=result.tool_call_id,
+                tool_name=result.tool_name,
+                description=result.tool_name,
+                result=StructuredToolResult(
+                    status=StructuredToolResultStatus.SUCCESS,
+                    data=result.result,
+                ),
+            )
+            messages.insert(msg_index + 1, tool_call_result.to_llm_message())
+            events.append(
+                StreamMessage(
+                    event=StreamEvents.TOOL_RESULT,
+                    data=tool_call_result.to_client_dict(),
+                )
+            )
+
+        return messages, events
 
     def _execute_tool_decisions(
         self,
@@ -692,6 +741,9 @@ class ToolCallingLLM:
         msgs: Optional[list[dict]] = None,
         enable_tool_approval: bool = False,
         tool_decisions: List[ToolApprovalDecision] | None = None,
+        frontend_tool_names: Optional[set[str]] = None,
+        frontend_openai_tools: Optional[list[dict]] = None,
+        frontend_tool_results: Optional[List[FrontendToolResult]] = None,
         request_context: Optional[Dict[str, Any]] = None,
         trace_span: Any = None,
         cancel_event: Optional[threading.Event] = None,
@@ -701,11 +753,31 @@ class ToolCallingLLM:
         """
         This function DOES NOT call llm.completion(stream=true).
         This function streams holmes one iteration at a time instead of waiting for all iterations to complete.
+
+        Args:
+            frontend_tool_names: Set of tool names that are frontend-defined. When the LLM
+                calls one of these, the stream pauses for client-side execution.
+            frontend_openai_tools: Frontend tool definitions in OpenAI format, appended to
+                the built-in tools list sent to the LLM.
+            frontend_tool_results: Results from previous frontend tool executions, used to
+                resume a paused stream.
         """
         if trace_span is None:
             trace_span = DummySpan()
 
         all_tool_calls: list[dict] = []
+        frontend_tool_names = frontend_tool_names or set()
+
+        # Process frontend tool results if provided (resuming after pause)
+        if msgs and frontend_tool_results:
+            logging.info(f"Processing {len(frontend_tool_results)} frontend tool results")
+            msgs, fe_events = self._inject_frontend_tool_results(
+                msgs, frontend_tool_results
+            )
+            for ev in fe_events:
+                yield ev
+                if ev.event == StreamEvents.TOOL_RESULT:
+                    all_tool_calls.append(ev.data)
 
         # Process tool decisions if provided
         if msgs and tool_decisions:
@@ -722,6 +794,9 @@ class ToolCallingLLM:
         messages: list[dict] = list(msgs) if msgs else []
         tool_calls: list[dict] = []
         tools: Optional[list] = self._get_tools()
+        # Append frontend-defined tools to the tools list for the LLM
+        if frontend_openai_tools and tools is not None:
+            tools = tools + frontend_openai_tools
         max_steps = self.max_steps
         metadata: Dict[Any, Any] = {}
         stats = RequestStats()
@@ -876,13 +951,39 @@ class ToolCallingLLM:
 
             # Check if any tools require approval first
             pending_approvals = []
+            pending_frontend_calls: list[PendingFrontendToolCall] = []
+
+            # Separate frontend tool calls from backend tool calls
+            backend_tools_to_call = []
+            for t in tools_to_call:  # type: ignore
+                if t.function.name in frontend_tool_names:
+                    # Frontend tool: don't execute, collect for client
+                    tool_params = {}
+                    try:
+                        tool_params = json.loads(t.function.arguments)
+                    except Exception:
+                        logging.warning(f"Failed to parse frontend tool arguments: {t.function.arguments}")
+
+                    pending_frontend_calls.append(
+                        PendingFrontendToolCall(
+                            tool_call_id=t.id,
+                            tool_name=t.function.name,
+                            arguments=tool_params,
+                        )
+                    )
+                    yield StreamMessage(
+                        event=StreamEvents.START_TOOL,
+                        data={"tool_name": t.function.name, "id": t.id, "frontend": True},
+                    )
+                else:
+                    backend_tools_to_call.append(t)
 
             # Extract session approved prefixes from conversation history
             session_prefixes = extract_bash_session_prefixes(messages)
 
             with concurrent.futures.ThreadPoolExecutor(max_workers=16) as executor:
                 futures = []
-                for tool_index, t in enumerate(tools_to_call, 1):  # type: ignore
+                for tool_index, t in enumerate(backend_tools_to_call, 1):
                     tool_number = tool_number_offset + tool_index
 
                     future = executor.submit(
@@ -959,16 +1060,23 @@ class ToolCallingLLM:
                 # Emit updated token counts after tool results
                 yield self._emit_token_count(messages, tools, full_response, limit_result, metadata, stats)
 
-                # If we have approval required tools, end the stream with pending approvals
-                if pending_approvals:
-                    # Mark pending tool calls in assistant messages
+                # If we have pending frontend tool calls or approval required tools, pause the stream
+                if pending_frontend_calls or pending_approvals:
+                    # Mark pending approval tool calls in assistant messages
                     for approval in pending_approvals:
                         tool_call = self.find_assistant_tool_call_request(
                             tool_call_id=approval.tool_call_id, messages=messages
                         )
                         tool_call["pending_approval"] = True
 
-                    # End stream with approvals required
+                    # Mark pending frontend tool calls in assistant messages
+                    for fe_call in pending_frontend_calls:
+                        tool_call = self.find_assistant_tool_call_request(
+                            tool_call_id=fe_call.tool_call_id, messages=messages
+                        )
+                        tool_call["pending_frontend"] = True
+
+                    # End stream with approvals/frontend calls required
                     yield StreamMessage(
                         event=StreamEvents.APPROVAL_REQUIRED,
                         data={
@@ -976,6 +1084,9 @@ class ToolCallingLLM:
                             "messages": messages,
                             "pending_approvals": [
                                 approval.model_dump() for approval in pending_approvals
+                            ],
+                            "pending_frontend_tool_calls": [
+                                fe_call.model_dump() for fe_call in pending_frontend_calls
                             ],
                             "requires_approval": True,
                             "num_llm_calls": i,
@@ -990,6 +1101,9 @@ class ToolCallingLLM:
                 # Re-fetch tools if runbook was just activated (enables restricted tools)
                 if self._runbook_in_use and tools is not None:
                     new_tools = self._get_tools()
+                    # Re-append frontend tools after refresh
+                    if frontend_openai_tools:
+                        new_tools = new_tools + frontend_openai_tools
                     if len(new_tools) != len(tools):
                         logging.info(
                             f"Runbook activated - refreshing tools list ({len(tools)} -> {len(new_tools)} tools)"

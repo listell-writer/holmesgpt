@@ -45,6 +45,7 @@ from holmes.core.conversations import (
 from holmes.core.models import (
     ChatRequest,
     ChatResponse,
+    FrontendToolDefinition,
     FollowUpAction,
 )
 from holmes.core.prompt import PromptComponent
@@ -311,6 +312,47 @@ def _stream_with_storage_cleanup(storage, stream_generator, req_info):
         storage.__exit__(None, None, None)
 
 
+def _frontend_tools_to_openai_format(
+    frontend_tools: List[FrontendToolDefinition],
+) -> list[dict]:
+    """Convert frontend tool definitions to OpenAI function-calling format."""
+    openai_tools = []
+    for ft in frontend_tools:
+        tool_def: dict = {
+            "type": "function",
+            "function": {
+                "name": ft.name,
+                "description": ft.description,
+            },
+        }
+        if ft.parameters:
+            tool_def["function"]["parameters"] = ft.parameters
+        openai_tools.append(tool_def)
+    return openai_tools
+
+
+def _validate_frontend_tools(
+    chat_request: ChatRequest,
+    builtin_tool_names: set[str],
+) -> None:
+    """Validate frontend tools configuration. Raises HTTPException on error."""
+    if not chat_request.frontend_tools:
+        return
+
+    if not chat_request.stream:
+        raise HTTPException(
+            status_code=400,
+            detail="frontend_tools requires stream=true. Frontend tools need the SSE pause/resume flow.",
+        )
+
+    for ft in chat_request.frontend_tools:
+        if ft.name in builtin_tool_names:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Frontend tool name '{ft.name}' conflicts with a built-in Holmes tool. Use a distinctive name.",
+            )
+
+
 @app.post("/api/chat")
 def chat(chat_request: ChatRequest, http_request: Request):
     try:
@@ -368,6 +410,20 @@ def chat(chat_request: ChatRequest, http_request: Request):
         ai = config.create_toolcalling_llm(
             dal=dal, model=chat_request.model, tool_results_dir=tool_results_dir
         )
+
+        # Validate frontend tools against built-in tool names
+        builtin_tool_names = set(getattr(ai.tool_executor, "tools_by_name", {}).keys())
+        _validate_frontend_tools(chat_request, builtin_tool_names)
+
+        # Build frontend tools OpenAI definitions and name set
+        frontend_openai_tools: list[dict] = []
+        frontend_tool_names: set[str] = set()
+        if chat_request.frontend_tools:
+            frontend_openai_tools = _frontend_tools_to_openai_format(
+                chat_request.frontend_tools
+            )
+            frontend_tool_names = {ft.name for ft in chat_request.frontend_tools}
+
         global_instructions = dal.get_global_instructions_for_account()
         messages = build_chat_messages(
             chat_request.ask,
@@ -387,6 +443,9 @@ def chat(chat_request: ChatRequest, http_request: Request):
                     msgs=messages,
                     enable_tool_approval=chat_request.enable_tool_approval or False,
                     tool_decisions=chat_request.tool_decisions,
+                    frontend_tool_names=frontend_tool_names if frontend_tool_names else None,
+                    frontend_openai_tools=frontend_openai_tools if frontend_openai_tools else None,
+                    frontend_tool_results=chat_request.frontend_tool_results,
                     response_format=chat_request.response_format,
                     request_context=request_context,
                 ),
@@ -415,6 +474,8 @@ def chat(chat_request: ChatRequest, http_request: Request):
                 )
             finally:
                 storage.__exit__(None, None, None)
+    except HTTPException:
+        raise
     except AuthenticationError as e:
         raise HTTPException(status_code=401, detail=e.message)
     except litellm.exceptions.RateLimitError as e:

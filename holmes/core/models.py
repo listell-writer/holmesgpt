@@ -85,6 +85,35 @@ class ToolApprovalDecision(BaseModel):
     feedback: Optional[str] = None  # User feedback when denying a tool call
 
 
+class FrontendToolDefinition(BaseModel):
+    """A tool defined by the frontend client, not by Holmes.
+
+    The LLM can call these tools, but execution happens on the client side.
+    When the LLM calls a frontend tool, the stream pauses and the client
+    receives the tool call details to execute and return results.
+    """
+
+    name: str
+    description: str
+    parameters: Dict[str, Any] = Field(default_factory=dict)
+
+
+class FrontendToolResult(BaseModel):
+    """Result of a frontend tool execution, sent by the client to resume the stream."""
+
+    tool_call_id: str
+    tool_name: str
+    result: str  # Always a string; serialize complex data as JSON if needed
+
+
+class PendingFrontendToolCall(BaseModel):
+    """A frontend tool call that the LLM requested, waiting for client execution."""
+
+    tool_call_id: str
+    tool_name: str
+    arguments: Dict[str, Any]
+
+
 class ChatRequestBaseModel(BaseModel):
     conversation_history: Optional[list[dict]] = None
     model: Optional[str] = None
@@ -93,6 +122,14 @@ class ChatRequestBaseModel(BaseModel):
         False  # Optional boolean for backwards compatibility
     )
     tool_decisions: Optional[List[ToolApprovalDecision]] = None
+    frontend_tools: Optional[List[FrontendToolDefinition]] = Field(
+        default=None,
+        description="Tools defined by the frontend client. Must be sent on every request (not persisted). Requires stream=true.",
+    )
+    frontend_tool_results: Optional[List[FrontendToolResult]] = Field(
+        default=None,
+        description="Results from frontend tool executions, sent to resume a paused stream.",
+    )
     additional_system_prompt: Optional[str] = None
     trace_span: Optional[Any] = (
         None  # Optional span for tracing and heartbeat callbacks
@@ -153,4 +190,5 @@ class ChatResponse(BaseModel):
     tool_calls: Optional[List[ToolCallResult]] = []
     follow_up_actions: Optional[List[FollowUpAction]] = []
     pending_approvals: Optional[List[PendingToolApproval]] = None
+    pending_frontend_tool_calls: Optional[List[PendingFrontendToolCall]] = None
     metadata: Optional[Dict[Any, Any]] = None
