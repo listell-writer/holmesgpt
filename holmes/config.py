@@ -17,7 +17,7 @@ from pydantic import (
 
 from holmes.common.env_vars import ROBUSTA_CONFIG_PATH
 from holmes.core.llm import DefaultLLM, LLMModelRegistry
-from holmes.core.tools import Toolset
+from holmes.core.tools import Toolset, ToolsetTag
 from holmes.core.tools_utils.tool_executor import ToolExecutor
 from holmes.core.toolset_manager import ToolsetManager
 from holmes.plugins.runbooks import (
@@ -103,8 +103,7 @@ class Config(RobustaBaseConfig):
     mcp_servers: Optional[dict[str, dict[str, Any]]] = None
     additional_toolsets: Optional[List[Toolset]] = None
 
-    _server_tool_executor: Optional[ToolExecutor] = None
-    _agui_tool_executor: Optional[ToolExecutor] = None
+    _cached_tool_executor: Optional[ToolExecutor] = None
 
     # TODO: Separate those fields to facade class, this shouldn't be part of the config.
     _toolset_manager: Optional[ToolsetManager] = PrivateAttr(None)
@@ -247,76 +246,135 @@ class Config(RobustaBaseConfig):
         )
         return runbook_catalog
 
-    def create_console_tool_executor(
-        self, dal: Optional["SupabaseDal"], refresh_status: bool = False
+    # ── Unified factory methods ──
+
+    def create_tool_executor(
+        self,
+        dal: Optional["SupabaseDal"] = None,
+        toolset_tags: Optional[List[ToolsetTag]] = None,
+        enable_all_toolsets: bool = True,
+        use_status_cache: bool = True,
+        refresh_status: bool = False,
+        cache: bool = False,
     ) -> ToolExecutor:
         """
-        Creates a ToolExecutor instance configured for CLI usage. This executor manages the available tools
-        and their execution in the command-line interface.
+        Create a ToolExecutor with explicit behavioral controls.
 
-        The method loads toolsets in this order, with later sources overriding earlier ones:
-        1. Built-in toolsets (tagged as CORE or CLI)
-        2. toolsets from config file will override and be merged into built-in toolsets with the same name.
-        3. Custom toolsets from config files which can not override built-in toolsets
+        Args:
+            dal: Optional database access layer.
+            toolset_tags: Which toolset tags to include (e.g. [ToolsetTag.CORE, ToolsetTag.CLI]).
+                Defaults to [ToolsetTag.CORE] if not specified.
+            enable_all_toolsets: If True, load all matching toolsets regardless of enabled flag.
+            use_status_cache: If True, use the local status cache file for toolset status.
+                If False, check prerequisites directly.
+            refresh_status: If True, force-refresh toolset status even if cached.
+            cache: If True, cache and reuse the executor on subsequent calls.
         """
-        cli_toolsets = self.toolset_manager.list_console_toolsets(
-            dal=dal, refresh_status=refresh_status
+        if cache and self._cached_tool_executor:
+            return self._cached_tool_executor
+
+        tags = toolset_tags or [ToolsetTag.CORE]
+        toolsets = self.toolset_manager.list_toolsets(
+            dal=dal,
+            toolset_tags=tags,
+            enable_all_toolsets=enable_all_toolsets,
+            use_status_cache=use_status_cache,
+            refresh_status=refresh_status,
         )
-        return ToolExecutor(cli_toolsets)
+        executor = ToolExecutor(toolsets)
 
-    def create_agui_tool_executor(self, dal: Optional["SupabaseDal"]) -> ToolExecutor:
-        """
-        Creates ToolExecutor for the AG-UI server endpoints
-        """
+        if cache:
+            self._cached_tool_executor = executor
 
-        if self._agui_tool_executor:
-            return self._agui_tool_executor
+        return executor
 
-        # Use same toolset as CLI for AG-UI front-end.
-        agui_toolsets = self.toolset_manager.list_console_toolsets(
-            dal=dal, refresh_status=True
-        )
-
-        self._agui_tool_executor = ToolExecutor(agui_toolsets)
-
-        return self._agui_tool_executor
-
-    def create_tool_executor(self, dal: Optional["SupabaseDal"]) -> ToolExecutor:
-        """
-        Creates ToolExecutor for the server endpoints
-        """
-
-        if self._server_tool_executor:
-            return self._server_tool_executor
-
-        toolsets = self.toolset_manager.list_server_toolsets(dal=dal)
-
-        self._server_tool_executor = ToolExecutor(toolsets)
-
-        logging.debug(
-            f"Starting AI session with tools: {[tn for tn in self._server_tool_executor.tools_by_name.keys()]}"
-        )
-
-        return self._server_tool_executor
-
-    def refresh_server_tool_executor(
-        self, dal: Optional["SupabaseDal"]
+    def refresh_tool_executor(
+        self,
+        dal: Optional["SupabaseDal"] = None,
+        toolset_tags: Optional[List[ToolsetTag]] = None,
+        enable_all_toolsets: bool = False,
     ) -> list[tuple[str, str, str]]:
-        if not self._server_tool_executor:
-            self.create_tool_executor(dal)
+        """Refresh the cached tool executor and return a list of status changes."""
+        if not self._cached_tool_executor:
+            self.create_tool_executor(dal, toolset_tags=toolset_tags, enable_all_toolsets=enable_all_toolsets, cache=True)
             return []
 
-        current_toolsets = self._server_tool_executor.toolsets
+        current_toolsets = self._cached_tool_executor.toolsets
         new_toolsets, changes = (
-            self.toolset_manager.refresh_server_toolsets_and_get_changes(
-                current_toolsets, dal
+            self.toolset_manager.refresh_toolsets_and_get_changes(
+                current_toolsets, dal, toolset_tags=toolset_tags, enable_all_toolsets=enable_all_toolsets,
             )
         )
 
         if changes:
-            self._server_tool_executor = ToolExecutor(new_toolsets)
+            self._cached_tool_executor = ToolExecutor(new_toolsets)
 
         return [(name, old.value, new.value) for name, old, new in changes]
+
+    def create_toolcalling_llm(
+        self,
+        dal: Optional["SupabaseDal"] = None,
+        toolset_tags: Optional[List[ToolsetTag]] = None,
+        enable_all_toolsets: bool = True,
+        use_status_cache: bool = True,
+        refresh_status: bool = False,
+        cache: bool = False,
+        model: Optional[str] = None,
+        tracer=None,
+        tool_results_dir: Optional[Path] = None,
+    ) -> "ToolCallingLLM":
+        """
+        Create a ToolCallingLLM with explicit behavioral controls.
+
+        Executor parameters (toolset_tags, enable_all_toolsets, use_status_cache,
+        refresh_status, cache) are forwarded to :meth:`create_tool_executor`.
+        """
+        tool_executor = self.create_tool_executor(
+            dal, toolset_tags, enable_all_toolsets, use_status_cache, refresh_status, cache,
+        )
+        from holmes.core.tool_calling_llm import ToolCallingLLM
+
+        return ToolCallingLLM(
+            tool_executor,
+            self.max_steps,
+            self._get_llm(model_key=model, tracer=tracer),
+            tool_results_dir=tool_results_dir,
+        )
+
+    # ── Deprecated wrappers (will be removed in a future version) ──
+
+    def create_console_tool_executor(
+        self, dal: Optional["SupabaseDal"] = None, refresh_status: bool = False
+    ) -> ToolExecutor:
+        """.. deprecated:: Use :meth:`create_tool_executor` with explicit parameters."""
+        return self.create_tool_executor(
+            dal,
+            toolset_tags=[ToolsetTag.CORE, ToolsetTag.CLI],
+            enable_all_toolsets=True,
+            use_status_cache=True,
+            refresh_status=refresh_status,
+        )
+
+    def create_agui_tool_executor(self, dal: Optional["SupabaseDal"] = None) -> ToolExecutor:
+        """.. deprecated:: Use :meth:`create_tool_executor` with explicit parameters."""
+        return self.create_tool_executor(
+            dal,
+            toolset_tags=[ToolsetTag.CORE, ToolsetTag.CLI],
+            enable_all_toolsets=True,
+            use_status_cache=True,
+            refresh_status=True,
+            cache=True,
+        )
+
+    def refresh_server_tool_executor(
+        self, dal: Optional["SupabaseDal"] = None,
+    ) -> list[tuple[str, str, str]]:
+        """.. deprecated:: Use :meth:`refresh_tool_executor` with explicit parameters."""
+        return self.refresh_tool_executor(
+            dal,
+            toolset_tags=[ToolsetTag.CORE, ToolsetTag.CLUSTER],
+            enable_all_toolsets=False,
+        )
 
     def create_console_toolcalling_llm(
         self,
@@ -326,13 +384,15 @@ class Config(RobustaBaseConfig):
         model_name: Optional[str] = None,
         tool_results_dir: Optional[Path] = None,
     ) -> "ToolCallingLLM":
-        tool_executor = self.create_console_tool_executor(dal, refresh_toolsets)
-        from holmes.core.tool_calling_llm import ToolCallingLLM
-
-        return ToolCallingLLM(
-            tool_executor,
-            self.max_steps,
-            self._get_llm(tracer=tracer, model_key=model_name),
+        """.. deprecated:: Use :meth:`create_toolcalling_llm` with explicit parameters."""
+        return self.create_toolcalling_llm(
+            dal,
+            toolset_tags=[ToolsetTag.CORE, ToolsetTag.CLI],
+            enable_all_toolsets=True,
+            use_status_cache=True,
+            refresh_status=refresh_toolsets,
+            model=model_name,
+            tracer=tracer,
             tool_results_dir=tool_results_dir,
         )
 
@@ -343,30 +403,16 @@ class Config(RobustaBaseConfig):
         tracer=None,
         tool_results_dir: Optional[Path] = None,
     ) -> "ToolCallingLLM":
-        tool_executor = self.create_agui_tool_executor(dal)
-        from holmes.core.tool_calling_llm import ToolCallingLLM
-
-        return ToolCallingLLM(
-            tool_executor,
-            self.max_steps,
-            self._get_llm(model, tracer),
-            tool_results_dir=tool_results_dir,
-        )
-
-    def create_toolcalling_llm(
-        self,
-        dal: Optional["SupabaseDal"] = None,
-        model: Optional[str] = None,
-        tracer=None,
-        tool_results_dir: Optional[Path] = None,
-    ) -> "ToolCallingLLM":
-        tool_executor = self.create_tool_executor(dal)
-        from holmes.core.tool_calling_llm import ToolCallingLLM
-
-        return ToolCallingLLM(
-            tool_executor,
-            self.max_steps,
-            self._get_llm(model, tracer),
+        """.. deprecated:: Use :meth:`create_toolcalling_llm` with explicit parameters."""
+        return self.create_toolcalling_llm(
+            dal,
+            toolset_tags=[ToolsetTag.CORE, ToolsetTag.CLI],
+            enable_all_toolsets=True,
+            use_status_cache=True,
+            refresh_status=True,
+            cache=True,
+            model=model,
+            tracer=tracer,
             tool_results_dir=tool_results_dir,
         )
 

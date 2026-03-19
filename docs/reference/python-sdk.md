@@ -8,6 +8,7 @@ Use the HolmesGPT Python SDK to embed AI-powered troubleshooting in your own app
 import os
 from holmes.config import Config
 from holmes.core.prompt import build_initial_ask_messages
+from holmes.core.tools import ToolsetTag
 
 # Create configuration
 config = Config(
@@ -16,7 +17,10 @@ config = Config(
 )
 
 # Create AI instance
-ai = config.create_console_toolcalling_llm()
+ai = config.create_toolcalling_llm(
+    toolset_tags=[ToolsetTag.CORE, ToolsetTag.CLI],
+    enable_all_toolsets=True,
+)
 
 # Ask a question
 messages = build_initial_ask_messages(
@@ -34,7 +38,10 @@ print(response.result)
 ## Listing Available Tools
 
 ```python
-ai = config.create_console_toolcalling_llm()
+ai = config.create_toolcalling_llm(
+    toolset_tags=[ToolsetTag.CORE, ToolsetTag.CLI],
+    enable_all_toolsets=True,
+)
 
 # List loaded toolsets and their status
 for toolset in ai.tool_executor.toolsets:
@@ -68,12 +75,16 @@ Maintain conversation context by reusing the message history returned in each re
 import os
 from holmes.config import Config
 from holmes.core.prompt import build_initial_ask_messages
+from holmes.core.tools import ToolsetTag
 
 config = Config(
     api_key=os.getenv("ANTHROPIC_API_KEY"),
     model="anthropic/claude-sonnet-4-5-20250929",
 )
-ai = config.create_console_toolcalling_llm()
+ai = config.create_toolcalling_llm(
+    toolset_tags=[ToolsetTag.CORE, ToolsetTag.CLI],
+    enable_all_toolsets=True,
+)
 
 # First question - build initial messages with system prompt
 messages = build_initial_ask_messages(
@@ -227,7 +238,10 @@ config = Config(
     additional_toolsets=[HttpBinToolset()],
 )
 
-ai = config.create_console_toolcalling_llm()
+ai = config.create_toolcalling_llm(
+    toolset_tags=[ToolsetTag.CORE, ToolsetTag.CLI],
+    enable_all_toolsets=True,
+)
 
 messages = build_initial_ask_messages(
     initial_user_prompt="What is my public IP address?",
@@ -273,7 +287,7 @@ Main configuration class (`holmes.config.Config`).
 |--------|---------|-------------|
 | `Config.load_from_file(config_file, **kwargs)` | `Config` | Load configuration from a YAML file. |
 | `Config.load_from_env()` | `Config` | Load configuration from environment variables. |
-| `create_console_toolcalling_llm()` | `ToolCallingLLM` | Create an AI instance for asking questions and investigating alerts. |
+| `create_toolcalling_llm(toolset_tags, ...)` | `ToolCallingLLM` | Create an AI instance with explicit toolset filtering, caching, and model controls. |
 | `get_runbook_catalog()` | `RunbookCatalog` or `None` | Get the loaded runbook catalog. |
 
 ### `ToolCallingLLM`

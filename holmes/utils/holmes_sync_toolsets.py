@@ -6,7 +6,7 @@ from typing import Any, List
 
 from holmes.config import Config
 from holmes.core.supabase_dal import SupabaseDal
-from holmes.core.tools import Toolset, ToolsetDBModel
+from holmes.core.tools import Toolset, ToolsetDBModel, ToolsetTag
 from holmes.plugins.prompts import load_and_render_prompt
 
 
@@ -31,7 +31,13 @@ def holmes_sync_toolsets_status(dal: SupabaseDal, config: Config) -> None:
     4) Run the check_prerequisites method for each toolset
     5) Use sync_toolsets to upsert toolset's status and remove toolsets that are not loaded from configs or folder with default directory
     """
-    tool_executor = config.create_tool_executor(dal)
+    tool_executor = config.create_tool_executor(
+        dal,
+        toolset_tags=[ToolsetTag.CORE, ToolsetTag.CLUSTER],
+        enable_all_toolsets=False,
+        use_status_cache=False,
+        cache=True,
+    )
 
     if not config.cluster_name:
         raise Exception(

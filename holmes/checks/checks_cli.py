@@ -24,6 +24,7 @@ from holmes.common.cli_commons import (
     opt_verbose,
 )
 from holmes.config import Config
+from holmes.core.tools import ToolsetTag
 from holmes.utils.console.logging import init_logging
 
 checks_app = typer.Typer(help="Health checks commands")
@@ -202,7 +203,10 @@ def run_check_command(
     """Main entry point for check command."""
 
     # Create runner
-    llm = config.create_console_toolcalling_llm()
+    llm = config.create_toolcalling_llm(
+        toolset_tags=[ToolsetTag.CORE, ToolsetTag.CLI],
+        enable_all_toolsets=True,
+    )
     runner = CheckRunner(
         config,
         console,

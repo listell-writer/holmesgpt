@@ -88,6 +88,9 @@ class ToolsetManager:
     def cli_tool_tags(self) -> List[ToolsetTag]:
         """
         Returns the list of toolset tags that are relevant for CLI tools.
+
+        .. deprecated::
+            Use explicit ``[ToolsetTag.CORE, ToolsetTag.CLI]`` instead.
         """
         return [ToolsetTag.CORE, ToolsetTag.CLI]
 
@@ -95,8 +98,46 @@ class ToolsetManager:
     def server_tool_tags(self) -> List[ToolsetTag]:
         """
         Returns the list of toolset tags that are relevant for server tools.
+
+        .. deprecated::
+            Use explicit ``[ToolsetTag.CORE, ToolsetTag.CLUSTER]`` instead.
         """
         return [ToolsetTag.CORE, ToolsetTag.CLUSTER]
+
+    def list_toolsets(
+        self,
+        dal: Optional[SupabaseDal] = None,
+        toolset_tags: Optional[List[ToolsetTag]] = None,
+        enable_all_toolsets: bool = False,
+        use_status_cache: bool = True,
+        refresh_status: bool = False,
+    ) -> List[Toolset]:
+        """
+        List toolsets matching the given tags, with explicit behavioral controls.
+
+        Args:
+            dal: Optional database access layer.
+            toolset_tags: Which toolset tags to include (e.g. [ToolsetTag.CORE, ToolsetTag.CLI]).
+            enable_all_toolsets: If True, load all matching toolsets regardless of enabled flag.
+            use_status_cache: If True, use the local status cache file for toolset status
+                (suitable for CLI). If False, check prerequisites directly (suitable for servers).
+            refresh_status: If True, force-refresh toolset status even if cached.
+                Only applies when use_status_cache=True.
+        """
+        if use_status_cache:
+            return self.load_toolset_with_status(
+                dal,
+                refresh_status=refresh_status,
+                enable_all_toolsets=enable_all_toolsets,
+                toolset_tags=toolset_tags,
+            )
+        else:
+            return self._list_all_toolsets(
+                dal,
+                check_prerequisites=True,
+                enable_all_toolsets=enable_all_toolsets,
+                toolset_tags=toolset_tags,
+            )
 
     def _list_all_toolsets(
         self,
@@ -441,40 +482,37 @@ class ToolsetManager:
         self, dal: Optional[SupabaseDal] = None, refresh_status=False
     ) -> List[Toolset]:
         """
-        List all enabled toolsets that cli tools can use.
-
-        listing console toolset does not refresh toolset status by default, and expects the status to be
-        refreshed specifically and cached locally.
+        .. deprecated::
+            Use :meth:`list_toolsets` with explicit parameters instead.
         """
-        toolsets_with_status = self.load_toolset_with_status(
+        return self.list_toolsets(
             dal,
-            refresh_status=refresh_status,
+            toolset_tags=[ToolsetTag.CORE, ToolsetTag.CLI],
             enable_all_toolsets=True,
-            toolset_tags=self.cli_tool_tags,
+            use_status_cache=True,
+            refresh_status=refresh_status,
         )
-        return toolsets_with_status
 
     def list_server_toolsets(
         self, dal: Optional[SupabaseDal] = None, refresh_status=True
     ) -> List[Toolset]:
         """
-        List all toolsets that are enabled and have the server tool tags.
-
-        server will sync the status of toolsets to DB during startup instead of local cache.
-        Refreshing the status by default for server to keep the toolsets up-to-date instead of relying on local cache.
+        .. deprecated::
+            Use :meth:`list_toolsets` with explicit parameters instead.
         """
-        toolsets_with_status = self._list_all_toolsets(
+        return self.list_toolsets(
             dal,
-            check_prerequisites=True,
+            toolset_tags=[ToolsetTag.CORE, ToolsetTag.CLUSTER],
             enable_all_toolsets=False,
-            toolset_tags=self.server_tool_tags,
+            use_status_cache=False,
         )
-        return toolsets_with_status
 
-    def refresh_server_toolsets_and_get_changes(
+    def refresh_toolsets_and_get_changes(
         self,
         current_toolsets: List[Toolset],
         dal: Optional[SupabaseDal] = None,
+        toolset_tags: Optional[List[ToolsetTag]] = None,
+        enable_all_toolsets: bool = False,
     ) -> tuple[List[Toolset], List[tuple[str, ToolsetStatusEnum, ToolsetStatusEnum]]]:
         old_status_by_name: dict[str, ToolsetStatusEnum] = {
             toolset.name: toolset.status for toolset in current_toolsets
@@ -483,8 +521,8 @@ class ToolsetManager:
         new_toolsets = self._list_all_toolsets(
             dal,
             check_prerequisites=True,
-            enable_all_toolsets=False,
-            toolset_tags=self.server_tool_tags,
+            enable_all_toolsets=enable_all_toolsets,
+            toolset_tags=toolset_tags,
             silent=True,
         )
 
@@ -495,6 +533,22 @@ class ToolsetManager:
                 changes.append((toolset.name, old_status, toolset.status))
 
         return new_toolsets, changes
+
+    def refresh_server_toolsets_and_get_changes(
+        self,
+        current_toolsets: List[Toolset],
+        dal: Optional[SupabaseDal] = None,
+    ) -> tuple[List[Toolset], List[tuple[str, ToolsetStatusEnum, ToolsetStatusEnum]]]:
+        """
+        .. deprecated::
+            Use :meth:`refresh_toolsets_and_get_changes` with explicit parameters instead.
+        """
+        return self.refresh_toolsets_and_get_changes(
+            current_toolsets,
+            dal,
+            toolset_tags=[ToolsetTag.CORE, ToolsetTag.CLUSTER],
+            enable_all_toolsets=False,
+        )
 
     def _load_toolsets_from_paths(
         self,
