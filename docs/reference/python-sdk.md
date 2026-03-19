@@ -19,7 +19,7 @@ config = Config(
 # Create AI instance
 ai = config.create_toolcalling_llm(
     toolset_tags=[ToolsetTag.CORE, ToolsetTag.CLI],
-    enable_all_toolsets=True,
+    auto_discover=True,
 )
 
 # Ask a question
@@ -40,7 +40,7 @@ print(response.result)
 ```python
 ai = config.create_toolcalling_llm(
     toolset_tags=[ToolsetTag.CORE, ToolsetTag.CLI],
-    enable_all_toolsets=True,
+    auto_discover=True,
 )
 
 # List loaded toolsets and their status
@@ -83,7 +83,7 @@ config = Config(
 )
 ai = config.create_toolcalling_llm(
     toolset_tags=[ToolsetTag.CORE, ToolsetTag.CLI],
-    enable_all_toolsets=True,
+    auto_discover=True,
 )
 
 # First question - build initial messages with system prompt
@@ -240,7 +240,7 @@ config = Config(
 
 ai = config.create_toolcalling_llm(
     toolset_tags=[ToolsetTag.CORE, ToolsetTag.CLI],
-    enable_all_toolsets=True,
+    auto_discover=True,
 )
 
 messages = build_initial_ask_messages(
@@ -298,10 +298,10 @@ Both methods accept the same toolset parameters. `create_toolcalling_llm` additi
 | Parameter | Type | Default | Description |
 |-----------|------|---------|-------------|
 | `toolset_tags` | `list[ToolsetTag]` | `[CORE]` | Which toolsets to load, filtered by tag. Each toolset declares tags like `CORE`, `CLI`, or `CLUSTER`. Only toolsets with at least one matching tag are included. |
-| `enable_all_toolsets` | `bool` | `True` | When `True`, auto-enable every toolset that doesn't require unconfigured settings. When `False`, only toolsets explicitly enabled in config are loaded. |
-| `use_status_cache` | `bool` | `True` | When `True`, toolset prerequisite results (health checks, API pings) are read from/written to a local cache file (`~/.holmes/toolset_status.json`). On repeat runs, only config validity is re-checked; full prerequisites are deferred until first tool use. When `False`, all prerequisites are checked eagerly every time with no disk caching. |
-| `refresh_status` | `bool` | `False` | Force re-run all prerequisite checks and overwrite the cache file. Only has effect when `use_status_cache=True`. |
-| `cache` | `bool` | `False` | When `True`, the created executor is cached in memory on the `Config` instance. Subsequent calls return the cached executor without reloading toolsets. |
+| `auto_discover` | `bool` | `True` | When `True`, automatically enable every toolset that can work without explicit configuration. When `False`, only toolsets explicitly enabled in config are loaded. |
+| `lazy_prerequisite_checks` | `bool` | `True` | When `True`, prerequisite results (health checks, API pings) are cached to disk; on repeat runs only config validity is re-checked and full prerequisites are deferred until first tool use. When `False`, all prerequisites are checked eagerly every time. |
+| `force_recheck` | `bool` | `False` | Ignore cached prerequisite results and re-run all checks. Only has effect when `lazy_prerequisite_checks=True`. |
+| `reuse_executor` | `bool` | `False` | When `True`, the created executor is cached in memory on the `Config` instance. Subsequent calls return the same executor without reloading toolsets. Useful for long-lived server processes. |
 | `model` | `str` | *None* | Model override for this LLM instance. |
 
 **`ToolsetTag` values** (`holmes.core.tools.ToolsetTag`):

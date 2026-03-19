@@ -34,9 +34,9 @@ def holmes_sync_toolsets_status(dal: SupabaseDal, config: Config) -> None:
     tool_executor = config.create_tool_executor(
         dal,
         toolset_tags=[ToolsetTag.CORE, ToolsetTag.CLUSTER],
-        enable_all_toolsets=False,
-        use_status_cache=False,
-        cache=True,
+        auto_discover=False,
+        lazy_prerequisite_checks=False,
+        reuse_executor=True,
     )
 
     if not config.cluster_name:

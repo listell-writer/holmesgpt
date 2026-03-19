@@ -29,7 +29,7 @@ config = Config(
 
 ai = config.create_toolcalling_llm(
     toolset_tags=[ToolsetTag.CORE, ToolsetTag.CLI],
-    enable_all_toolsets=True,
+    auto_discover=True,
 )
 
 messages = build_initial_ask_messages(

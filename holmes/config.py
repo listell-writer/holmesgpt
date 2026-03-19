@@ -252,10 +252,10 @@ class Config(RobustaBaseConfig):
         self,
         dal: Optional["SupabaseDal"] = None,
         toolset_tags: Optional[List[ToolsetTag]] = None,
-        enable_all_toolsets: bool = True,
-        use_status_cache: bool = True,
-        refresh_status: bool = False,
-        cache: bool = False,
+        auto_discover: bool = True,
+        lazy_prerequisite_checks: bool = True,
+        force_recheck: bool = False,
+        reuse_executor: bool = False,
     ) -> ToolExecutor:
         """
         Create a ToolExecutor with explicit behavioral controls.
@@ -264,26 +264,32 @@ class Config(RobustaBaseConfig):
             dal: Optional database access layer.
             toolset_tags: Which toolset tags to include (e.g. [ToolsetTag.CORE, ToolsetTag.CLI]).
                 Defaults to [ToolsetTag.CORE] if not specified.
-            enable_all_toolsets: If True, load all matching toolsets regardless of enabled flag.
-            use_status_cache: If True, use the local status cache file for toolset status.
-                If False, check prerequisites directly.
-            refresh_status: If True, force-refresh toolset status even if cached.
-            cache: If True, cache and reuse the executor on subsequent calls.
+            auto_discover: If True, automatically enable every toolset that can work
+                without explicit configuration. If False, only toolsets explicitly
+                enabled in config are loaded.
+            lazy_prerequisite_checks: If True, prerequisite results (health checks,
+                API pings) are cached to disk; on subsequent runs only config validity
+                is re-checked and full prerequisites are deferred until first tool use.
+                If False, all prerequisites are checked eagerly every time.
+            force_recheck: Ignore cached prerequisite results and re-run all checks.
+                Only has effect when lazy_prerequisite_checks=True.
+            reuse_executor: If True, cache the executor in memory and return the same
+                instance on subsequent calls. Useful for long-lived server processes.
         """
-        if cache and self._cached_tool_executor:
+        if reuse_executor and self._cached_tool_executor:
             return self._cached_tool_executor
 
         tags = toolset_tags or [ToolsetTag.CORE]
         toolsets = self.toolset_manager.list_toolsets(
             dal=dal,
             toolset_tags=tags,
-            enable_all_toolsets=enable_all_toolsets,
-            use_status_cache=use_status_cache,
-            refresh_status=refresh_status,
+            auto_discover=auto_discover,
+            lazy_prerequisite_checks=lazy_prerequisite_checks,
+            force_recheck=force_recheck,
         )
         executor = ToolExecutor(toolsets)
 
-        if cache:
+        if reuse_executor:
             self._cached_tool_executor = executor
 
         return executor
@@ -292,17 +298,17 @@ class Config(RobustaBaseConfig):
         self,
         dal: Optional["SupabaseDal"] = None,
         toolset_tags: Optional[List[ToolsetTag]] = None,
-        enable_all_toolsets: bool = False,
+        auto_discover: bool = False,
     ) -> list[tuple[str, str, str]]:
         """Refresh the cached tool executor and return a list of status changes."""
         if not self._cached_tool_executor:
-            self.create_tool_executor(dal, toolset_tags=toolset_tags, enable_all_toolsets=enable_all_toolsets, cache=True)
+            self.create_tool_executor(dal, toolset_tags=toolset_tags, auto_discover=auto_discover, reuse_executor=True)
             return []
 
         current_toolsets = self._cached_tool_executor.toolsets
         new_toolsets, changes = (
             self.toolset_manager.refresh_toolsets_and_get_changes(
-                current_toolsets, dal, toolset_tags=toolset_tags, enable_all_toolsets=enable_all_toolsets,
+                current_toolsets, dal, toolset_tags=toolset_tags, auto_discover=auto_discover,
             )
         )
 
@@ -315,10 +321,10 @@ class Config(RobustaBaseConfig):
         self,
         dal: Optional["SupabaseDal"] = None,
         toolset_tags: Optional[List[ToolsetTag]] = None,
-        enable_all_toolsets: bool = True,
-        use_status_cache: bool = True,
-        refresh_status: bool = False,
-        cache: bool = False,
+        auto_discover: bool = True,
+        lazy_prerequisite_checks: bool = True,
+        force_recheck: bool = False,
+        reuse_executor: bool = False,
         model: Optional[str] = None,
         tracer=None,
         tool_results_dir: Optional[Path] = None,
@@ -326,11 +332,11 @@ class Config(RobustaBaseConfig):
         """
         Create a ToolCallingLLM with explicit behavioral controls.
 
-        Executor parameters (toolset_tags, enable_all_toolsets, use_status_cache,
-        refresh_status, cache) are forwarded to :meth:`create_tool_executor`.
+        Executor parameters (toolset_tags, auto_discover, lazy_prerequisite_checks,
+        force_recheck, reuse_executor) are forwarded to :meth:`create_tool_executor`.
         """
         tool_executor = self.create_tool_executor(
-            dal, toolset_tags, enable_all_toolsets, use_status_cache, refresh_status, cache,
+            dal, toolset_tags, auto_discover, lazy_prerequisite_checks, force_recheck, reuse_executor,
         )
         from holmes.core.tool_calling_llm import ToolCallingLLM
 
@@ -350,9 +356,8 @@ class Config(RobustaBaseConfig):
         return self.create_tool_executor(
             dal,
             toolset_tags=[ToolsetTag.CORE, ToolsetTag.CLI],
-            enable_all_toolsets=True,
-            use_status_cache=True,
-            refresh_status=refresh_status,
+            auto_discover=True,
+            force_recheck=refresh_status,
         )
 
     def create_agui_tool_executor(self, dal: Optional["SupabaseDal"] = None) -> ToolExecutor:
@@ -360,10 +365,9 @@ class Config(RobustaBaseConfig):
         return self.create_tool_executor(
             dal,
             toolset_tags=[ToolsetTag.CORE, ToolsetTag.CLI],
-            enable_all_toolsets=True,
-            use_status_cache=True,
-            refresh_status=True,
-            cache=True,
+            auto_discover=True,
+            force_recheck=True,
+            reuse_executor=True,
         )
 
     def refresh_server_tool_executor(
@@ -373,7 +377,7 @@ class Config(RobustaBaseConfig):
         return self.refresh_tool_executor(
             dal,
             toolset_tags=[ToolsetTag.CORE, ToolsetTag.CLUSTER],
-            enable_all_toolsets=False,
+            auto_discover=False,
         )
 
     def create_console_toolcalling_llm(
@@ -388,9 +392,8 @@ class Config(RobustaBaseConfig):
         return self.create_toolcalling_llm(
             dal,
             toolset_tags=[ToolsetTag.CORE, ToolsetTag.CLI],
-            enable_all_toolsets=True,
-            use_status_cache=True,
-            refresh_status=refresh_toolsets,
+            auto_discover=True,
+            force_recheck=refresh_toolsets,
             model=model_name,
             tracer=tracer,
             tool_results_dir=tool_results_dir,
@@ -407,10 +410,9 @@ class Config(RobustaBaseConfig):
         return self.create_toolcalling_llm(
             dal,
             toolset_tags=[ToolsetTag.CORE, ToolsetTag.CLI],
-            enable_all_toolsets=True,
-            use_status_cache=True,
-            refresh_status=True,
-            cache=True,
+            auto_discover=True,
+            force_recheck=True,
+            reuse_executor=True,
             model=model,
             tracer=tracer,
             tool_results_dir=tool_results_dir,

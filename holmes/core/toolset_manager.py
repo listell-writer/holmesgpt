@@ -108,9 +108,9 @@ class ToolsetManager:
         self,
         dal: Optional[SupabaseDal] = None,
         toolset_tags: Optional[List[ToolsetTag]] = None,
-        enable_all_toolsets: bool = False,
-        use_status_cache: bool = True,
-        refresh_status: bool = False,
+        auto_discover: bool = False,
+        lazy_prerequisite_checks: bool = True,
+        force_recheck: bool = False,
     ) -> List[Toolset]:
         """
         List toolsets matching the given tags, with explicit behavioral controls.
@@ -118,24 +118,28 @@ class ToolsetManager:
         Args:
             dal: Optional database access layer.
             toolset_tags: Which toolset tags to include (e.g. [ToolsetTag.CORE, ToolsetTag.CLI]).
-            enable_all_toolsets: If True, load all matching toolsets regardless of enabled flag.
-            use_status_cache: If True, use the local status cache file for toolset status
-                (suitable for CLI). If False, check prerequisites directly (suitable for servers).
-            refresh_status: If True, force-refresh toolset status even if cached.
-                Only applies when use_status_cache=True.
+            auto_discover: If True, automatically enable every toolset that can work
+                without explicit configuration. If False, only toolsets explicitly
+                enabled in config are loaded.
+            lazy_prerequisite_checks: If True, prerequisite results (health checks,
+                API pings) are cached to disk; on subsequent runs only config validity
+                is re-checked and full prerequisites are deferred until first tool use.
+                If False, all prerequisites are checked eagerly every time.
+            force_recheck: Ignore cached prerequisite results and re-run all checks.
+                Only has effect when lazy_prerequisite_checks=True.
         """
-        if use_status_cache:
+        if lazy_prerequisite_checks:
             return self.load_toolset_with_status(
                 dal,
-                refresh_status=refresh_status,
-                enable_all_toolsets=enable_all_toolsets,
+                refresh_status=force_recheck,
+                enable_all_toolsets=auto_discover,
                 toolset_tags=toolset_tags,
             )
         else:
             return self._list_all_toolsets(
                 dal,
                 check_prerequisites=True,
-                enable_all_toolsets=enable_all_toolsets,
+                enable_all_toolsets=auto_discover,
                 toolset_tags=toolset_tags,
             )
 
@@ -488,9 +492,9 @@ class ToolsetManager:
         return self.list_toolsets(
             dal,
             toolset_tags=[ToolsetTag.CORE, ToolsetTag.CLI],
-            enable_all_toolsets=True,
-            use_status_cache=True,
-            refresh_status=refresh_status,
+            auto_discover=True,
+            lazy_prerequisite_checks=True,
+            force_recheck=refresh_status,
         )
 
     def list_server_toolsets(
@@ -503,8 +507,8 @@ class ToolsetManager:
         return self.list_toolsets(
             dal,
             toolset_tags=[ToolsetTag.CORE, ToolsetTag.CLUSTER],
-            enable_all_toolsets=False,
-            use_status_cache=False,
+            auto_discover=False,
+            lazy_prerequisite_checks=False,
         )
 
     def refresh_toolsets_and_get_changes(
@@ -512,7 +516,7 @@ class ToolsetManager:
         current_toolsets: List[Toolset],
         dal: Optional[SupabaseDal] = None,
         toolset_tags: Optional[List[ToolsetTag]] = None,
-        enable_all_toolsets: bool = False,
+        auto_discover: bool = False,
     ) -> tuple[List[Toolset], List[tuple[str, ToolsetStatusEnum, ToolsetStatusEnum]]]:
         old_status_by_name: dict[str, ToolsetStatusEnum] = {
             toolset.name: toolset.status for toolset in current_toolsets
@@ -521,7 +525,7 @@ class ToolsetManager:
         new_toolsets = self._list_all_toolsets(
             dal,
             check_prerequisites=True,
-            enable_all_toolsets=enable_all_toolsets,
+            enable_all_toolsets=auto_discover,
             toolset_tags=toolset_tags,
             silent=True,
         )
@@ -547,7 +551,7 @@ class ToolsetManager:
             current_toolsets,
             dal,
             toolset_tags=[ToolsetTag.CORE, ToolsetTag.CLUSTER],
-            enable_all_toolsets=False,
+            auto_discover=False,
         )
 
     def _load_toolsets_from_paths(
