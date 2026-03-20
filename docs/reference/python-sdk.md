@@ -18,8 +18,14 @@ config = Config(
 
 # Create AI instance
 ai = config.create_toolcalling_llm(
+    # Only load toolsets tagged CORE or CLI (excludes server-only CLUSTER toolsets)
     toolset_tag_filter=[ToolsetTag.CORE, ToolsetTag.CLI],
+    # Auto-enable every toolset that works without explicit config (e.g. kubectl on PATH)
     auto_discover=True,
+    # Remaining params use defaults:
+    #   defer_prerequisites=True   — cache health-check results to disk for fast restarts
+    #   force_recheck_prerequisites=False — use cached results if available
+    #   reuse_executor=False       — create a fresh executor each call (fine for CLI)
 )
 
 # Ask a question
