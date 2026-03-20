@@ -332,9 +332,9 @@ def ask(
 
     with tool_result_storage() as tool_results_dir:
         ai = config.create_toolcalling_llm(
-            toolset_tags=[ToolsetTag.CORE, ToolsetTag.CLI],
+            toolset_tag_filter=[ToolsetTag.CORE, ToolsetTag.CLI],
             auto_discover=True,
-            force_recheck=refresh_toolsets,
+            force_recheck_prerequisites=refresh_toolsets,
             tracer=tracer,
             model=model,
             tool_results_dir=tool_results_dir,
@@ -471,7 +471,7 @@ def alertmanager(
 
     with tool_result_storage() as tool_results_dir:
         ai = config.create_toolcalling_llm(
-            toolset_tags=[ToolsetTag.CORE, ToolsetTag.CLI],
+            toolset_tag_filter=[ToolsetTag.CORE, ToolsetTag.CLI],
             auto_discover=True,
             model=model,
             tool_results_dir=tool_results_dir,
@@ -607,7 +607,7 @@ def jira(
     results = []
     with tool_result_storage() as tool_results_dir:
         ai = config.create_toolcalling_llm(
-            toolset_tags=[ToolsetTag.CORE, ToolsetTag.CLI],
+            toolset_tag_filter=[ToolsetTag.CORE, ToolsetTag.CLI],
             auto_discover=True,
             model=model,
             tool_results_dir=tool_results_dir,
@@ -702,7 +702,7 @@ def ticket(
 
     with tool_result_storage() as tool_results_dir:
         ai = ticket_source.config.create_toolcalling_llm(
-            toolset_tags=[ToolsetTag.CORE, ToolsetTag.CLI],
+            toolset_tag_filter=[ToolsetTag.CORE, ToolsetTag.CLI],
             auto_discover=True,
             model=model,
             tool_results_dir=tool_results_dir,
@@ -816,7 +816,7 @@ def github(
     )
     with tool_result_storage() as tool_results_dir:
         ai = config.create_toolcalling_llm(
-            toolset_tags=[ToolsetTag.CORE, ToolsetTag.CLI],
+            toolset_tag_filter=[ToolsetTag.CORE, ToolsetTag.CLI],
             auto_discover=True,
             model=model,
             tool_results_dir=tool_results_dir,
@@ -897,7 +897,7 @@ def pagerduty(
     results = []
     with tool_result_storage() as tool_results_dir:
         ai = config.create_toolcalling_llm(
-            toolset_tags=[ToolsetTag.CORE, ToolsetTag.CLI],
+            toolset_tag_filter=[ToolsetTag.CORE, ToolsetTag.CLI],
             auto_discover=True,
             model=model,
             tool_results_dir=tool_results_dir,
@@ -976,7 +976,7 @@ def opsgenie(
     )
     with tool_result_storage() as tool_results_dir:
         ai = config.create_toolcalling_llm(
-            toolset_tags=[ToolsetTag.CORE, ToolsetTag.CLI],
+            toolset_tag_filter=[ToolsetTag.CORE, ToolsetTag.CLI],
             auto_discover=True,
             model=model,
             tool_results_dir=tool_results_dir,

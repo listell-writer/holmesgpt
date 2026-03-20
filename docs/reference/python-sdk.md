@@ -18,7 +18,7 @@ config = Config(
 
 # Create AI instance
 ai = config.create_toolcalling_llm(
-    toolset_tags=[ToolsetTag.CORE, ToolsetTag.CLI],
+    toolset_tag_filter=[ToolsetTag.CORE, ToolsetTag.CLI],
     auto_discover=True,
 )
 
@@ -39,7 +39,7 @@ print(response.result)
 
 ```python
 ai = config.create_toolcalling_llm(
-    toolset_tags=[ToolsetTag.CORE, ToolsetTag.CLI],
+    toolset_tag_filter=[ToolsetTag.CORE, ToolsetTag.CLI],
     auto_discover=True,
 )
 
@@ -82,7 +82,7 @@ config = Config(
     model="anthropic/claude-sonnet-4-5-20250929",
 )
 ai = config.create_toolcalling_llm(
-    toolset_tags=[ToolsetTag.CORE, ToolsetTag.CLI],
+    toolset_tag_filter=[ToolsetTag.CORE, ToolsetTag.CLI],
     auto_discover=True,
 )
 
@@ -239,7 +239,7 @@ config = Config(
 )
 
 ai = config.create_toolcalling_llm(
-    toolset_tags=[ToolsetTag.CORE, ToolsetTag.CLI],
+    toolset_tag_filter=[ToolsetTag.CORE, ToolsetTag.CLI],
     auto_discover=True,
 )
 
@@ -297,10 +297,10 @@ Both methods accept the same toolset parameters. `create_toolcalling_llm` additi
 
 | Parameter | Type | Default | Description |
 |-----------|------|---------|-------------|
-| `toolset_tags` | `list[ToolsetTag]` | `[CORE]` | Which toolsets to load, filtered by tag. Each toolset declares tags like `CORE`, `CLI`, or `CLUSTER`. Only toolsets with at least one matching tag are included. |
-| `auto_discover` | `bool` | `True` | When `True`, automatically enable every toolset that can work without explicit configuration. When `False`, only toolsets explicitly enabled in config are loaded. |
-| `lazy_prerequisite_checks` | `bool` | `True` | When `True`, prerequisite results (health checks, API pings) are cached to disk; on repeat runs only config validity is re-checked and full prerequisites are deferred until first tool use. When `False`, all prerequisites are checked eagerly every time. |
-| `force_recheck` | `bool` | `False` | Ignore cached prerequisite results and re-run all checks. Only has effect when `lazy_prerequisite_checks=True`. |
+| `toolset_tag_filter` | `list[ToolsetTag]` | `[CORE]` | Only include toolsets whose tags overlap with this list. Toolsets that don't match are excluded entirely — they won't be loaded, checked, or returned. This filter runs first, before `auto_discover` decides which of the remaining toolsets to enable. |
+| `auto_discover` | `bool` | `True` | When `True`, automatically enable every toolset (that passed the tag filter) that can work without explicit configuration. When `False`, only toolsets explicitly enabled in config are loaded. |
+| `defer_prerequisites` | `bool` | `True` | When `True`, prerequisite results (health checks, API pings) are cached to disk; on repeat runs only config validity is re-checked and full prerequisites are deferred until first tool use. When `False`, all prerequisites are checked eagerly every time. |
+| `force_recheck_prerequisites` | `bool` | `False` | Ignore cached prerequisite results and re-run all checks now. Only has effect when `defer_prerequisites=True`. |
 | `reuse_executor` | `bool` | `False` | When `True`, the created executor is cached in memory on the `Config` instance. Subsequent calls return the same executor without reloading toolsets. Useful for long-lived server processes. |
 | `model` | `str` | *None* | Model override for this LLM instance. |
 
@@ -309,6 +309,16 @@ Both methods accept the same toolset parameters. `create_toolcalling_llm` additi
 - `ToolsetTag.CORE` — Foundational toolsets (Kubernetes, etc.)
 - `ToolsetTag.CLI` — Tools for interactive CLI use (filesystem, local commands)
 - `ToolsetTag.CLUSTER` — Tools for server/cluster deployments (cluster-wide monitoring)
+
+**How `toolset_tag_filter` and `auto_discover` interact:**
+
+These are independent, sequential steps. First, `toolset_tag_filter` narrows down *which* toolsets are even considered. Then, `auto_discover` decides which of those remaining toolsets get enabled:
+
+1. Load all toolsets (built-in + config + custom)
+2. `auto_discover=True` → auto-enable toolsets that don't need explicit config
+3. Filter by `toolset_tag_filter` → remove toolsets that don't match any tag
+4. Check prerequisites on enabled toolsets
+5. Return matching toolsets
 
 ### `ToolCallingLLM`
 

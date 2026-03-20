@@ -28,7 +28,7 @@ config = Config(
 )
 
 ai = config.create_toolcalling_llm(
-    toolset_tags=[ToolsetTag.CORE, ToolsetTag.CLI],
+    toolset_tag_filter=[ToolsetTag.CORE, ToolsetTag.CLI],
     auto_discover=True,
 )
 

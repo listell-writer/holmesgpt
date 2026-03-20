@@ -107,40 +107,45 @@ class ToolsetManager:
     def list_toolsets(
         self,
         dal: Optional[SupabaseDal] = None,
-        toolset_tags: Optional[List[ToolsetTag]] = None,
+        toolset_tag_filter: Optional[List[ToolsetTag]] = None,
         auto_discover: bool = False,
-        lazy_prerequisite_checks: bool = True,
-        force_recheck: bool = False,
+        defer_prerequisites: bool = True,
+        force_recheck_prerequisites: bool = False,
     ) -> List[Toolset]:
         """
         List toolsets matching the given tags, with explicit behavioral controls.
 
         Args:
             dal: Optional database access layer.
-            toolset_tags: Which toolset tags to include (e.g. [ToolsetTag.CORE, ToolsetTag.CLI]).
+            toolset_tag_filter: Only include toolsets whose tags overlap with this
+                list (e.g. [ToolsetTag.CORE, ToolsetTag.CLI]). Toolsets that don't
+                match any tag are excluded entirely — they won't be loaded, checked,
+                or returned. This filter is independent of ``auto_discover``: a
+                toolset must pass the tag filter first, then ``auto_discover``
+                controls whether it gets enabled automatically.
             auto_discover: If True, automatically enable every toolset that can work
                 without explicit configuration. If False, only toolsets explicitly
                 enabled in config are loaded.
-            lazy_prerequisite_checks: If True, prerequisite results (health checks,
+            defer_prerequisites: If True, prerequisite results (health checks,
                 API pings) are cached to disk; on subsequent runs only config validity
                 is re-checked and full prerequisites are deferred until first tool use.
                 If False, all prerequisites are checked eagerly every time.
-            force_recheck: Ignore cached prerequisite results and re-run all checks.
-                Only has effect when lazy_prerequisite_checks=True.
+            force_recheck_prerequisites: Ignore cached prerequisite results and re-run
+                all checks now. Only has effect when defer_prerequisites=True.
         """
-        if lazy_prerequisite_checks:
+        if defer_prerequisites:
             return self.load_toolset_with_status(
                 dal,
-                refresh_status=force_recheck,
+                refresh_status=force_recheck_prerequisites,
                 enable_all_toolsets=auto_discover,
-                toolset_tags=toolset_tags,
+                toolset_tags=toolset_tag_filter,
             )
         else:
             return self._list_all_toolsets(
                 dal,
                 check_prerequisites=True,
                 enable_all_toolsets=auto_discover,
-                toolset_tags=toolset_tags,
+                toolset_tags=toolset_tag_filter,
             )
 
     def _list_all_toolsets(
@@ -491,10 +496,10 @@ class ToolsetManager:
         """
         return self.list_toolsets(
             dal,
-            toolset_tags=[ToolsetTag.CORE, ToolsetTag.CLI],
+            toolset_tag_filter=[ToolsetTag.CORE, ToolsetTag.CLI],
             auto_discover=True,
-            lazy_prerequisite_checks=True,
-            force_recheck=refresh_status,
+            defer_prerequisites=True,
+            force_recheck_prerequisites=refresh_status,
         )
 
     def list_server_toolsets(
@@ -506,16 +511,16 @@ class ToolsetManager:
         """
         return self.list_toolsets(
             dal,
-            toolset_tags=[ToolsetTag.CORE, ToolsetTag.CLUSTER],
+            toolset_tag_filter=[ToolsetTag.CORE, ToolsetTag.CLUSTER],
             auto_discover=False,
-            lazy_prerequisite_checks=False,
+            defer_prerequisites=False,
         )
 
     def refresh_toolsets_and_get_changes(
         self,
         current_toolsets: List[Toolset],
         dal: Optional[SupabaseDal] = None,
-        toolset_tags: Optional[List[ToolsetTag]] = None,
+        toolset_tag_filter: Optional[List[ToolsetTag]] = None,
         auto_discover: bool = False,
     ) -> tuple[List[Toolset], List[tuple[str, ToolsetStatusEnum, ToolsetStatusEnum]]]:
         old_status_by_name: dict[str, ToolsetStatusEnum] = {
@@ -526,7 +531,7 @@ class ToolsetManager:
             dal,
             check_prerequisites=True,
             enable_all_toolsets=auto_discover,
-            toolset_tags=toolset_tags,
+            toolset_tags=toolset_tag_filter,
             silent=True,
         )
 
@@ -550,7 +555,7 @@ class ToolsetManager:
         return self.refresh_toolsets_and_get_changes(
             current_toolsets,
             dal,
-            toolset_tags=[ToolsetTag.CORE, ToolsetTag.CLUSTER],
+            toolset_tag_filter=[ToolsetTag.CORE, ToolsetTag.CLUSTER],
             auto_discover=False,
         )
 
