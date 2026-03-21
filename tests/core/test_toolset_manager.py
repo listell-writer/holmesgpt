@@ -353,14 +353,9 @@ def test_mcp_servers_from_config(toolset_manager):
 
 
 def test_inject_fast_model_with_existing_tool_transformers():
-    """Test that global fast model is injected into tool-level transformer instances."""
-    from unittest.mock import patch as _patch
-
+    """Test that global fast model is injected into tool transformer configs."""
     from holmes.core.transformers import Transformer
 
-    global_fast_model = "gpt-4o-mini"
-
-    # Create a toolset with a tool that has transformers
     toolset = YAMLToolset(
         name="test_toolset",
         tags=[ToolsetTag.CORE],
@@ -380,16 +375,14 @@ def test_inject_fast_model_with_existing_tool_transformers():
         ],
     )
 
-    manager = ToolsetManager(global_fast_model=global_fast_model)
-    with _patch("holmes.core.transformers.llm_summarize.DefaultLLM"):
-        manager._inject_fast_model_into_transformers([toolset])
+    manager = ToolsetManager(global_fast_model="gpt-4o-mini")
+    manager._inject_fast_model_into_transformers([toolset])
 
-    # Verify the cached instance received the global_fast_model
-    tool = toolset.tools[0]
-    instance = tool._transformer_instances[0]
-    assert instance.global_fast_model == "gpt-4o-mini"
-    # Original config on the Transformer model is unchanged
-    assert "global_fast_model" not in toolset.tools[0].transformers[0].config
+    # Config dict should have global_fast_model, original values preserved
+    config = toolset.tools[0].transformers[0].config
+    assert config["global_fast_model"] == "gpt-4o-mini"
+    assert config["input_threshold"] == 1000
+    assert config["prompt"] == "Custom"
 
 
 def test_no_injection_when_no_transformers():
@@ -427,21 +420,14 @@ def test_no_injection_when_no_global_fast_model():
         ],
     )
 
-    tool = toolset.tools[0]
-    instance = tool._transformer_instances[0]
-    assert instance.global_fast_model is None
-
     manager = ToolsetManager()  # No global fast model
     manager._inject_fast_model_into_transformers([toolset])
 
-    # Instance should remain unchanged
-    assert instance.global_fast_model is None
+    assert "global_fast_model" not in toolset.tools[0].transformers[0].config
 
 
 def test_injection_skips_explicit_fast_model():
     """Test that injection is skipped when transformer has explicit fast_model."""
-    from unittest.mock import patch as _patch
-
     from holmes.core.transformers import Transformer
 
     toolset = YAMLToolset(
@@ -464,21 +450,17 @@ def test_injection_skips_explicit_fast_model():
     )
 
     manager = ToolsetManager(global_fast_model="gpt-4o-mini")
-    with _patch("holmes.core.transformers.llm_summarize.DefaultLLM"):
-        manager._inject_fast_model_into_transformers([toolset])
+    manager._inject_fast_model_into_transformers([toolset])
 
-    # Explicit fast_model should be preserved; global_fast_model not set
-    tool = toolset.tools[0]
-    instance = tool._transformer_instances[0]
-    assert instance.fast_model == "my-model"
-    assert instance.global_fast_model is None
+    # Explicit fast_model → global_fast_model should NOT be injected
+    config = toolset.tools[0].transformers[0].config
+    assert config["fast_model"] == "my-model"
+    assert "global_fast_model" not in config
 
 
 @patch("holmes.core.toolset_registry._discover_builtin_toolsets")
 def test_list_all_toolsets_applies_fast_model_injection(mock_load_builtin_toolsets):
-    """Integration test that global fast model reaches transformer instances during loading."""
-    from unittest.mock import patch as _patch
-
+    """Integration test that global fast model reaches transformer configs during loading."""
     from holmes.core.transformers import Transformer
 
     toolset = YAMLToolset(
@@ -501,18 +483,14 @@ def test_list_all_toolsets_applies_fast_model_injection(mock_load_builtin_toolse
     )
     mock_load_builtin_toolsets.return_value = [toolset]
 
-    global_fast_model = "azure/gpt-4.1"
-    manager = ToolsetManager(global_fast_model=global_fast_model)
-
-    with _patch("holmes.core.transformers.llm_summarize.DefaultLLM"):
-        result = manager._list_all_toolsets(check_prerequisites=False)
+    manager = ToolsetManager(global_fast_model="azure/gpt-4.1")
+    result = manager._list_all_toolsets(check_prerequisites=False)
 
     k8s_toolset = next(t for t in result if t.name == "kubernetes")
-    tool = k8s_toolset.tools[0]
-    instance = tool._transformer_instances[0]
-    assert instance.global_fast_model == "azure/gpt-4.1"
-    assert instance.input_threshold == 1000
-    assert instance.prompt == "K8s prompt"
+    config = k8s_toolset.tools[0].transformers[0].config
+    assert config["global_fast_model"] == "azure/gpt-4.1"
+    assert config["input_threshold"] == 1000
+    assert config["prompt"] == "K8s prompt"
 
 
 @patch("holmes.core.toolset_registry._discover_builtin_toolsets")

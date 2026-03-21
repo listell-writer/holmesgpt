@@ -12,77 +12,70 @@ from holmes.core.transformers import Transformer
 
 def create_kubernetes_toolset():
     """Create a Kubernetes toolset similar to the real one with transformers."""
-    kubectl_describe = YAMLTool(
-        name="kubectl_describe",
-        description="Run kubectl describe",
-        command="kubectl describe {{ kind }} {{ name }}",
-        transformers=[
-            Transformer(
-                name="llm_summarize",
-                config={
-                    "input_threshold": 1000,
-                    "prompt": "Summarize kubectl describe output...",
-                },
-            )
-        ],
-    )
-
-    kubectl_get = YAMLTool(
-        name="kubectl_get_by_kind_in_namespace",
-        description="Run kubectl get",
-        command="kubectl get {{ kind }} -n {{ namespace }}",
-        transformers=[
-            Transformer(
-                name="llm_summarize",
-                config={
-                    "input_threshold": 1000,
-                    "prompt": "Summarize kubectl output...",
-                },
-            )
-        ],
-    )
-
     return YAMLToolset(
         name="kubernetes/core",
         tags=[ToolsetTag.CORE],
         description="Kubernetes toolset",
-        tools=[kubectl_describe, kubectl_get],
+        tools=[
+            {
+                "name": "kubectl_describe",
+                "description": "Run kubectl describe",
+                "command": "kubectl describe {{ kind }} {{ name }}",
+                "transformers": [
+                    Transformer(
+                        name="llm_summarize",
+                        config={
+                            "input_threshold": 1000,
+                            "prompt": "Summarize kubectl describe output...",
+                        },
+                    )
+                ],
+            },
+            {
+                "name": "kubectl_get_by_kind_in_namespace",
+                "description": "Run kubectl get",
+                "command": "kubectl get {{ kind }} -n {{ namespace }}",
+                "transformers": [
+                    Transformer(
+                        name="llm_summarize",
+                        config={
+                            "input_threshold": 1000,
+                            "prompt": "Summarize kubectl output...",
+                        },
+                    )
+                ],
+            },
+        ],
     )
 
 
 def test_cli_fast_model_integration_with_kubernetes():
     """
-    Integration test: CLI --fast-model should reach tool transformer instances.
+    Integration test: CLI --fast-model should inject into transformer configs.
     """
-    global_fast_model = "azure/gpt-4.1"
     kubernetes_toolset = create_kubernetes_toolset()
 
     with patch("holmes.core.toolset_registry._discover_builtin_toolsets") as mock_load:
         mock_load.return_value = [kubernetes_toolset]
 
-        manager = ToolsetManager(global_fast_model=global_fast_model)
-        with patch("holmes.core.transformers.llm_summarize.DefaultLLM"):
-            toolsets = manager._list_all_toolsets(check_prerequisites=False)
+        manager = ToolsetManager(global_fast_model="azure/gpt-4.1")
+        toolsets = manager._list_all_toolsets(check_prerequisites=False)
 
         k8s_toolset = next(t for t in toolsets if t.name == "kubernetes/core")
-
-        # Verify transformer instances received the global_fast_model
         kubectl_describe = next(
             t for t in k8s_toolset.tools if t.name == "kubectl_describe"
         )
-        instance = kubectl_describe._transformer_instances[0]
-        assert instance.global_fast_model == "azure/gpt-4.1"
-        assert instance.input_threshold == 1000
+        config = kubectl_describe.transformers[0].config
+
+        assert config["global_fast_model"] == "azure/gpt-4.1"
+        assert config["input_threshold"] == 1000
+        assert "prompt" in config
 
 
 def test_fast_model_injection_chain():
     """
-    Test that global_fast_model reaches tool instances (both tool-level and inherited).
+    Test global_fast_model reaches both tool-level and inherited transformers.
     """
-    global_fast_model = "gpt-4.1"
-
-    # Pass tools as dicts to exercise the normal YAML parsing flow
-    # (preprocess_tools merges toolset transformers into tools as dicts)
     toolset = YAMLToolset(
         name="test_toolset",
         tags=[ToolsetTag.CORE],
@@ -113,40 +106,28 @@ def test_fast_model_injection_chain():
     with patch("holmes.core.toolset_registry._discover_builtin_toolsets") as mock_load:
         mock_load.return_value = [toolset]
 
-        manager = ToolsetManager(global_fast_model=global_fast_model)
-        with patch("holmes.core.transformers.llm_summarize.DefaultLLM"):
-            toolsets = manager._list_all_toolsets(check_prerequisites=False)
+        manager = ToolsetManager(global_fast_model="gpt-4.1")
+        toolsets = manager._list_all_toolsets(check_prerequisites=False)
 
         test_toolset = toolsets[0]
 
-        # Tool with explicit transformer should have its threshold preserved
+        # Tool with explicit transformer: threshold overrides toolset, gets fast_model
         specific_tool = next(t for t in test_toolset.tools if t.name == "specific_tool")
-        instance = specific_tool._transformer_instances[0]
-        assert instance.global_fast_model == "gpt-4.1"
-        assert instance.input_threshold == 2000
+        config = specific_tool.transformers[0].config
+        assert config["global_fast_model"] == "gpt-4.1"
+        assert config["input_threshold"] == 2000
 
-        # Tool that inherited from toolset should also get global_fast_model
+        # Tool that inherited from toolset: gets toolset config + fast_model
         generic_tool = next(t for t in test_toolset.tools if t.name == "generic_tool")
-        instance = generic_tool._transformer_instances[0]
-        assert instance.global_fast_model == "gpt-4.1"
-        assert instance.input_threshold == 1000  # From toolset
+        config = generic_tool.transformers[0].config
+        assert config["global_fast_model"] == "gpt-4.1"
+        assert config["input_threshold"] == 1000
 
 
 def test_fast_model_injection_with_different_transformers():
     """
-    Test that fast model injection reaches tool instances correctly.
+    Test that fast model injection works with toolset-level and tool-level transformers.
     """
-    global_fast_model = "gpt-4o-mini"
-
-    tool = YAMLTool(
-        name="multi_transformer_tool",
-        description="Tool with transformer",
-        command="echo test",
-        transformers=[
-            Transformer(name="llm_summarize", config={"prompt": "Custom prompt"})
-        ],
-    )
-
     toolset = YAMLToolset(
         name="multi_transformer_toolset",
         tags=[ToolsetTag.CORE],
@@ -157,28 +138,34 @@ def test_fast_model_injection_with_different_transformers():
                 config={"input_threshold": 1000, "prompt": "Toolset prompt"},
             )
         ],
-        tools=[tool],
+        tools=[
+            {
+                "name": "multi_transformer_tool",
+                "description": "Tool with transformer",
+                "command": "echo test",
+                "transformers": [
+                    Transformer(name="llm_summarize", config={"prompt": "Custom prompt"})
+                ],
+            },
+        ],
     )
 
     with patch("holmes.core.toolset_registry._discover_builtin_toolsets") as mock_load:
         mock_load.return_value = [toolset]
 
-        manager = ToolsetManager(global_fast_model=global_fast_model)
-        with patch("holmes.core.transformers.llm_summarize.DefaultLLM"):
-            toolsets = manager._list_all_toolsets(check_prerequisites=False)
+        manager = ToolsetManager(global_fast_model="gpt-4o-mini")
+        toolsets = manager._list_all_toolsets(check_prerequisites=False)
 
         result_tool = toolsets[0].tools[0]
-        instance = result_tool._transformer_instances[0]
-        assert instance.global_fast_model == "gpt-4o-mini"
-        assert "Custom prompt" in instance.prompt
+        config = result_tool.transformers[0].config
+        assert config["global_fast_model"] == "gpt-4o-mini"
+        assert "Custom prompt" in config["prompt"]
 
 
 def test_backward_compatibility():
     """
     Test that toolsets without transformers still work correctly (no injection occurs).
     """
-    global_fast_model = "gpt-4o-mini"
-
     simple_toolset = YAMLToolset(
         name="simple_toolset",
         tags=[ToolsetTag.CORE],
@@ -189,7 +176,7 @@ def test_backward_compatibility():
     with patch("holmes.core.toolset_registry._discover_builtin_toolsets") as mock_load:
         mock_load.return_value = [simple_toolset]
 
-        manager = ToolsetManager(global_fast_model=global_fast_model)
+        manager = ToolsetManager(global_fast_model="gpt-4o-mini")
         toolsets = manager._list_all_toolsets(check_prerequisites=False)
 
         result_toolset = toolsets[0]
@@ -227,74 +214,69 @@ def test_no_global_configs_no_regression():
 def test_toolset_with_only_tool_level_transformers_gets_fast_model():
     """
     Test that toolsets with ONLY tool-level transformers (no toolset-level transformers)
-    DO receive global fast-model settings via instance injection.
+    DO receive global fast-model settings.
     """
-    global_fast_model = "gpt-4o-mini"
-
-    jq_query_tool = YAMLTool(
-        name="kubernetes_jq_query",
-        description="Query Kubernetes Resources with jq",
-        command="kubectl get {{ kind }} --all-namespaces -o json | jq -r {{ jq_expr }}",
-        transformers=[
-            Transformer(
-                name="llm_summarize",
-                config={
-                    "input_threshold": 1000,
-                    "prompt": "Summarize jq query output focusing on patterns...",
-                },
-            )
-        ],
-    )
-
     toolset = YAMLToolset(
         name="kubernetes/core",
         tags=[ToolsetTag.CORE],
         description="Kubernetes toolset with only tool-level transformers",
-        tools=[jq_query_tool],
+        tools=[
+            {
+                "name": "kubernetes_jq_query",
+                "description": "Query Kubernetes Resources with jq",
+                "command": "kubectl get {{ kind }} --all-namespaces -o json | jq -r {{ jq_expr }}",
+                "transformers": [
+                    Transformer(
+                        name="llm_summarize",
+                        config={
+                            "input_threshold": 1000,
+                            "prompt": "Summarize jq query output focusing on patterns...",
+                        },
+                    )
+                ],
+            }
+        ],
     )
 
     with patch("holmes.core.toolset_registry._discover_builtin_toolsets") as mock_load:
         mock_load.return_value = [toolset]
 
-        manager = ToolsetManager(global_fast_model=global_fast_model)
-        with patch("holmes.core.transformers.llm_summarize.DefaultLLM"):
-            toolsets = manager._list_all_toolsets(check_prerequisites=False)
+        manager = ToolsetManager(global_fast_model="gpt-4o-mini")
+        toolsets = manager._list_all_toolsets(check_prerequisites=False)
 
         jq_tool = next(
             t for t in toolsets[0].tools if t.name == "kubernetes_jq_query"
         )
-        instance = jq_tool._transformer_instances[0]
-        assert instance.global_fast_model == "gpt-4o-mini"
-        assert instance.input_threshold == 1000
+        config = jq_tool.transformers[0].config
+        assert config["global_fast_model"] == "gpt-4o-mini"
+        assert config["input_threshold"] == 1000
 
 
 def test_toolset_with_toolset_level_transformers_works():
     """
     Contrast test: Verify that toolsets WITH toolset-level transformers
-    DO receive global fast-model injection on tool instances.
+    DO receive global fast-model injection on tool configs.
     """
-    global_fast_model = "gpt-4o-mini"
-
-    kubectl_describe = YAMLTool(
-        name="kubectl_describe",
-        description="Run kubectl describe",
-        command="kubectl describe {{ kind }} {{ name }}",
-        transformers=[
-            Transformer(
-                name="llm_summarize",
-                config={
-                    "input_threshold": 1000,
-                    "prompt": "Summarize kubectl describe output...",
-                },
-            )
-        ],
-    )
-
     toolset = YAMLToolset(
         name="kubernetes/core",
         tags=[ToolsetTag.CORE],
         description="Kubernetes toolset with toolset-level transformers",
-        tools=[kubectl_describe],
+        tools=[
+            {
+                "name": "kubectl_describe",
+                "description": "Run kubectl describe",
+                "command": "kubectl describe {{ kind }} {{ name }}",
+                "transformers": [
+                    Transformer(
+                        name="llm_summarize",
+                        config={
+                            "input_threshold": 1000,
+                            "prompt": "Summarize kubectl describe output...",
+                        },
+                    )
+                ],
+            }
+        ],
         transformers=[
             Transformer(
                 name="llm_summarize",
@@ -306,14 +288,13 @@ def test_toolset_with_toolset_level_transformers_works():
     with patch("holmes.core.toolset_registry._discover_builtin_toolsets") as mock_load:
         mock_load.return_value = [toolset]
 
-        manager = ToolsetManager(global_fast_model=global_fast_model)
-        with patch("holmes.core.transformers.llm_summarize.DefaultLLM"):
-            toolsets = manager._list_all_toolsets(check_prerequisites=False)
+        manager = ToolsetManager(global_fast_model="gpt-4o-mini")
+        toolsets = manager._list_all_toolsets(check_prerequisites=False)
 
         describe_tool = next(
             t for t in toolsets[0].tools if t.name == "kubectl_describe"
         )
-        instance = describe_tool._transformer_instances[0]
-        assert instance.global_fast_model == "gpt-4o-mini"
-        assert instance.input_threshold == 1000
-        assert "Summarize kubectl describe output" in instance.prompt
+        config = describe_tool.transformers[0].config
+        assert config["global_fast_model"] == "gpt-4o-mini"
+        assert config["input_threshold"] == 1000
+        assert "Summarize kubectl describe output" in config["prompt"]

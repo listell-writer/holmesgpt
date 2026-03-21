@@ -511,27 +511,18 @@ class ToolsetManager:
     # ------------------------------------------------------------------
 
     def _inject_fast_model_into_transformers(self, toolsets: List[Toolset]) -> None:
-        """Propagate ``global_fast_model`` to cached transformer instances.
+        """Set ``global_fast_model`` on ``llm_summarize`` transformer configs.
 
-        Iterates every already-created :class:`LLMSummarizeTransformer` instance
-        on each tool and calls :meth:`set_global_fast_model` — no config-dict
-        mutation or instance recreation required.
+        Safe to call before transformer instances are created (they are lazy),
+        so no instance recreation is needed.
         """
         if not self.global_fast_model:
             return
 
-        from holmes.core.transformers.llm_summarize import LLMSummarizeTransformer
-
-        injected = 0
         for toolset in toolsets:
             if not hasattr(toolset, "tools") or not toolset.tools:
                 continue
             for tool in toolset.tools:
-                for instance in tool._transformer_instances or []:
-                    if isinstance(instance, LLMSummarizeTransformer):
-                        instance.set_global_fast_model(self.global_fast_model)
-                        injected += 1
-
-        logging.debug(
-            f"Injected global_fast_model={self.global_fast_model!r} into {injected} transformer instances"
-        )
+                for transformer in tool.transformers or []:
+                    if transformer.name == "llm_summarize" and "fast_model" not in transformer.config:
+                        transformer.config["global_fast_model"] = self.global_fast_model
