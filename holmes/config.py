@@ -340,7 +340,10 @@ class Config(RobustaBaseConfig):
         tags = toolset_tag_filter or [ToolsetTag.CORE]
 
         cache_key = self._executor_cache_key(tags, enable_all_toolsets_possible)
-        if not self._cached_tool_executor or self._cached_executor_key != cache_key:
+        with self._executor_lock:
+            cached_executor = self._cached_tool_executor
+            cached_key = self._cached_executor_key
+        if not cached_executor or cached_key != cache_key:
             # Cold start or key mismatch — run live prerequisite checks.
             self.create_tool_executor(
                 dal,
