@@ -64,6 +64,13 @@ class ToolsetManager:
 
         self.custom_toolsets_from_cli = custom_toolsets_from_cli
         self.global_fast_model = global_fast_model
+
+        # Set class-level default once — all future LLMSummarizeTransformer
+        # instances will pick it up automatically (no per-tool injection).
+        if global_fast_model:
+            from holmes.core.transformers.llm_summarize import LLMSummarizeTransformer
+
+            LLMSummarizeTransformer.set_default_fast_model(global_fast_model)
         self.config_file_path = config_file_path
         # Keep reference to custom_toolset_paths for hash tracking
         self._custom_toolset_paths = custom_toolset_paths
@@ -174,9 +181,7 @@ class ToolsetManager:
             tag_filter=toolset_tags,
         )
 
-        # Inject global fast_model into all toolsets
         final_toolsets = list(toolsets_by_name.values())
-        self._inject_fast_model_into_transformers(final_toolsets)
 
         # check_prerequisites against each enabled toolset
         if not check_prerequisites:
@@ -443,9 +448,6 @@ class ToolsetManager:
             check_conflict_default=True,
         )
 
-        # Inject fast_model into CLI custom toolsets
-        self._inject_fast_model_into_transformers(custom_toolsets_from_cli)
-
         # custom toolsets from cli should not override custom toolsets from config
         enabled_toolsets_from_cli: List[Toolset] = []
         for custom_toolset_from_cli in custom_toolsets_from_cli:
@@ -507,22 +509,3 @@ class ToolsetManager:
             toolset.check_config_prerequisites()
 
     # ------------------------------------------------------------------
-    # Transformer injection (stays on manager — lifecycle concern)
-    # ------------------------------------------------------------------
-
-    def _inject_fast_model_into_transformers(self, toolsets: List[Toolset]) -> None:
-        """Set ``global_fast_model`` on ``llm_summarize`` transformer configs.
-
-        Safe to call before transformer instances are created (they are lazy),
-        so no instance recreation is needed.
-        """
-        if not self.global_fast_model:
-            return
-
-        for toolset in toolsets:
-            if not hasattr(toolset, "tools") or not toolset.tools:
-                continue
-            for tool in toolset.tools:
-                for transformer in tool.transformers or []:
-                    if transformer.name == "llm_summarize" and "fast_model" not in transformer.config:
-                        transformer.config["global_fast_model"] = self.global_fast_model

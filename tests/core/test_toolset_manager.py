@@ -352,145 +352,49 @@ def test_mcp_servers_from_config(toolset_manager):
 # Tests for transformer config merging functionality
 
 
-def test_inject_fast_model_with_existing_tool_transformers():
-    """Test that global fast model is injected into tool transformer configs."""
-    from holmes.core.transformers import Transformer
+def test_default_fast_model_set_on_class():
+    """Test that ToolsetManager sets the class-level default fast model."""
+    from holmes.core.transformers.llm_summarize import LLMSummarizeTransformer
 
-    toolset = YAMLToolset(
-        name="test_toolset",
-        tags=[ToolsetTag.CORE],
-        description="Test toolset",
-        tools=[
-            {
-                "name": "test_tool",
-                "description": "A test tool",
-                "command": "echo hello",
-                "transformers": [
-                    Transformer(
-                        name="llm_summarize",
-                        config={"input_threshold": 1000, "prompt": "Custom"},
-                    )
-                ],
-            }
-        ],
-    )
-
-    manager = ToolsetManager(global_fast_model="gpt-4o-mini")
-    manager._inject_fast_model_into_transformers([toolset])
-
-    # Config dict should have global_fast_model, original values preserved
-    config = toolset.tools[0].transformers[0].config
-    assert config["global_fast_model"] == "gpt-4o-mini"
-    assert config["input_threshold"] == 1000
-    assert config["prompt"] == "Custom"
+    original = LLMSummarizeTransformer._default_fast_model
+    try:
+        ToolsetManager(global_fast_model="gpt-4o-mini")
+        assert LLMSummarizeTransformer._default_fast_model == "gpt-4o-mini"
+    finally:
+        LLMSummarizeTransformer._default_fast_model = original
 
 
-def test_no_injection_when_no_transformers():
-    """Test that no injection occurs when toolset has no transformers."""
-    toolset = YAMLToolset(
-        name="test_toolset", tags=[ToolsetTag.CORE], description="Test toolset"
-    )
+def test_no_default_fast_model_when_not_provided():
+    """Test that class-level default is unchanged when no global fast model provided."""
+    from holmes.core.transformers.llm_summarize import LLMSummarizeTransformer
 
-    manager = ToolsetManager(global_fast_model="gpt-4o-mini")
-    manager._inject_fast_model_into_transformers([toolset])
-
-    assert toolset.transformers is None
-
-
-def test_no_injection_when_no_global_fast_model():
-    """Test that nothing happens when no global fast model is provided."""
-    from holmes.core.transformers import Transformer
-
-    toolset = YAMLToolset(
-        name="test_toolset",
-        tags=[ToolsetTag.CORE],
-        description="Test toolset",
-        tools=[
-            {
-                "name": "test_tool",
-                "description": "A test tool",
-                "command": "echo hello",
-                "transformers": [
-                    Transformer(
-                        name="llm_summarize",
-                        config={"input_threshold": 1000},
-                    )
-                ],
-            }
-        ],
-    )
-
-    manager = ToolsetManager()  # No global fast model
-    manager._inject_fast_model_into_transformers([toolset])
-
-    assert "global_fast_model" not in toolset.tools[0].transformers[0].config
+    original = LLMSummarizeTransformer._default_fast_model
+    try:
+        LLMSummarizeTransformer._default_fast_model = None
+        ToolsetManager()  # No global fast model
+        assert LLMSummarizeTransformer._default_fast_model is None
+    finally:
+        LLMSummarizeTransformer._default_fast_model = original
 
 
-def test_injection_skips_explicit_fast_model():
-    """Test that injection is skipped when transformer has explicit fast_model."""
-    from holmes.core.transformers import Transformer
+def test_explicit_fast_model_overrides_default():
+    """Test that per-instance fast_model takes precedence over class default."""
+    from unittest.mock import patch as _patch
 
-    toolset = YAMLToolset(
-        name="test_toolset",
-        tags=[ToolsetTag.CORE],
-        description="Test toolset",
-        tools=[
-            {
-                "name": "test_tool",
-                "description": "A test tool",
-                "command": "echo hello",
-                "transformers": [
-                    Transformer(
-                        name="llm_summarize",
-                        config={"input_threshold": 1000, "fast_model": "my-model"},
-                    )
-                ],
-            }
-        ],
-    )
+    from holmes.core.transformers.llm_summarize import LLMSummarizeTransformer
 
-    manager = ToolsetManager(global_fast_model="gpt-4o-mini")
-    manager._inject_fast_model_into_transformers([toolset])
+    original = LLMSummarizeTransformer._default_fast_model
+    try:
+        LLMSummarizeTransformer._default_fast_model = "gpt-4o-mini"
 
-    # Explicit fast_model → global_fast_model should NOT be injected
-    config = toolset.tools[0].transformers[0].config
-    assert config["fast_model"] == "my-model"
-    assert "global_fast_model" not in config
-
-
-@patch("holmes.core.toolset_registry._discover_builtin_toolsets")
-def test_list_all_toolsets_applies_fast_model_injection(mock_load_builtin_toolsets):
-    """Integration test that global fast model reaches transformer configs during loading."""
-    from holmes.core.transformers import Transformer
-
-    toolset = YAMLToolset(
-        name="kubernetes",
-        tags=[ToolsetTag.CORE],
-        description="Kubernetes toolset",
-        tools=[
-            {
-                "name": "k8s_tool",
-                "description": "A k8s tool",
-                "command": "kubectl get pods",
-                "transformers": [
-                    Transformer(
-                        name="llm_summarize",
-                        config={"input_threshold": 1000, "prompt": "K8s prompt"},
-                    )
-                ],
-            }
-        ],
-    )
-    mock_load_builtin_toolsets.return_value = [toolset]
-
-    manager = ToolsetManager(global_fast_model="azure/gpt-4.1")
-    result = manager._list_all_toolsets(check_prerequisites=False)
-
-    k8s_toolset = next(t for t in result if t.name == "kubernetes")
-    config = k8s_toolset.tools[0].transformers[0].config
-    assert config["global_fast_model"] == "azure/gpt-4.1"
-    assert config["input_threshold"] == 1000
-    assert config["prompt"] == "K8s prompt"
+        with _patch("holmes.core.transformers.llm_summarize.DefaultLLM") as mock_llm:
+            instance = LLMSummarizeTransformer(
+                input_threshold=1000, fast_model="my-explicit-model"
+            )
+            # Should use "my-explicit-model", not "gpt-4o-mini"
+            mock_llm.assert_called_once_with("my-explicit-model", None)
+    finally:
+        LLMSummarizeTransformer._default_fast_model = original
 
 
 @patch("holmes.core.toolset_registry._discover_builtin_toolsets")
