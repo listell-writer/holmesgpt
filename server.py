@@ -193,7 +193,7 @@ def _toolset_status_refresh_loop():
                 changes = config.refresh_tool_executor(
                     dal,
                     toolset_tag_filter=[ToolsetTag.CORE, ToolsetTag.CLUSTER],
-                    auto_discover=False,
+                    auto_enable_toolsets=False,
                 )
                 if changes:
                     for toolset_name, old_status, new_status in changes:
@@ -372,7 +372,7 @@ def chat(chat_request: ChatRequest, http_request: Request):
         ai = config.create_toolcalling_llm(
             dal=dal,
             toolset_tag_filter=[ToolsetTag.CORE, ToolsetTag.CLUSTER],
-            auto_discover=False,
+            auto_enable_toolsets=False,
             defer_prerequisites=False,
             reuse_executor=True,
             model=chat_request.model,

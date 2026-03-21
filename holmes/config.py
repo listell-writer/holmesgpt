@@ -252,7 +252,7 @@ class Config(RobustaBaseConfig):
         self,
         dal: Optional["SupabaseDal"] = None,
         toolset_tag_filter: Optional[List[ToolsetTag]] = None,
-        auto_discover: bool = True,
+        auto_enable_toolsets: bool = True,
         defer_prerequisites: bool = True,
         force_recheck_prerequisites: bool = False,
         reuse_executor: bool = False,
@@ -266,12 +266,12 @@ class Config(RobustaBaseConfig):
                 list (e.g. ``[ToolsetTag.CORE, ToolsetTag.CLI]``). Toolsets that
                 don't match any tag are excluded entirely — they won't be loaded,
                 checked, or returned. This filter is independent of
-                ``auto_discover``: a toolset must pass the tag filter first, then
-                ``auto_discover`` controls whether it gets enabled automatically.
+                ``auto_enable_toolsets``: a toolset must pass the tag filter first, then
+                ``auto_enable_toolsets`` controls whether it gets enabled automatically.
                 Defaults to ``[ToolsetTag.CORE]`` if not specified.
-            auto_discover: If True, automatically enable every toolset (that passed
-                the tag filter) that can work without explicit configuration. If
-                False, only toolsets explicitly enabled in config are loaded.
+            auto_enable_toolsets: If True, automatically enable every toolset (that
+                passed the tag filter) that can work without explicit configuration.
+                If False, only toolsets explicitly enabled in config are loaded.
             defer_prerequisites: If True, prerequisite results (health checks,
                 API pings) are cached to disk; on subsequent runs only config validity
                 is re-checked and full prerequisites are deferred until first tool use.
@@ -288,7 +288,7 @@ class Config(RobustaBaseConfig):
         toolsets = self.toolset_manager.list_toolsets(
             dal=dal,
             toolset_tag_filter=tags,
-            auto_discover=auto_discover,
+            auto_enable_toolsets=auto_enable_toolsets,
             defer_prerequisites=defer_prerequisites,
             force_recheck_prerequisites=force_recheck_prerequisites,
         )
@@ -303,17 +303,17 @@ class Config(RobustaBaseConfig):
         self,
         dal: Optional["SupabaseDal"] = None,
         toolset_tag_filter: Optional[List[ToolsetTag]] = None,
-        auto_discover: bool = False,
+        auto_enable_toolsets: bool = False,
     ) -> list[tuple[str, str, str]]:
         """Refresh the cached tool executor and return a list of status changes."""
         if not self._cached_tool_executor:
-            self.create_tool_executor(dal, toolset_tag_filter=toolset_tag_filter, auto_discover=auto_discover, reuse_executor=True)
+            self.create_tool_executor(dal, toolset_tag_filter=toolset_tag_filter, auto_enable_toolsets=auto_enable_toolsets, reuse_executor=True)
             return []
 
         current_toolsets = self._cached_tool_executor.toolsets
         new_toolsets, changes = (
             self.toolset_manager.refresh_toolsets_and_get_changes(
-                current_toolsets, dal, toolset_tag_filter=toolset_tag_filter, auto_discover=auto_discover,
+                current_toolsets, dal, toolset_tag_filter=toolset_tag_filter, auto_enable_toolsets=auto_enable_toolsets,
             )
         )
 
@@ -326,7 +326,7 @@ class Config(RobustaBaseConfig):
         self,
         dal: Optional["SupabaseDal"] = None,
         toolset_tag_filter: Optional[List[ToolsetTag]] = None,
-        auto_discover: bool = True,
+        auto_enable_toolsets: bool = True,
         defer_prerequisites: bool = True,
         force_recheck_prerequisites: bool = False,
         reuse_executor: bool = False,
@@ -337,12 +337,12 @@ class Config(RobustaBaseConfig):
         """
         Create a ToolCallingLLM with explicit behavioral controls.
 
-        Executor parameters (toolset_tag_filter, auto_discover, defer_prerequisites,
+        Executor parameters (toolset_tag_filter, auto_enable_toolsets, defer_prerequisites,
         force_recheck_prerequisites, reuse_executor) are forwarded to
         :meth:`create_tool_executor`.
         """
         tool_executor = self.create_tool_executor(
-            dal, toolset_tag_filter, auto_discover, defer_prerequisites,
+            dal, toolset_tag_filter, auto_enable_toolsets, defer_prerequisites,
             force_recheck_prerequisites, reuse_executor,
         )
         from holmes.core.tool_calling_llm import ToolCallingLLM
@@ -363,7 +363,7 @@ class Config(RobustaBaseConfig):
         return self.create_tool_executor(
             dal,
             toolset_tag_filter=[ToolsetTag.CORE, ToolsetTag.CLI],
-            auto_discover=True,
+            auto_enable_toolsets=True,
             force_recheck_prerequisites=refresh_status,
         )
 
@@ -372,7 +372,7 @@ class Config(RobustaBaseConfig):
         return self.create_tool_executor(
             dal,
             toolset_tag_filter=[ToolsetTag.CORE, ToolsetTag.CLI],
-            auto_discover=True,
+            auto_enable_toolsets=True,
             force_recheck_prerequisites=True,
             reuse_executor=True,
         )
@@ -384,7 +384,7 @@ class Config(RobustaBaseConfig):
         return self.refresh_tool_executor(
             dal,
             toolset_tag_filter=[ToolsetTag.CORE, ToolsetTag.CLUSTER],
-            auto_discover=False,
+            auto_enable_toolsets=False,
         )
 
     def create_console_toolcalling_llm(
@@ -399,7 +399,7 @@ class Config(RobustaBaseConfig):
         return self.create_toolcalling_llm(
             dal,
             toolset_tag_filter=[ToolsetTag.CORE, ToolsetTag.CLI],
-            auto_discover=True,
+            auto_enable_toolsets=True,
             force_recheck_prerequisites=refresh_toolsets,
             model=model_name,
             tracer=tracer,
@@ -417,7 +417,7 @@ class Config(RobustaBaseConfig):
         return self.create_toolcalling_llm(
             dal,
             toolset_tag_filter=[ToolsetTag.CORE, ToolsetTag.CLI],
-            auto_discover=True,
+            auto_enable_toolsets=True,
             force_recheck_prerequisites=True,
             reuse_executor=True,
             model=model,

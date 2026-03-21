@@ -21,7 +21,7 @@ ai = config.create_toolcalling_llm(
     # Only load toolsets tagged CORE or CLI (excludes server-only CLUSTER toolsets)
     toolset_tag_filter=[ToolsetTag.CORE, ToolsetTag.CLI],
     # Auto-enable every toolset that works without explicit config (e.g. kubectl on PATH)
-    auto_discover=True,
+    auto_enable_toolsets=True,
     # Remaining params use defaults:
     #   defer_prerequisites=True   — cache health-check results to disk for fast restarts
     #   force_recheck_prerequisites=False — use cached results if available
@@ -46,7 +46,7 @@ print(response.result)
 ```python
 ai = config.create_toolcalling_llm(
     toolset_tag_filter=[ToolsetTag.CORE, ToolsetTag.CLI],
-    auto_discover=True,
+    auto_enable_toolsets=True,
 )
 
 # List loaded toolsets and their status
@@ -89,7 +89,7 @@ config = Config(
 )
 ai = config.create_toolcalling_llm(
     toolset_tag_filter=[ToolsetTag.CORE, ToolsetTag.CLI],
-    auto_discover=True,
+    auto_enable_toolsets=True,
 )
 
 # First question - build initial messages with system prompt
@@ -246,7 +246,7 @@ config = Config(
 
 ai = config.create_toolcalling_llm(
     toolset_tag_filter=[ToolsetTag.CORE, ToolsetTag.CLI],
-    auto_discover=True,
+    auto_enable_toolsets=True,
 )
 
 messages = build_initial_ask_messages(
@@ -303,8 +303,8 @@ Both methods accept the same toolset parameters. `create_toolcalling_llm` additi
 
 | Parameter | Type | Default | Description |
 |-----------|------|---------|-------------|
-| `toolset_tag_filter` | `list[ToolsetTag]` | `[CORE]` | Only include toolsets whose tags overlap with this list. Toolsets that don't match are excluded entirely — they won't be loaded, checked, or returned. This filter runs first, before `auto_discover` decides which of the remaining toolsets to enable. |
-| `auto_discover` | `bool` | `True` | When `True`, automatically enable every toolset (that passed the tag filter) that can work without explicit configuration. When `False`, only toolsets explicitly enabled in config are loaded. |
+| `toolset_tag_filter` | `list[ToolsetTag]` | `[CORE]` | Only include toolsets whose tags overlap with this list. Toolsets that don't match are excluded entirely — they won't be loaded, checked, or returned. This filter runs first, before `auto_enable_toolsets` decides which of the remaining toolsets to enable. |
+| `auto_enable_toolsets` | `bool` | `True` | When `True`, automatically enable every toolset (that passed the tag filter) that can work without explicit configuration. When `False`, only toolsets explicitly enabled in config are loaded. |
 | `defer_prerequisites` | `bool` | `True` | When `True`, prerequisite results (health checks, API pings) are cached to disk; on repeat runs only config validity is re-checked and full prerequisites are deferred until first tool use. When `False`, all prerequisites are checked eagerly every time. |
 | `force_recheck_prerequisites` | `bool` | `False` | Ignore cached prerequisite results and re-run all checks now. Only has effect when `defer_prerequisites=True`. |
 | `reuse_executor` | `bool` | `False` | When `True`, the created executor is cached in memory on the `Config` instance. Subsequent calls return the same executor without reloading toolsets. Useful for long-lived server processes. |
@@ -316,12 +316,12 @@ Both methods accept the same toolset parameters. `create_toolcalling_llm` additi
 - `ToolsetTag.CLI` — Tools for interactive CLI use (filesystem, local commands)
 - `ToolsetTag.CLUSTER` — Tools for server/cluster deployments (cluster-wide monitoring)
 
-**How `toolset_tag_filter` and `auto_discover` interact:**
+**How `toolset_tag_filter` and `auto_enable_toolsets` interact:**
 
-These are independent, sequential steps. First, `toolset_tag_filter` narrows down *which* toolsets are even considered. Then, `auto_discover` decides which of those remaining toolsets get enabled:
+These are independent, sequential steps. First, `toolset_tag_filter` narrows down *which* toolsets are even considered. Then, `auto_enable_toolsets` decides which of those remaining toolsets get enabled:
 
 1. Load all toolsets (built-in + config + custom)
-2. `auto_discover=True` → auto-enable toolsets that don't need explicit config
+2. `auto_enable_toolsets=True` → auto-enable toolsets that don't need explicit config
 3. Filter by `toolset_tag_filter` → remove toolsets that don't match any tag
 4. Check prerequisites on enabled toolsets
 5. Return matching toolsets

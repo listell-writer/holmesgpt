@@ -69,7 +69,7 @@ def _get_ai(model: Optional[str]) -> ToolCallingLLM:
     return _CONFIG.create_toolcalling_llm(
         dal=_CONFIG.dal,
         toolset_tag_filter=[ToolsetTag.CORE, ToolsetTag.CLUSTER],
-        auto_discover=False,
+        auto_enable_toolsets=False,
         defer_prerequisites=False,
         reuse_executor=True,
         model=model,

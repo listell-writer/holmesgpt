@@ -205,7 +205,7 @@ def run_check_command(
     # Create runner
     llm = config.create_toolcalling_llm(
         toolset_tag_filter=[ToolsetTag.CORE, ToolsetTag.CLI],
-        auto_discover=True,
+        auto_enable_toolsets=True,
     )
     runner = CheckRunner(
         config,

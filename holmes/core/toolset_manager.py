@@ -108,7 +108,7 @@ class ToolsetManager:
         self,
         dal: Optional[SupabaseDal] = None,
         toolset_tag_filter: Optional[List[ToolsetTag]] = None,
-        auto_discover: bool = False,
+        auto_enable_toolsets: bool = False,
         defer_prerequisites: bool = True,
         force_recheck_prerequisites: bool = False,
     ) -> List[Toolset]:
@@ -120,12 +120,12 @@ class ToolsetManager:
             toolset_tag_filter: Only include toolsets whose tags overlap with this
                 list (e.g. [ToolsetTag.CORE, ToolsetTag.CLI]). Toolsets that don't
                 match any tag are excluded entirely — they won't be loaded, checked,
-                or returned. This filter is independent of ``auto_discover``: a
-                toolset must pass the tag filter first, then ``auto_discover``
+                or returned. This filter is independent of ``auto_enable_toolsets``: a
+                toolset must pass the tag filter first, then ``auto_enable_toolsets``
                 controls whether it gets enabled automatically.
-            auto_discover: If True, automatically enable every toolset that can work
-                without explicit configuration. If False, only toolsets explicitly
-                enabled in config are loaded.
+            auto_enable_toolsets: If True, automatically enable every toolset that can
+                work without explicit configuration. If False, only toolsets
+                explicitly enabled in config are loaded.
             defer_prerequisites: If True, prerequisite results (health checks,
                 API pings) are cached to disk; on subsequent runs only config validity
                 is re-checked and full prerequisites are deferred until first tool use.
@@ -137,14 +137,14 @@ class ToolsetManager:
             return self.load_toolset_with_status(
                 dal,
                 refresh_status=force_recheck_prerequisites,
-                enable_all_toolsets=auto_discover,
+                enable_all_toolsets=auto_enable_toolsets,
                 toolset_tags=toolset_tag_filter,
             )
         else:
             return self._list_all_toolsets(
                 dal,
                 check_prerequisites=True,
-                enable_all_toolsets=auto_discover,
+                enable_all_toolsets=auto_enable_toolsets,
                 toolset_tags=toolset_tag_filter,
             )
 
@@ -497,7 +497,7 @@ class ToolsetManager:
         return self.list_toolsets(
             dal,
             toolset_tag_filter=[ToolsetTag.CORE, ToolsetTag.CLI],
-            auto_discover=True,
+            auto_enable_toolsets=True,
             defer_prerequisites=True,
             force_recheck_prerequisites=refresh_status,
         )
@@ -512,7 +512,7 @@ class ToolsetManager:
         return self.list_toolsets(
             dal,
             toolset_tag_filter=[ToolsetTag.CORE, ToolsetTag.CLUSTER],
-            auto_discover=False,
+            auto_enable_toolsets=False,
             defer_prerequisites=False,
         )
 
@@ -521,7 +521,7 @@ class ToolsetManager:
         current_toolsets: List[Toolset],
         dal: Optional[SupabaseDal] = None,
         toolset_tag_filter: Optional[List[ToolsetTag]] = None,
-        auto_discover: bool = False,
+        auto_enable_toolsets: bool = False,
     ) -> tuple[List[Toolset], List[tuple[str, ToolsetStatusEnum, ToolsetStatusEnum]]]:
         old_status_by_name: dict[str, ToolsetStatusEnum] = {
             toolset.name: toolset.status for toolset in current_toolsets
@@ -530,7 +530,7 @@ class ToolsetManager:
         new_toolsets = self._list_all_toolsets(
             dal,
             check_prerequisites=True,
-            enable_all_toolsets=auto_discover,
+            enable_all_toolsets=auto_enable_toolsets,
             toolset_tags=toolset_tag_filter,
             silent=True,
         )
@@ -556,7 +556,7 @@ class ToolsetManager:
             current_toolsets,
             dal,
             toolset_tag_filter=[ToolsetTag.CORE, ToolsetTag.CLUSTER],
-            auto_discover=False,
+            auto_enable_toolsets=False,
         )
 
     def _load_toolsets_from_paths(

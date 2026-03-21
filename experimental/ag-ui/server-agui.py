@@ -113,7 +113,7 @@ def agui_chat(input_data: RunAgentInput, request: Request):
     ai = config.create_toolcalling_llm(
         dal=dal,
         toolset_tag_filter=[ToolsetTag.CORE, ToolsetTag.CLI],
-        auto_discover=True,
+        auto_enable_toolsets=True,
         force_recheck_prerequisites=True,
         reuse_executor=True,
         model=chat_request.model,
