@@ -43,6 +43,7 @@ def test__list_all_toolsets_merges_configs(
     builtin_toolset.tags = [ToolsetTag.CORE]
     builtin_toolset.type = ToolsetType.BUILTIN
     builtin_toolset.enabled = False
+    builtin_toolset.is_default = False
     builtin_toolset.missing_config = False
     builtin_toolset.check_prerequisites = MagicMock()
     mock_load_builtin_toolsets.return_value = [builtin_toolset]
@@ -51,6 +52,7 @@ def test__list_all_toolsets_merges_configs(
     config_toolset.tags = [ToolsetTag.CLI]
     config_toolset.type = ToolsetType.CUSTOM_YAML
     config_toolset.enabled = True
+    config_toolset.is_default = False
     config_toolset.check_prerequisites = MagicMock()
     mock_load_toolsets_from_config.return_value = [config_toolset]
 
@@ -425,6 +427,7 @@ def test_custom_runbook_catalogs_passed_to_builtin_toolsets(
     builtin_toolset.tags = [ToolsetTag.CORE]
     builtin_toolset.type = ToolsetType.BUILTIN
     builtin_toolset.enabled = False
+    builtin_toolset.is_default = False
     builtin_toolset.missing_config = False
     builtin_toolset.check_prerequisites = MagicMock()
     mock_load_builtin_toolsets.return_value = [builtin_toolset]
@@ -478,6 +481,7 @@ def test_custom_runbook_catalogs_multiple_paths(mock_load_builtin_toolsets, tmp_
     builtin_toolset.tags = [ToolsetTag.CORE]
     builtin_toolset.type = ToolsetType.BUILTIN
     builtin_toolset.enabled = False
+    builtin_toolset.is_default = False
     builtin_toolset.missing_config = False
     builtin_toolset.check_prerequisites = MagicMock()
     mock_load_builtin_toolsets.return_value = [builtin_toolset]
@@ -507,6 +511,7 @@ def test_custom_runbook_catalogs_empty_list(tmp_path):
         builtin_toolset.tags = [ToolsetTag.CORE]
         builtin_toolset.type = ToolsetType.BUILTIN
         builtin_toolset.enabled = False
+        builtin_toolset.is_default = False
         builtin_toolset.missing_config = False
         builtin_toolset.check_prerequisites = MagicMock()
         mock_load.return_value = [builtin_toolset]
@@ -529,6 +534,7 @@ def test_custom_runbook_catalogs_none(tmp_path):
         builtin_toolset.tags = [ToolsetTag.CORE]
         builtin_toolset.type = ToolsetType.BUILTIN
         builtin_toolset.enabled = False
+        builtin_toolset.is_default = False
         builtin_toolset.missing_config = False
         builtin_toolset.check_prerequisites = MagicMock()
         mock_load.return_value = [builtin_toolset]

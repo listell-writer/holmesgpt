@@ -109,8 +109,14 @@ class ToolsetRegistry:
                 toolsets_by_name[toolset.name] = toolset
 
         # Step 5: Decide enabled state for each toolset
+        # Build a normalized set of config keys so deprecated names
+        # (e.g. "coralogix/logs") match the canonical name ("coralogix").
+        normalized_config_keys = {
+            handle_deprecated_toolset_name(k, builtin_toolset_names)
+            for k in self.toolsets_config
+        }
         for name, toolset in toolsets_by_name.items():
-            explicitly_configured = name in self.toolsets_config
+            explicitly_configured = name in self.toolsets_config or name in normalized_config_keys
             toolset.enabled = self.should_enable_toolset(
                 toolset, explicitly_configured, auto_enable
             )
@@ -162,6 +168,12 @@ class ToolsetRegistry:
             ToolsetType.MONGODB,
         ):
             return toolset.enabled
+
+        # Built-in with is_default=True → always enable.
+        # Preserves pre-refactor behavior: should_auto_enable() returned True
+        # for ``self.enabled or self.is_default`` before any other checks.
+        if toolset.is_default:
+            return True
 
         # Built-in + auto_enable → enable if config requirements are met
         if auto_enable:
