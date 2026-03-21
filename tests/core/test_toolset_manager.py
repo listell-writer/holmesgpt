@@ -49,7 +49,7 @@ def test__list_all_toolsets_merges_configs(
     config_toolset = MagicMock(spec=Toolset)
     config_toolset.name = "config"
     config_toolset.tags = [ToolsetTag.CLI]
-    config_toolset.type = ToolsetType.CUSTOMIZED
+    config_toolset.type = ToolsetType.CUSTOM_YAML
     config_toolset.enabled = True
     config_toolset.check_prerequisites = MagicMock()
     mock_load_toolsets_from_config.return_value = [config_toolset]

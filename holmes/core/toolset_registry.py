@@ -105,7 +105,7 @@ class ToolsetRegistry:
         # Step 4: Add additional Python toolsets passed programmatically
         if self.additional_toolsets:
             for toolset in self.additional_toolsets:
-                toolset.type = ToolsetType.CUSTOMIZED
+                toolset.type = ToolsetType.CUSTOM_YAML
                 toolsets_by_name[toolset.name] = toolset
 
         # Step 5: Decide enabled state for each toolset
@@ -155,7 +155,7 @@ class ToolsetRegistry:
         # Custom/MCP/HTTP/DATABASE toolsets default to enabled, but respect
         # an explicit ``enabled: false`` set during file loading.
         if toolset.type in (
-            ToolsetType.CUSTOMIZED,
+            ToolsetType.CUSTOM_YAML,
             ToolsetType.MCP,
             ToolsetType.HTTP,
             ToolsetType.DATABASE,
@@ -200,7 +200,7 @@ class ToolsetRegistry:
             else:
                 # Custom toolset (including HTTP, DATABASE, MCP, etc.)
                 if toolset_config.get("type") is None:
-                    toolset_config["type"] = ToolsetType.CUSTOMIZED.value
+                    toolset_config["type"] = ToolsetType.CUSTOM_YAML.value
                 # custom toolsets defaults to enabled when not explicitly disabled
                 if toolset_config.get("enabled", True) is False:
                     toolset_config["enabled"] = False

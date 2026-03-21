@@ -163,22 +163,22 @@ per-toolset or per-tool injection is needed.
 
 ## ToolsetType — Conflated Concerns
 
-`ToolsetType` is an enum with values: `BUILTIN`, `CUSTOMIZED`, `MCP`, `HTTP`, `DATABASE`, `MONGODB`.
+`ToolsetType` is an enum with values: `BUILTIN`, `CUSTOM_YAML`, `MCP`, `HTTP`, `DATABASE`, `MONGODB`.
 
 **The enum conflates two orthogonal concepts:**
 
 | Value | Concept | Meaning |
 |---|---|---|
 | `BUILTIN` | **Ownership** | Shipped with HolmesGPT |
-| `CUSTOMIZED` | **Ownership** | User-defined (catch-all) |
+| `CUSTOM_YAML` | **Ownership** | User-defined (catch-all) |
 | `MCP` | **Format** | MCP protocol toolset |
 | `HTTP` | **Format** | HTTP endpoint toolset |
 | `DATABASE` | **Format** | SQL database toolset |
 | `MONGODB` | **Format** | MongoDB toolset |
 
 This creates inconsistencies:
-- A user-defined MCP toolset gets `type=MCP` (format), not `CUSTOMIZED` (ownership)
-- A user-defined YAML toolset gets `type=CUSTOMIZED` (ownership), not a format value
+- A user-defined MCP toolset gets `type=MCP` (format), not `CUSTOM_YAML` (ownership)
+- A user-defined YAML toolset gets `type=CUSTOM_YAML` (ownership), not a format value
 - A builtin YAML toolset and user-defined YAML toolset have different types despite same format
 
 **What the code actually needs:**
@@ -190,7 +190,7 @@ This creates inconsistencies:
 - `BUILTIN` — disabled by default (enabled only via explicit config or `auto_enable`)
 - `MCP` — gets eager prerequisite checking in `_load_toolset_with_status` (not deferred to lazy init)
 
-`CUSTOMIZED` has zero unique behavior — it's always grouped with all other non-BUILTIN types.
+`CUSTOM_YAML` has zero unique behavior — it's always grouped with all other non-BUILTIN types.
 
 **Cleaner model (future):** Split into two fields:
 ```python
@@ -212,7 +212,7 @@ class ToolsetFormat(str, Enum):
 Then enable logic becomes `origin == BUILTIN` check, and eager-init logic becomes
 `format == MCP` check. No enumeration of all non-builtin types needed.
 
-**Pragmatic simplification (now):** The enable logic `toolset.type in (CUSTOMIZED, MCP, HTTP, ...)`
+**Pragmatic simplification (now):** The enable logic `toolset.type in (CUSTOM_YAML, MCP, HTTP, ...)`
 is equivalent to `toolset.type != ToolsetType.BUILTIN`. Using that removes the maintenance
 burden of updating the list when new types are added.
 
@@ -292,9 +292,9 @@ new Python toolset requires editing this function.
 **Fix (future):** Use a registration decorator pattern, or a plugin entry-point system,
 so toolsets self-register.
 
-### 8. `ToolsetType.CUSTOMIZED` is redundant
+### 8. `ToolsetType.CUSTOM_YAML` is redundant
 
-`CUSTOMIZED` has no unique behavior — it's always grouped with all other non-BUILTIN types.
+`CUSTOM_YAML` has no unique behavior — it's always grouped with all other non-BUILTIN types.
 The enable logic check enumerates five types when it could just check `!= BUILTIN`. This
 creates maintenance overhead when new types are added.
 

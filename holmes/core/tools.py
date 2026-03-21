@@ -176,7 +176,7 @@ class ToolsetTag(str, Enum):
 
 class ToolsetType(str, Enum):
     BUILTIN = "built-in"
-    CUSTOMIZED = "custom"
+    CUSTOM_YAML = "custom"
     MCP = "mcp"
     HTTP = "http"
     DATABASE = "database"
