@@ -131,7 +131,196 @@ Prerequisites have 4 concrete types (Static, Env, Command, Callable) split acros
 
 ---
 
-## Refactoring Options
+## Phase 1: Centralize Enable/Disable Logic & Extract ToolsetRegistry
+
+> **Status: APPROVED** — These are the first concrete steps. No other refactoring is in scope.
+
+### Problem Statement
+
+The enable/disable policy for toolsets is scattered across 6+ locations:
+
+| Location | What it decides |
+|---|---|
+| `Toolset.enabled` default (`tools.py:703`) | Built-ins start `enabled=False` |
+| `ToolsetYamlFromConfig.enabled` default (`tools.py:1083`) | Config overrides start `enabled=True` |
+| `__init__.py:80` | MCP from file → `enabled=True` via `setdefault` |
+| `_load_toolsets_from_config` (`toolset_manager.py:289-293`) | Custom toolsets default enabled unless explicitly disabled |
+| `_list_all_toolsets` (`toolset_manager.py:182-190`) | Auto-enable built-ins if no `missing_config` |
+| `missing_config` property (`tools.py:857-884`) | Bakes in `enabled`/`is_default` policy guards into what should be a fact-check |
+
+Additionally, `ToolsetManager` mixes two responsibilities:
+- **Registry**: discovering, loading, merging, and deciding what's enabled
+- **Lifecycle**: prerequisites, caching, lazy init, status management
+
+### Step 1: Clean up `missing_config` → pure fact-check
+
+**Current** (`tools.py:857-884`): Mixes policy (`self.enabled`, `self.is_default` early returns) with fact-checking (do config classes have required fields without values?).
+
+**Target**: `missing_config` becomes a pure predicate — "does this toolset need config that wasn't provided?"
+
+```python
+@property
+def missing_config(self) -> bool:
+    """True when config_classes have required fields and no config was provided."""
+    if not self.config_classes:
+        return False
+
+    requires_config = any(
+        cls.has_required_fields()
+        for cls in self.config_classes
+        if hasattr(cls, "has_required_fields")
+    )
+    if not requires_config:
+        return False
+
+    return self.config is None
+```
+
+No `self.enabled`, no `self.is_default` guards. Those move to `should_enable_toolset`.
+
+### Step 2: Create `ToolsetRegistry`
+
+**New file**: `holmes/core/toolset_registry.py`
+
+**Responsibility**: Discovering, loading, merging toolsets from all sources, and deciding which are enabled. Returns a fully resolved `dict[str, Toolset]` with `enabled` already set.
+
+```python
+class ToolsetRegistry:
+    """Discovers, loads, merges toolsets and decides which are enabled."""
+
+    def __init__(
+        self,
+        toolsets_config: dict[str, dict[str, Any]],
+        custom_toolset_paths: list[FilePath],
+        additional_toolsets: list[Toolset],
+        custom_runbook_catalogs: list[Union[str, FilePath]],
+    ): ...
+
+    def get_all_toolsets(
+        self,
+        dal: Optional[SupabaseDal] = None,
+        auto_enable: bool = False,
+        tag_filter: Optional[list[ToolsetTag]] = None,
+    ) -> dict[str, Toolset]:
+        """Return all toolsets with enabled state resolved.
+
+        Pipeline:
+        1. discover_builtin_toolsets() — YAML files + Python classes
+        2. apply_config_overrides() — user toolsets config merged onto builtins
+        3. apply_custom_toolsets() — custom toolset files merged in
+        4. apply_additional_toolsets() — programmatic toolsets added
+        5. For each toolset: toolset.enabled = should_enable_toolset(...)
+        6. Filter by tag_filter if provided
+        """
+        ...
+
+    def should_enable_toolset(
+        self,
+        toolset: Toolset,
+        explicitly_configured: bool,
+        auto_enable: bool,
+    ) -> bool:
+        """Single source of truth for whether a toolset should be enabled.
+
+        Args:
+            toolset: The toolset to evaluate.
+            explicitly_configured: True if the user named this toolset in their config.
+            auto_enable: True if auto-enabling all toolsets that can work without config.
+        """
+        # Explicitly configured → respect the enabled flag from config
+        if explicitly_configured:
+            return toolset.enabled
+
+        # Custom/MCP/HTTP/DATABASE toolsets default to enabled
+        if toolset.type in (
+            ToolsetType.CUSTOMIZED, ToolsetType.MCP,
+            ToolsetType.HTTP, ToolsetType.DATABASE, ToolsetType.MONGODB,
+        ):
+            return True
+
+        # Built-in + auto_enable → enable if config requirements are met
+        if auto_enable:
+            return not toolset.missing_config
+
+        return False
+```
+
+**Methods migrating from current locations**:
+
+| Current location | Method | New location |
+|---|---|---|
+| `plugins/toolsets/__init__.py` | `load_builtin_toolsets()` | `ToolsetRegistry._discover_builtin_toolsets()` |
+| `plugins/toolsets/__init__.py` | `load_python_toolsets()` | `ToolsetRegistry._discover_python_toolsets()` |
+| `plugins/toolsets/__init__.py` | `load_toolsets_from_config()` | `ToolsetRegistry._parse_toolset_config()` |
+| `plugins/toolsets/__init__.py` | `load_toolsets_from_file()` | `ToolsetRegistry._load_toolsets_from_file()` |
+| `ToolsetManager` | `_load_toolsets_from_config()` | `ToolsetRegistry._apply_config_overrides()` |
+| `ToolsetManager` | `load_custom_toolsets()` | `ToolsetRegistry._apply_custom_toolsets()` |
+| `ToolsetManager` | `_load_toolsets_from_paths()` | `ToolsetRegistry._load_toolsets_from_paths()` |
+| `ToolsetManager` | `add_or_merge_onto_toolsets()` | `ToolsetRegistry._merge_onto()` |
+| `ToolsetManager._list_all_toolsets` | enable_all logic (lines 182-190) | `ToolsetRegistry.should_enable_toolset()` |
+| `ToolsetManager._list_all_toolsets` | tag filtering (lines 218-223) | `ToolsetRegistry.get_all_toolsets()` |
+| `ToolsetManager` | `_inject_fast_model_into_transformers()` | stays on `ToolsetManager` (lifecycle concern) |
+
+### Step 3: Simplify `ToolsetManager` → rename to lifecycle role
+
+**Rename the main public method**: `list_toolsets()` → `prepare_toolsets()`
+
+`ToolsetManager` keeps:
+- `prepare_toolsets()` — gets toolsets from registry, checks prerequisites, returns ready-to-use list
+- `refresh_toolset_status()` — eager prerequisite check + cache to disk
+- `load_toolset_with_status()` — restore from cache + lazy init
+- `check_toolset_prerequisites()` / `_check_config_prerequisites()` — prerequisite orchestration
+- `_inject_fast_model_into_transformers()` — transformer config injection
+- Status cache I/O
+
+`ToolsetManager.__init__` takes a `ToolsetRegistry` instead of raw config dicts:
+
+```python
+class ToolsetManager:
+    def __init__(
+        self,
+        registry: ToolsetRegistry,
+        custom_toolsets_from_cli: Optional[List[FilePath]] = None,
+        toolset_status_location: Optional[FilePath] = None,
+        global_fast_model: Optional[str] = None,
+    ): ...
+
+    def prepare_toolsets(
+        self,
+        dal: Optional[SupabaseDal] = None,
+        tag_filter: Optional[List[ToolsetTag]] = None,
+        auto_enable: bool = False,
+        defer_prerequisites: bool = True,
+        force_recheck: bool = False,
+    ) -> List[Toolset]:
+        """Get toolsets from registry and prepare them for use."""
+        toolsets = self.registry.get_all_toolsets(
+            dal=dal, auto_enable=auto_enable, tag_filter=tag_filter,
+        )
+        # ... prerequisite checking, caching, lazy init ...
+```
+
+### What's NOT in scope
+
+- Extracting `PrerequisiteChecker` from `Toolset` (future work)
+- Extracting `ApprovalPolicy` from `Tool` (future work)
+- Unifying eager/lazy loading paths (future work)
+- Changing `ToolExecutor` (already clean)
+- Renaming `ToolsetManager` class itself (keep it, just clarify its role)
+
+### Key invariants to preserve
+
+1. **Merge order**: builtins → config overrides → custom files → additional programmatic
+2. **Config overrides can disable builtins**: `kubernetes/logs: { enabled: false }` must still work
+3. **MCP servers default enabled** whether from config or file
+4. **Custom toolsets from CLI raise on conflict** with existing toolset names
+5. **Cache restoration** sets `enabled` from cached status (manager's responsibility, not registry's)
+6. **`is_default` toolsets** — `missing_config` currently treats these as "not missing config". After cleanup, `should_enable_toolset` must handle `is_default` builtins. If `is_default=True` and `auto_enable=True`, enable even if `missing_config=True`... OR we need to verify no `is_default` toolset actually has required config classes. Must check.
+7. **Deprecated toolset name mapping** (`coralogix/logs` → `coralogix`) — stays in registry
+
+---
+
+## Future Refactoring Options (not in current scope)
 
 ### Option A: Extract PrerequisiteChecker
 
@@ -185,10 +374,3 @@ These could be unified into one loading path where `defer_slow_checks=True` skip
 
 **Benefit:** One code path to understand and maintain.
 **Risk:** Medium — the caching behavior in `load_toolset_with_status` is interleaved with the loading logic.
-
-### Recommended priority
-
-1. **Option A (PrerequisiteChecker)** — highest impact, lowest risk, most lines moved out of Toolset
-2. **Option D (Unified loading)** — simplifies ToolsetManager, reduces confusion
-3. **Option C (ApprovalPolicy)** — cleaner Tool class, independently testable
-4. **Option B (ToolsetMerger)** — nice to have, but merge logic is stable and rarely changed
