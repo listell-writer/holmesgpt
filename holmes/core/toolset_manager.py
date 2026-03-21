@@ -10,6 +10,7 @@ from pydantic import FilePath
 from holmes.core.config import config_path_dir
 from holmes.core.supabase_dal import SupabaseDal
 from holmes.core.tools import PrerequisiteCacheMode, Toolset, ToolsetStatusEnum, ToolsetTag, ToolsetType
+from holmes.core.transformers.llm_summarize import LLMSummarizeTransformer
 from holmes.core.toolset_registry import (
     ToolsetRegistry,
     _merge_onto,
@@ -68,8 +69,6 @@ class ToolsetManager:
         # Set class-level default once — all future LLMSummarizeTransformer
         # instances will pick it up automatically (no per-tool injection).
         if global_fast_model:
-            from holmes.core.transformers.llm_summarize import LLMSummarizeTransformer
-
             LLMSummarizeTransformer.set_default_fast_model(global_fast_model)
         self.config_file_path = config_file_path
         # Keep reference to custom_toolset_paths for hash tracking
@@ -174,7 +173,7 @@ class ToolsetManager:
         toolset_tags: Optional[List[ToolsetTag]] = None,
         silent: bool = False,
     ) -> List[Toolset]:
-        """Get all toolsets from registry, inject fast_model, optionally check prerequisites."""
+        """Get all toolsets from registry, optionally check prerequisites."""
         toolsets_by_name = self.registry.get_all_toolsets(
             dal=dal,
             auto_enable=enable_all_toolsets_possible,

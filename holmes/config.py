@@ -309,7 +309,7 @@ class Config(RobustaBaseConfig):
                 ):
                     return self._cached_tool_executor
 
-        toolsets = self.toolset_manager.list_toolsets(
+        toolsets = self.toolset_manager.prepare_toolsets(
             dal=dal,
             toolset_tag_filter=tags,
             enable_all_toolsets_possible=enable_all_toolsets_possible,
