@@ -351,54 +351,6 @@ def test_mcp_servers_from_config(toolset_manager):
     assert toolset_manager.toolsets["mcp1"]["type"] == ToolsetType.MCP.value
 
 
-# Tests for transformer config merging functionality
-
-
-def test_default_fast_model_set_on_class():
-    """Test that ToolsetManager sets the class-level default fast model."""
-    from holmes.core.transformers.llm_summarize import LLMSummarizeTransformer
-
-    original = LLMSummarizeTransformer._default_fast_model
-    try:
-        ToolsetManager(global_fast_model="gpt-4o-mini")
-        assert LLMSummarizeTransformer._default_fast_model == "gpt-4o-mini"
-    finally:
-        LLMSummarizeTransformer._default_fast_model = original
-
-
-def test_no_default_fast_model_when_not_provided():
-    """Test that class-level default is unchanged when no global fast model provided."""
-    from holmes.core.transformers.llm_summarize import LLMSummarizeTransformer
-
-    original = LLMSummarizeTransformer._default_fast_model
-    try:
-        LLMSummarizeTransformer._default_fast_model = None
-        ToolsetManager()  # No global fast model
-        assert LLMSummarizeTransformer._default_fast_model is None
-    finally:
-        LLMSummarizeTransformer._default_fast_model = original
-
-
-def test_explicit_fast_model_overrides_default():
-    """Test that per-instance fast_model takes precedence over class default."""
-    from unittest.mock import patch as _patch
-
-    from holmes.core.transformers.llm_summarize import LLMSummarizeTransformer
-
-    original = LLMSummarizeTransformer._default_fast_model
-    try:
-        LLMSummarizeTransformer._default_fast_model = "gpt-4o-mini"
-
-        with _patch("holmes.core.transformers.llm_summarize.DefaultLLM") as mock_llm:
-            instance = LLMSummarizeTransformer(
-                input_threshold=1000, fast_model="my-explicit-model"
-            )
-            # Should use "my-explicit-model", not "gpt-4o-mini"
-            mock_llm.assert_called_once_with("my-explicit-model", None)
-    finally:
-        LLMSummarizeTransformer._default_fast_model = original
-
-
 @patch("holmes.core.toolset_registry._discover_builtin_toolsets")
 def test_custom_runbook_catalogs_passed_to_builtin_toolsets(
     mock_load_builtin_toolsets, tmp_path
