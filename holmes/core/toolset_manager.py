@@ -300,11 +300,27 @@ class ToolsetManager:
             silent=True,
         )
 
+        new_status_by_name: dict[str, ToolsetStatusEnum] = {
+            toolset.name: toolset.status for toolset in new_toolsets
+        }
+
         changes: List[tuple[str, ToolsetStatusEnum, ToolsetStatusEnum]] = []
+
+        # Status transitions for toolsets present in both old and new
         for toolset in new_toolsets:
             old_status = old_status_by_name.get(toolset.name)
             if old_status is not None and old_status != toolset.status:
                 changes.append((toolset.name, old_status, toolset.status))
+
+        # Newly added toolsets (in new but not in old)
+        for name, status in new_status_by_name.items():
+            if name not in old_status_by_name:
+                changes.append((name, ToolsetStatusEnum.DISABLED, status))
+
+        # Removed toolsets (in old but not in new)
+        for name, status in old_status_by_name.items():
+            if name not in new_status_by_name:
+                changes.append((name, status, ToolsetStatusEnum.DISABLED))
 
         return new_toolsets, changes
 

@@ -142,7 +142,7 @@ def sync_before_server_start():
 
 def _has_failed_mcp_toolsets() -> bool:
     """Check if any MCP toolsets are in FAILED state."""
-    executor = config._cached_tool_executor
+    executor = config.cached_tool_executor  # thread-safe property
     if not executor:
         return False
     return any(

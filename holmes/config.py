@@ -1,6 +1,7 @@
 import logging
 import os
 import os.path
+import threading
 from enum import Enum
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, List, Optional, Union
@@ -103,13 +104,24 @@ class Config(RobustaBaseConfig):
     mcp_servers: Optional[dict[str, dict[str, Any]]] = None
     additional_toolsets: Optional[List[Toolset]] = None
 
+    # Thread-safe executor cache: stores (executor, cache_key) where cache_key
+    # is (tuple(tags), enable_all_toolsets_possible) so callers with different
+    # parameters don't silently receive a stale executor.
     _cached_tool_executor: Optional[ToolExecutor] = None
+    _cached_executor_key: Optional[tuple] = None
+    _executor_lock: threading.Lock = PrivateAttr(default_factory=threading.Lock)
 
     # TODO: Separate those fields to facade class, this shouldn't be part of the config.
     _toolset_manager: Optional[ToolsetManager] = PrivateAttr(None)
     _llm_model_registry: Optional[LLMModelRegistry] = PrivateAttr(None)
     _dal: Optional[SupabaseDal] = PrivateAttr(None)
     _config_file_path: Optional[Path] = PrivateAttr(None)
+
+    @property
+    def cached_tool_executor(self) -> Optional[ToolExecutor]:
+        """Thread-safe read access to the cached executor."""
+        with self._executor_lock:
+            return self._cached_tool_executor
 
     @property
     def toolset_manager(self) -> ToolsetManager:
@@ -248,6 +260,12 @@ class Config(RobustaBaseConfig):
 
     # ── Unified factory methods ──
 
+    @staticmethod
+    def _executor_cache_key(
+        tags: List[ToolsetTag], enable_all: bool
+    ) -> tuple:
+        return (tuple(sorted(tags, key=lambda t: t.value)), enable_all)
+
     def create_tool_executor(
         self,
         dal: Optional["SupabaseDal"] = None,
@@ -276,12 +294,21 @@ class Config(RobustaBaseConfig):
                 ENABLED — use cached results when available (default).
                 FORCE_REFRESH — re-run all checks and update the cache.
             reuse_executor: If True, cache the executor in memory and return the same
-                instance on subsequent calls. Useful for long-lived server processes.
+                instance on subsequent calls with the *same* parameters.
+                A call with different ``toolset_tag_filter`` or
+                ``enable_all_toolsets_possible`` will create and cache a fresh executor.
         """
-        if reuse_executor and self._cached_tool_executor:
-            return self._cached_tool_executor
-
         tags = toolset_tag_filter or [ToolsetTag.CORE]
+        cache_key = self._executor_cache_key(tags, enable_all_toolsets_possible)
+
+        if reuse_executor:
+            with self._executor_lock:
+                if (
+                    self._cached_tool_executor is not None
+                    and self._cached_executor_key == cache_key
+                ):
+                    return self._cached_tool_executor
+
         toolsets = self.toolset_manager.list_toolsets(
             dal=dal,
             toolset_tag_filter=tags,
@@ -291,7 +318,9 @@ class Config(RobustaBaseConfig):
         executor = ToolExecutor(toolsets)
 
         if reuse_executor:
-            self._cached_tool_executor = executor
+            with self._executor_lock:
+                self._cached_tool_executor = executor
+                self._cached_executor_key = cache_key
 
         return executor
 
@@ -301,20 +330,42 @@ class Config(RobustaBaseConfig):
         toolset_tag_filter: Optional[List[ToolsetTag]] = None,
         enable_all_toolsets_possible: bool = False,
     ) -> list[tuple[str, str, str]]:
-        """Refresh the cached tool executor and return a list of status changes."""
+        """Refresh the cached tool executor and return a list of changes.
+
+        Changes include status transitions, added toolsets, and removed toolsets.
+        The cached executor is always replaced with the freshly-loaded one so that
+        added/removed toolsets are picked up even when no status changes occur.
+        """
         if not self._cached_tool_executor:
-            self.create_tool_executor(dal, toolset_tag_filter=toolset_tag_filter, enable_all_toolsets_possible=enable_all_toolsets_possible, reuse_executor=True)
+            # Cold start — run live prerequisite checks (not stale disk cache).
+            self.create_tool_executor(
+                dal,
+                toolset_tag_filter=toolset_tag_filter,
+                enable_all_toolsets_possible=enable_all_toolsets_possible,
+                prerequisite_cache=PrerequisiteCacheMode.FORCE_REFRESH,
+                reuse_executor=True,
+            )
             return []
 
-        current_toolsets = self._cached_tool_executor.toolsets
+        with self._executor_lock:
+            current_toolsets = self._cached_tool_executor.toolsets
+
         new_toolsets, changes = (
             self.toolset_manager.refresh_toolsets_and_get_changes(
-                current_toolsets, dal, toolset_tag_filter=toolset_tag_filter, enable_all_toolsets_possible=enable_all_toolsets_possible,
+                current_toolsets,
+                dal,
+                toolset_tag_filter=toolset_tag_filter,
+                enable_all_toolsets_possible=enable_all_toolsets_possible,
             )
         )
 
-        if changes:
+        # Always update the executor — toolsets may have been added or removed
+        # even when no *status* changes are reported.
+        tags = toolset_tag_filter or [ToolsetTag.CORE]
+        cache_key = self._executor_cache_key(tags, enable_all_toolsets_possible)
+        with self._executor_lock:
             self._cached_tool_executor = ToolExecutor(new_toolsets)
+            self._cached_executor_key = cache_key
 
         return [(name, old.value, new.value) for name, old, new in changes]
 
