@@ -152,7 +152,8 @@ class ToolsetRegistry:
         if explicitly_configured:
             return toolset.enabled
 
-        # Custom/MCP/HTTP/DATABASE toolsets default to enabled
+        # Custom/MCP/HTTP/DATABASE toolsets default to enabled, but respect
+        # an explicit ``enabled: false`` set during file loading.
         if toolset.type in (
             ToolsetType.CUSTOMIZED,
             ToolsetType.MCP,
@@ -160,7 +161,7 @@ class ToolsetRegistry:
             ToolsetType.DATABASE,
             ToolsetType.MONGODB,
         ):
-            return True
+            return toolset.enabled
 
         # Built-in + auto_enable → enable if config requirements are met
         if auto_enable:

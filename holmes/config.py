@@ -339,8 +339,9 @@ class Config(RobustaBaseConfig):
         # Normalize early so the same tags are used for both loading and caching.
         tags = toolset_tag_filter or [ToolsetTag.CORE]
 
-        if not self._cached_tool_executor:
-            # Cold start — run live prerequisite checks (not stale disk cache).
+        cache_key = self._executor_cache_key(tags, enable_all_toolsets_possible)
+        if not self._cached_tool_executor or self._cached_executor_key != cache_key:
+            # Cold start or key mismatch — run live prerequisite checks.
             self.create_tool_executor(
                 dal,
                 toolset_tag_filter=tags,
@@ -364,7 +365,6 @@ class Config(RobustaBaseConfig):
 
         # Always update the executor — toolsets may have been added or removed
         # even when no *status* changes are reported.
-        cache_key = self._executor_cache_key(tags, enable_all_toolsets_possible)
         with self._executor_lock:
             self._cached_tool_executor = ToolExecutor(new_toolsets)
             self._cached_executor_key = cache_key
