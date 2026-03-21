@@ -1,5 +1,7 @@
 # Toolset Classes — Current State & Refactoring Specs
 
+> **Status: PENDING** — This document describes a refactoring that is being *considered*, not yet implemented. The current codebase does not reflect these changes.
+
 ## Current Class Map
 
 ### Toolset (`holmes/core/tools.py` ~360 lines)
