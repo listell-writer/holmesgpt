@@ -351,50 +351,36 @@ def test_mcp_servers_from_config(toolset_manager):
     assert toolset_manager.toolsets["mcp1"]["type"] == ToolsetType.MCP.value
 
 
-# Tests for transformer config merging functionality
+# Tests for default fast model (class-level setter on LLMSummarizeTransformer)
 
 
 def test_default_fast_model_set_on_class():
-    """Test that ToolsetManager sets the class-level default fast model."""
+    """Test that set_default_fast_model sets the class-level default used by new instances."""
     from holmes.core.transformers.llm_summarize import LLMSummarizeTransformer
 
     original = LLMSummarizeTransformer._default_fast_model
     try:
-        ToolsetManager(global_fast_model="gpt-4o-mini")
+        LLMSummarizeTransformer.set_default_fast_model("gpt-4o-mini")
         assert LLMSummarizeTransformer._default_fast_model == "gpt-4o-mini"
     finally:
         LLMSummarizeTransformer._default_fast_model = original
 
 
-def test_no_default_fast_model_when_not_provided():
-    """Test that class-level default is unchanged when no global fast model provided."""
-    from holmes.core.transformers.llm_summarize import LLMSummarizeTransformer
-
-    original = LLMSummarizeTransformer._default_fast_model
-    try:
-        LLMSummarizeTransformer._default_fast_model = None
-        ToolsetManager()  # No global fast model
-        assert LLMSummarizeTransformer._default_fast_model is None
-    finally:
-        LLMSummarizeTransformer._default_fast_model = original
-
-
-def test_explicit_fast_model_overrides_default():
+def test_per_instance_fast_model_overrides_default():
     """Test that per-instance fast_model takes precedence over class default."""
-    from unittest.mock import patch as _patch
+    from unittest.mock import patch as mock_patch
 
     from holmes.core.transformers.llm_summarize import LLMSummarizeTransformer
 
     original = LLMSummarizeTransformer._default_fast_model
     try:
-        LLMSummarizeTransformer._default_fast_model = "gpt-4o-mini"
+        LLMSummarizeTransformer.set_default_fast_model("gpt-4o-mini")
 
-        with _patch("holmes.core.transformers.llm_summarize.DefaultLLM") as mock_llm:
-            instance = LLMSummarizeTransformer(
-                input_threshold=1000, fast_model="my-explicit-model"
-            )
-            # Should use "my-explicit-model", not "gpt-4o-mini"
-            mock_llm.assert_called_once_with("my-explicit-model", None)
+        # Mock DefaultLLM to capture which model is used
+        with mock_patch("holmes.core.transformers.llm_summarize.DefaultLLM") as mock_llm:
+            instance = LLMSummarizeTransformer(fast_model="claude-haiku")
+            # Should use per-instance fast_model, not the class default
+            mock_llm.assert_called_once_with("claude-haiku", None)
     finally:
         LLMSummarizeTransformer._default_fast_model = original
 
