@@ -354,8 +354,7 @@ class Config(RobustaBaseConfig):
             )
             return []
 
-        with self._executor_lock:
-            current_toolsets = self._cached_tool_executor.toolsets
+        current_toolsets = cached_executor.toolsets
 
         new_toolsets, changes = (
             self.toolset_manager.refresh_toolsets_and_get_changes(
