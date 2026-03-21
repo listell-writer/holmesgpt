@@ -95,7 +95,7 @@
 **Key method — `should_enable_toolset()`:**
 Single source of truth for whether a toolset should be enabled:
 - Explicitly configured → respect the `enabled` flag from config
-- Custom/MCP/HTTP/DATABASE toolsets → default to enabled
+- Non-builtin toolsets → respect `toolset.enabled` (defaults True, honours explicit `enabled: false`)
 - Built-in + `auto_enable` → enable if `missing_config` is False
 
 **Module-level helpers** (moved from `plugins/toolsets/__init__.py`):
@@ -112,12 +112,12 @@ Single source of truth for whether a toolset should be enabled:
 **Key fields:**
 - `registry` — the `ToolsetRegistry` instance
 - `custom_toolsets_from_cli` — CLI-provided toolset files (not cached, always rechecked)
-- `global_fast_model` — propagated to all transformers
+- `global_fast_model` — set once in `__init__` as a class-level default on `LLMSummarizeTransformer`
 - `toolset_status_location` — path to cached status JSON
 - `config_file_path` — main config path for hash tracking
 
 **Public API:**
-- `prepare_toolsets()` — primary method: registry → fast_model injection → prerequisites → return
+- `prepare_toolsets()` — primary method: registry → prerequisites → return
 - `refresh_toolsets_and_get_changes()` — re-checks all toolsets and diffs against previous status
 
 **Deprecated wrappers** (delegate to `prepare_toolsets`):
@@ -129,12 +129,17 @@ Single source of truth for whether a toolset should be enabled:
 - Methods: `load_custom_toolsets()`, `add_or_merge_onto_toolsets()`
 
 **Internal methods:**
-- `_list_all_toolsets()` — gets toolsets from registry + injects fast_model + optional prerequisites
+- `_list_all_toolsets()` — gets toolsets from registry, optionally checks prerequisites
 - `_refresh_toolset_status()` / `refresh_toolset_status` — eager check + cache to disk
 - `_load_toolset_with_status()` / `load_toolset_with_status` — restore from cache + lazy init
 - `check_toolset_prerequisites()` — threaded prerequisite checking
 - `_check_config_prerequisites()` — fast config-only checks
-- `_inject_fast_model_into_transformers()` — 130-line method for transformer config injection
+
+**Fast model setup:**
+`global_fast_model` is set once in `ToolsetManager.__init__()` via
+`LLMSummarizeTransformer.set_default_fast_model()`. This sets a class-level default
+so all future `LLMSummarizeTransformer` instances pick it up automatically. No
+per-toolset or per-tool injection is needed.
 
 ---
 
@@ -153,6 +158,63 @@ Single source of truth for whether a toolset should be enabled:
    bypassing the registry pipeline (legitimate, `enabled` is a public field)
 9. **`missing_config`** is a pure fact-check: "do config_classes have required fields and no
    config was provided?" No `self.enabled` or `self.is_default` guards.
+
+---
+
+## ToolsetType — Conflated Concerns
+
+`ToolsetType` is an enum with values: `BUILTIN`, `CUSTOMIZED`, `MCP`, `HTTP`, `DATABASE`, `MONGODB`.
+
+**The enum conflates two orthogonal concepts:**
+
+| Value | Concept | Meaning |
+|---|---|---|
+| `BUILTIN` | **Ownership** | Shipped with HolmesGPT |
+| `CUSTOMIZED` | **Ownership** | User-defined (catch-all) |
+| `MCP` | **Format** | MCP protocol toolset |
+| `HTTP` | **Format** | HTTP endpoint toolset |
+| `DATABASE` | **Format** | SQL database toolset |
+| `MONGODB` | **Format** | MongoDB toolset |
+
+This creates inconsistencies:
+- A user-defined MCP toolset gets `type=MCP` (format), not `CUSTOMIZED` (ownership)
+- A user-defined YAML toolset gets `type=CUSTOMIZED` (ownership), not a format value
+- A builtin YAML toolset and user-defined YAML toolset have different types despite same format
+
+**What the code actually needs:**
+- `should_enable_toolset()` cares about **ownership**: builtin = opt-in, everything else = opt-out
+- `_load_toolset_with_status()` cares about **format**: MCP needs eager prerequisite init
+- Display/serialization uses it as a label for both
+
+**Only two types have unique behavioral significance:**
+- `BUILTIN` — disabled by default (enabled only via explicit config or `auto_enable`)
+- `MCP` — gets eager prerequisite checking in `_load_toolset_with_status` (not deferred to lazy init)
+
+`CUSTOMIZED` has zero unique behavior — it's always grouped with all other non-BUILTIN types.
+
+**Cleaner model (future):** Split into two fields:
+```python
+class ToolsetOrigin(str, Enum):
+    BUILTIN = "builtin"        # Shipped with HolmesGPT
+    USER_CONFIG = "user-config" # Defined in config dict
+    USER_FILE = "user-file"     # Loaded from custom toolset file path
+    PROGRAMMATIC = "programmatic" # Added via additional_toolsets
+
+class ToolsetFormat(str, Enum):
+    YAML = "yaml"
+    PYTHON = "python"
+    MCP = "mcp"
+    HTTP = "http"
+    DATABASE = "database"
+    MONGODB = "mongodb"
+```
+
+Then enable logic becomes `origin == BUILTIN` check, and eager-init logic becomes
+`format == MCP` check. No enumeration of all non-builtin types needed.
+
+**Pragmatic simplification (now):** The enable logic `toolset.type in (CUSTOMIZED, MCP, HTTP, ...)`
+is equivalent to `toolset.type != ToolsetType.BUILTIN`. Using that removes the maintenance
+burden of updating the list when new types are added.
 
 ---
 
@@ -185,16 +247,7 @@ checking in one method. This is the single hardest method to follow in the codeb
 **Fix (future):** Split into `_restore_from_cache()`, `_check_prerequisites_by_strategy()`,
 and `_handle_cli_toolsets()`.
 
-### 4. `_inject_fast_model_into_transformers` is 130 lines of verbose logging
-
-~60% of this method is debug/info logging. The actual injection logic is ~20 lines total.
-The method also reaches into `tool._transformer_instances` (a private field) to force
-recreation, coupling it tightly to `Tool` internals.
-
-**Fix:** Extract a `_inject_into_transformer(transformer)` helper; move transformer
-recreation to a `Tool.recreate_transformer_instances()` method.
-
-### 5. `_apply_config_overrides` sets `enabled=True` on custom toolsets in config dict
+### 4. `_apply_config_overrides` sets `enabled=True` on custom toolsets in config dict
 
 Lines 200-207 in `toolset_registry.py` mutate the config dict to force `enabled=True/False`
 on custom toolsets before parsing. Then `should_enable_toolset()` reads `toolset.enabled`
@@ -207,7 +260,7 @@ source of truth, but it isn't for this case.
 config, then let `should_enable_toolset` handle the "custom toolsets default enabled unless
 explicitly disabled" rule.
 
-### 6. Re-exports in two places
+### 5. Re-exports in two places
 
 `plugins/toolsets/__init__.py` and `toolset_manager.py` both re-export registry functions
 under old names. The `toolset_manager.py` re-exports exist purely so test mocks at
@@ -219,7 +272,7 @@ re-exports are now dead code.
 **Fix:** Remove the re-exports from `toolset_manager.py`; keep only
 `plugins/toolsets/__init__.py` for backwards compat.
 
-### 7. `custom_toolsets_from_cli` lives on manager, not registry
+### 6. `custom_toolsets_from_cli` lives on manager, not registry
 
 CLI toolset paths are handled in `_load_toolset_with_status` by calling
 `self.registry._load_toolsets_from_paths(self.custom_toolsets_from_cli, ...)` — reaching
@@ -230,7 +283,7 @@ toolsets need conflict checking against cached names, which is a manager concern
 `get_cli_toolsets()` method, or extract a `_load_and_check_cli_toolsets()` method on the
 manager that doesn't reach into registry internals.
 
-### 8. `_discover_python_toolsets` is a 90-line import list
+### 7. `_discover_python_toolsets` is a 90-line import list
 
 Every Python toolset class is imported inside `_discover_python_toolsets()` to avoid
 circular imports. This function is a hardcoded registry of all Python toolsets. Adding a
@@ -238,6 +291,16 @@ new Python toolset requires editing this function.
 
 **Fix (future):** Use a registration decorator pattern, or a plugin entry-point system,
 so toolsets self-register.
+
+### 8. `ToolsetType.CUSTOMIZED` is redundant
+
+`CUSTOMIZED` has no unique behavior — it's always grouped with all other non-BUILTIN types.
+The enable logic check enumerates five types when it could just check `!= BUILTIN`. This
+creates maintenance overhead when new types are added.
+
+**Fix:** Simplify `should_enable_toolset()` to check `toolset.type != ToolsetType.BUILTIN`
+instead of enumerating all non-builtin types. Keep the enum values for display/serialization
+but stop branching on them.
 
 ---
 
