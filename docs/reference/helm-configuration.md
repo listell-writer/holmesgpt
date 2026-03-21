@@ -64,19 +64,27 @@ toolsets:
 
 #### API Key Configuration
 
-The most important configuration is setting up API keys for your chosen AI provider:
+The most important configuration is setting up API keys for your chosen AI provider. **Always use Kubernetes Secrets** to avoid exposing sensitive values as plaintext in your pod spec:
+
+```bash
+# Create a secret with your API key(s)
+kubectl create secret generic holmes-secrets \
+  --from-literal=openai-api-key=<YOUR_KEY> \
+  -n <NAMESPACE>
+```
 
 ```yaml
+# values.yaml
 additionalEnvVars:
 - name: OPENAI_API_KEY
-  value: "your-api-key"
-# Or load from secret:
-# - name: OPENAI_API_KEY
-#   valueFrom:
-#     secretKeyRef:
-#       name: holmes-secrets
-#       key: openai-api-key
+  valueFrom:
+    secretKeyRef:
+      name: holmes-secrets
+      key: openai-api-key
 ```
+
+!!! warning "Avoid plaintext API keys"
+    Do **not** set API keys using `value: "your-api-key"` directly. Plaintext values are visible in the pod spec and will be flagged as hardcoded secrets by HolmesGPT itself (and other security scanners) when scanning your cluster.
 
 #### Toolset Configuration
 

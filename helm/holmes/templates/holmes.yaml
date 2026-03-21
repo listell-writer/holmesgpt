@@ -81,8 +81,13 @@ spec:
             value: {{ .Values.logLevel }}
           - name: ENABLE_TELEMETRY
             value: {{ include "holmes.enableTelemetry" . | quote }}
+          {{- if .Values.sentryDSN }}
           - name: SENTRY_DSN
-            value: {{ .Values.sentryDSN }}
+            valueFrom:
+              secretKeyRef:
+                name: {{ .Release.Name }}-holmes-secret
+                key: sentry-dsn
+          {{- end }}
           {{ if .Values.certificate -}}
           - name: CERTIFICATE
             value: {{ .Values.certificate }}
