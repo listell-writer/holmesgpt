@@ -29,7 +29,7 @@ from holmes.common.env_vars import (
     HOLMES_PORT,
 )
 from holmes.config import Config
-from holmes.core.tools import ToolsetTag
+from holmes.core.tools import PrerequisiteCacheMode, ToolsetTag
 from holmes.core.conversations import (
     build_chat_messages,
 )
@@ -113,8 +113,8 @@ def agui_chat(input_data: RunAgentInput, request: Request):
     ai = config.create_toolcalling_llm(
         dal=dal,
         toolset_tag_filter=[ToolsetTag.CORE, ToolsetTag.CLI],
-        auto_enable_toolsets=True,
-        force_recheck_prerequisites=True,
+        enable_all_toolsets_possible=True,
+        prerequisite_cache=PrerequisiteCacheMode.FORCE_REFRESH,
         reuse_executor=True,
         model=chat_request.model,
     )

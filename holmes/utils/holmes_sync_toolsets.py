@@ -6,7 +6,7 @@ from typing import Any, List
 
 from holmes.config import Config
 from holmes.core.supabase_dal import SupabaseDal
-from holmes.core.tools import Toolset, ToolsetDBModel, ToolsetTag
+from holmes.core.tools import PrerequisiteCacheMode, Toolset, ToolsetDBModel, ToolsetTag
 from holmes.plugins.prompts import load_and_render_prompt
 
 
@@ -34,8 +34,8 @@ def holmes_sync_toolsets_status(dal: SupabaseDal, config: Config) -> None:
     tool_executor = config.create_tool_executor(
         dal,
         toolset_tag_filter=[ToolsetTag.CORE, ToolsetTag.CLUSTER],
-        auto_enable_toolsets=False,
-        defer_prerequisites=False,
+        enable_all_toolsets_possible=False,
+        prerequisite_cache=PrerequisiteCacheMode.DISABLED,
         reuse_executor=True,
     )
 

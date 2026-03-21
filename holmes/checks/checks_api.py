@@ -12,7 +12,7 @@ from holmes.checks.models import Check, CheckMode, CheckResult, CheckStatus
 from holmes.config import Config
 from holmes.core.issue import Issue, IssueStatus
 from holmes.core.tool_calling_llm import LLMResult, ToolCallingLLM
-from holmes.core.tools import ToolsetTag
+from holmes.core.tools import PrerequisiteCacheMode, ToolsetTag
 from holmes.plugins.destinations.slack.plugin import SlackDestination
 
 checks_app = FastAPI()
@@ -69,8 +69,8 @@ def _get_ai(model: Optional[str]) -> ToolCallingLLM:
     return _CONFIG.create_toolcalling_llm(
         dal=_CONFIG.dal,
         toolset_tag_filter=[ToolsetTag.CORE, ToolsetTag.CLUSTER],
-        auto_enable_toolsets=False,
-        defer_prerequisites=False,
+        enable_all_toolsets_possible=False,
+        prerequisite_cache=PrerequisiteCacheMode.DISABLED,
         reuse_executor=True,
         model=model,
     )

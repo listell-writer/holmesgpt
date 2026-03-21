@@ -48,7 +48,7 @@ from holmes.core.models import (
     FollowUpAction,
 )
 from holmes.core.prompt import PromptComponent
-from holmes.core.tools import ToolsetStatusEnum, ToolsetTag, ToolsetType
+from holmes.core.tools import PrerequisiteCacheMode, ToolsetStatusEnum, ToolsetTag, ToolsetType
 from holmes.core.scheduled_prompts import ScheduledPromptsExecutor
 from holmes.utils.connection_utils import patch_socket_create_connection
 from holmes.utils.holmes_status import update_holmes_status_in_db
@@ -193,7 +193,7 @@ def _toolset_status_refresh_loop():
                 changes = config.refresh_tool_executor(
                     dal,
                     toolset_tag_filter=[ToolsetTag.CORE, ToolsetTag.CLUSTER],
-                    auto_enable_toolsets=False,
+                    enable_all_toolsets_possible=False,
                 )
                 if changes:
                     for toolset_name, old_status, new_status in changes:
@@ -372,8 +372,8 @@ def chat(chat_request: ChatRequest, http_request: Request):
         ai = config.create_toolcalling_llm(
             dal=dal,
             toolset_tag_filter=[ToolsetTag.CORE, ToolsetTag.CLUSTER],
-            auto_enable_toolsets=False,
-            defer_prerequisites=False,
+            enable_all_toolsets_possible=False,
+            prerequisite_cache=PrerequisiteCacheMode.DISABLED,
             reuse_executor=True,
             model=chat_request.model,
             tool_results_dir=tool_results_dir,

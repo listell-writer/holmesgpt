@@ -114,7 +114,7 @@ def run_holmes_check(
         # Use real tools and real LLM
         ai = config.create_toolcalling_llm(
             toolset_tag_filter=[ToolsetTag.CORE, ToolsetTag.CLI],
-            auto_enable_toolsets=True,
+            enable_all_toolsets_possible=True,
             tracer=tracer,
         )
 

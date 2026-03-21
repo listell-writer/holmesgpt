@@ -36,7 +36,7 @@ from holmes.core.prompt import (
 )
 from holmes.core.resource_instruction import ResourceInstructionDocument
 from holmes.core.tool_calling_llm import LLMResult, ToolCallingLLM
-from holmes.core.tools import ToolsetTag, pretty_print_toolset_status
+from holmes.core.tools import PrerequisiteCacheMode, ToolsetTag, pretty_print_toolset_status
 from holmes.core.tools_utils.filesystem_result_storage import tool_result_storage
 from holmes.core.tracing import SpanType, TracingFactory
 from holmes.interactive import run_interactive_loop
@@ -333,8 +333,8 @@ def ask(
     with tool_result_storage() as tool_results_dir:
         ai = config.create_toolcalling_llm(
             toolset_tag_filter=[ToolsetTag.CORE, ToolsetTag.CLI],
-            auto_enable_toolsets=True,
-            force_recheck_prerequisites=refresh_toolsets,
+            enable_all_toolsets_possible=True,
+            prerequisite_cache=PrerequisiteCacheMode.FORCE_REFRESH if refresh_toolsets else PrerequisiteCacheMode.ENABLED,
             tracer=tracer,
             model=model,
             tool_results_dir=tool_results_dir,
@@ -472,7 +472,7 @@ def alertmanager(
     with tool_result_storage() as tool_results_dir:
         ai = config.create_toolcalling_llm(
             toolset_tag_filter=[ToolsetTag.CORE, ToolsetTag.CLI],
-            auto_enable_toolsets=True,
+            enable_all_toolsets_possible=True,
             model=model,
             tool_results_dir=tool_results_dir,
         )
@@ -608,7 +608,7 @@ def jira(
     with tool_result_storage() as tool_results_dir:
         ai = config.create_toolcalling_llm(
             toolset_tag_filter=[ToolsetTag.CORE, ToolsetTag.CLI],
-            auto_enable_toolsets=True,
+            enable_all_toolsets_possible=True,
             model=model,
             tool_results_dir=tool_results_dir,
         )
@@ -703,7 +703,7 @@ def ticket(
     with tool_result_storage() as tool_results_dir:
         ai = ticket_source.config.create_toolcalling_llm(
             toolset_tag_filter=[ToolsetTag.CORE, ToolsetTag.CLI],
-            auto_enable_toolsets=True,
+            enable_all_toolsets_possible=True,
             model=model,
             tool_results_dir=tool_results_dir,
         )
@@ -817,7 +817,7 @@ def github(
     with tool_result_storage() as tool_results_dir:
         ai = config.create_toolcalling_llm(
             toolset_tag_filter=[ToolsetTag.CORE, ToolsetTag.CLI],
-            auto_enable_toolsets=True,
+            enable_all_toolsets_possible=True,
             model=model,
             tool_results_dir=tool_results_dir,
         )
@@ -898,7 +898,7 @@ def pagerduty(
     with tool_result_storage() as tool_results_dir:
         ai = config.create_toolcalling_llm(
             toolset_tag_filter=[ToolsetTag.CORE, ToolsetTag.CLI],
-            auto_enable_toolsets=True,
+            enable_all_toolsets_possible=True,
             model=model,
             tool_results_dir=tool_results_dir,
         )
@@ -977,7 +977,7 @@ def opsgenie(
     with tool_result_storage() as tool_results_dir:
         ai = config.create_toolcalling_llm(
             toolset_tag_filter=[ToolsetTag.CORE, ToolsetTag.CLI],
-            auto_enable_toolsets=True,
+            enable_all_toolsets_possible=True,
             model=model,
             tool_results_dir=tool_results_dir,
         )

@@ -17,7 +17,7 @@ from pydantic import (
 
 from holmes.common.env_vars import ROBUSTA_CONFIG_PATH
 from holmes.core.llm import DefaultLLM, LLMModelRegistry
-from holmes.core.tools import Toolset, ToolsetTag
+from holmes.core.tools import PrerequisiteCacheMode, Toolset, ToolsetTag
 from holmes.core.tools_utils.tool_executor import ToolExecutor
 from holmes.core.toolset_manager import ToolsetManager
 from holmes.plugins.runbooks import (
@@ -252,9 +252,8 @@ class Config(RobustaBaseConfig):
         self,
         dal: Optional["SupabaseDal"] = None,
         toolset_tag_filter: Optional[List[ToolsetTag]] = None,
-        auto_enable_toolsets: bool = True,
-        defer_prerequisites: bool = True,
-        force_recheck_prerequisites: bool = False,
+        enable_all_toolsets_possible: bool = True,
+        prerequisite_cache: PrerequisiteCacheMode = PrerequisiteCacheMode.ENABLED,
         reuse_executor: bool = False,
     ) -> ToolExecutor:
         """
@@ -266,18 +265,16 @@ class Config(RobustaBaseConfig):
                 list (e.g. ``[ToolsetTag.CORE, ToolsetTag.CLI]``). Toolsets that
                 don't match any tag are excluded entirely — they won't be loaded,
                 checked, or returned. This filter is independent of
-                ``auto_enable_toolsets``: a toolset must pass the tag filter first, then
-                ``auto_enable_toolsets`` controls whether it gets enabled automatically.
+                ``enable_all_toolsets_possible``: a toolset must pass the tag filter first, then
+                ``enable_all_toolsets_possible`` controls whether it gets enabled automatically.
                 Defaults to ``[ToolsetTag.CORE]`` if not specified.
-            auto_enable_toolsets: If True, automatically enable every toolset (that
+            enable_all_toolsets_possible: If True, automatically enable every toolset (that
                 passed the tag filter) that can work without explicit configuration.
                 If False, only toolsets explicitly enabled in config are loaded.
-            defer_prerequisites: If True, prerequisite results (health checks,
-                API pings) are cached to disk; on subsequent runs only config validity
-                is re-checked and full prerequisites are deferred until first tool use.
-                If False, all prerequisites are checked eagerly every time.
-            force_recheck_prerequisites: Ignore cached prerequisite results and re-run
-                all checks now. Only has effect when defer_prerequisites=True.
+            prerequisite_cache: Controls prerequisite check caching behavior.
+                DISABLED — run full checks eagerly, no disk caching.
+                ENABLED — use cached results when available (default).
+                FORCE_REFRESH — re-run all checks and update the cache.
             reuse_executor: If True, cache the executor in memory and return the same
                 instance on subsequent calls. Useful for long-lived server processes.
         """
@@ -288,9 +285,8 @@ class Config(RobustaBaseConfig):
         toolsets = self.toolset_manager.list_toolsets(
             dal=dal,
             toolset_tag_filter=tags,
-            auto_enable_toolsets=auto_enable_toolsets,
-            defer_prerequisites=defer_prerequisites,
-            force_recheck_prerequisites=force_recheck_prerequisites,
+            enable_all_toolsets_possible=enable_all_toolsets_possible,
+            prerequisite_cache=prerequisite_cache,
         )
         executor = ToolExecutor(toolsets)
 
@@ -303,17 +299,17 @@ class Config(RobustaBaseConfig):
         self,
         dal: Optional["SupabaseDal"] = None,
         toolset_tag_filter: Optional[List[ToolsetTag]] = None,
-        auto_enable_toolsets: bool = False,
+        enable_all_toolsets_possible: bool = False,
     ) -> list[tuple[str, str, str]]:
         """Refresh the cached tool executor and return a list of status changes."""
         if not self._cached_tool_executor:
-            self.create_tool_executor(dal, toolset_tag_filter=toolset_tag_filter, auto_enable_toolsets=auto_enable_toolsets, reuse_executor=True)
+            self.create_tool_executor(dal, toolset_tag_filter=toolset_tag_filter, enable_all_toolsets_possible=enable_all_toolsets_possible, reuse_executor=True)
             return []
 
         current_toolsets = self._cached_tool_executor.toolsets
         new_toolsets, changes = (
             self.toolset_manager.refresh_toolsets_and_get_changes(
-                current_toolsets, dal, toolset_tag_filter=toolset_tag_filter, auto_enable_toolsets=auto_enable_toolsets,
+                current_toolsets, dal, toolset_tag_filter=toolset_tag_filter, enable_all_toolsets_possible=enable_all_toolsets_possible,
             )
         )
 
@@ -326,9 +322,8 @@ class Config(RobustaBaseConfig):
         self,
         dal: Optional["SupabaseDal"] = None,
         toolset_tag_filter: Optional[List[ToolsetTag]] = None,
-        auto_enable_toolsets: bool = True,
-        defer_prerequisites: bool = True,
-        force_recheck_prerequisites: bool = False,
+        enable_all_toolsets_possible: bool = True,
+        prerequisite_cache: PrerequisiteCacheMode = PrerequisiteCacheMode.ENABLED,
         reuse_executor: bool = False,
         model: Optional[str] = None,
         tracer=None,
@@ -337,13 +332,16 @@ class Config(RobustaBaseConfig):
         """
         Create a ToolCallingLLM with explicit behavioral controls.
 
-        Executor parameters (toolset_tag_filter, auto_enable_toolsets, defer_prerequisites,
-        force_recheck_prerequisites, reuse_executor) are forwarded to
+        Executor parameters (toolset_tag_filter, enable_all_toolsets_possible,
+        prerequisite_cache, reuse_executor) are forwarded to
         :meth:`create_tool_executor`.
         """
         tool_executor = self.create_tool_executor(
-            dal, toolset_tag_filter, auto_enable_toolsets, defer_prerequisites,
-            force_recheck_prerequisites, reuse_executor,
+            dal=dal,
+            toolset_tag_filter=toolset_tag_filter,
+            enable_all_toolsets_possible=enable_all_toolsets_possible,
+            prerequisite_cache=prerequisite_cache,
+            reuse_executor=reuse_executor,
         )
         from holmes.core.tool_calling_llm import ToolCallingLLM
 
@@ -363,8 +361,8 @@ class Config(RobustaBaseConfig):
         return self.create_tool_executor(
             dal,
             toolset_tag_filter=[ToolsetTag.CORE, ToolsetTag.CLI],
-            auto_enable_toolsets=True,
-            force_recheck_prerequisites=refresh_status,
+            enable_all_toolsets_possible=True,
+            prerequisite_cache=PrerequisiteCacheMode.FORCE_REFRESH if refresh_status else PrerequisiteCacheMode.ENABLED,
         )
 
     def create_agui_tool_executor(self, dal: Optional["SupabaseDal"] = None) -> ToolExecutor:
@@ -372,8 +370,8 @@ class Config(RobustaBaseConfig):
         return self.create_tool_executor(
             dal,
             toolset_tag_filter=[ToolsetTag.CORE, ToolsetTag.CLI],
-            auto_enable_toolsets=True,
-            force_recheck_prerequisites=True,
+            enable_all_toolsets_possible=True,
+            prerequisite_cache=PrerequisiteCacheMode.FORCE_REFRESH,
             reuse_executor=True,
         )
 
@@ -384,7 +382,7 @@ class Config(RobustaBaseConfig):
         return self.refresh_tool_executor(
             dal,
             toolset_tag_filter=[ToolsetTag.CORE, ToolsetTag.CLUSTER],
-            auto_enable_toolsets=False,
+            enable_all_toolsets_possible=False,
         )
 
     def create_console_toolcalling_llm(
@@ -399,8 +397,8 @@ class Config(RobustaBaseConfig):
         return self.create_toolcalling_llm(
             dal,
             toolset_tag_filter=[ToolsetTag.CORE, ToolsetTag.CLI],
-            auto_enable_toolsets=True,
-            force_recheck_prerequisites=refresh_toolsets,
+            enable_all_toolsets_possible=True,
+            prerequisite_cache=PrerequisiteCacheMode.FORCE_REFRESH if refresh_toolsets else PrerequisiteCacheMode.ENABLED,
             model=model_name,
             tracer=tracer,
             tool_results_dir=tool_results_dir,
@@ -417,8 +415,8 @@ class Config(RobustaBaseConfig):
         return self.create_toolcalling_llm(
             dal,
             toolset_tag_filter=[ToolsetTag.CORE, ToolsetTag.CLI],
-            auto_enable_toolsets=True,
-            force_recheck_prerequisites=True,
+            enable_all_toolsets_possible=True,
+            prerequisite_cache=PrerequisiteCacheMode.FORCE_REFRESH,
             reuse_executor=True,
             model=model,
             tracer=tracer,

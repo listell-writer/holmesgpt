@@ -5,28 +5,19 @@ import os
 from pathlib import Path
 from typing import Any, List, Optional, Union
 
-from benedict import benedict  # noqa: F401 — re-exported for test mocks
 from pydantic import FilePath
 
 from holmes.core.config import config_path_dir
 from holmes.core.supabase_dal import SupabaseDal
-from holmes.core.tools import Toolset, ToolsetStatusEnum, ToolsetTag, ToolsetType
+from holmes.core.tools import PrerequisiteCacheMode, Toolset, ToolsetStatusEnum, ToolsetTag, ToolsetType
 from holmes.core.toolset_registry import (
     ToolsetRegistry,
-    _discover_builtin_toolsets as load_builtin_toolsets,  # noqa: F401
     _merge_onto,
-    _parse_toolset_config as load_toolsets_from_config,  # noqa: F401
 )
 from holmes.utils.config_hash import check_and_update_config_hashes
 from holmes.utils.definitions import CUSTOM_TOOLSET_LOCATION
 
 DEFAULT_TOOLSET_STATUS_LOCATION = os.path.join(config_path_dir, "toolsets_status.json")
-
-# Re-export for backwards compatibility — other modules import these from here.
-from holmes.core.toolset_registry import (  # noqa: F401, E501
-    DEPRECATED_TOOLSET_NAMES,
-    handle_deprecated_toolset_name,
-)
 
 
 class ToolsetManager:
@@ -172,14 +163,14 @@ class ToolsetManager:
         self,
         dal: Optional[SupabaseDal] = None,
         check_prerequisites=True,
-        enable_all_toolsets=False,
+        enable_all_toolsets_possible=False,
         toolset_tags: Optional[List[ToolsetTag]] = None,
         silent: bool = False,
     ) -> List[Toolset]:
         """Get all toolsets from registry, inject fast_model, optionally check prerequisites."""
         toolsets_by_name = self.registry.get_all_toolsets(
             dal=dal,
-            auto_enable=enable_all_toolsets,
+            auto_enable=enable_all_toolsets_possible,
             tag_filter=toolset_tags,
         )
 
@@ -209,34 +200,33 @@ class ToolsetManager:
         self,
         dal: Optional[SupabaseDal] = None,
         toolset_tag_filter: Optional[List[ToolsetTag]] = None,
-        auto_enable_toolsets: bool = False,
-        defer_prerequisites: bool = True,
-        force_recheck_prerequisites: bool = False,
+        enable_all_toolsets_possible: bool = False,
+        prerequisite_cache: PrerequisiteCacheMode = PrerequisiteCacheMode.ENABLED,
     ) -> List[Toolset]:
         """Get toolsets from registry and prepare them for use.
 
         Args:
             dal: Optional database access layer.
             toolset_tag_filter: Only include toolsets whose tags overlap with this list.
-            auto_enable_toolsets: If True, automatically enable every toolset that can
+            enable_all_toolsets_possible: If True, automatically enable every toolset that can
                 work without explicit configuration.
-            defer_prerequisites: If True, prerequisite results are cached to disk;
-                on subsequent runs only config validity is re-checked.
-            force_recheck_prerequisites: Ignore cached prerequisite results and re-run
-                all checks now.
+            prerequisite_cache: Controls prerequisite check caching behavior.
+                DISABLED — run full checks eagerly, no disk caching.
+                ENABLED — use cached results when available (default).
+                FORCE_REFRESH — re-run all checks and update the cache.
         """
-        if defer_prerequisites:
-            return self.load_toolset_with_status(
-                dal,
-                refresh_status=force_recheck_prerequisites,
-                enable_all_toolsets=auto_enable_toolsets,
-                toolset_tags=toolset_tag_filter,
-            )
-        else:
+        if prerequisite_cache == PrerequisiteCacheMode.DISABLED:
             return self._list_all_toolsets(
                 dal,
                 check_prerequisites=True,
-                enable_all_toolsets=auto_enable_toolsets,
+                enable_all_toolsets_possible=enable_all_toolsets_possible,
+                toolset_tags=toolset_tag_filter,
+            )
+        else:
+            return self.load_toolset_with_status(
+                dal,
+                refresh_status=(prerequisite_cache == PrerequisiteCacheMode.FORCE_REFRESH),
+                enable_all_toolsets_possible=enable_all_toolsets_possible,
                 toolset_tags=toolset_tag_filter,
             )
 
@@ -244,9 +234,8 @@ class ToolsetManager:
         self,
         dal: Optional[SupabaseDal] = None,
         toolset_tag_filter: Optional[List[ToolsetTag]] = None,
-        auto_enable_toolsets: bool = False,
-        defer_prerequisites: bool = True,
-        force_recheck_prerequisites: bool = False,
+        enable_all_toolsets_possible: bool = False,
+        prerequisite_cache: PrerequisiteCacheMode = PrerequisiteCacheMode.ENABLED,
     ) -> List[Toolset]:
         """
         .. deprecated::
@@ -255,9 +244,8 @@ class ToolsetManager:
         return self.prepare_toolsets(
             dal=dal,
             toolset_tag_filter=toolset_tag_filter,
-            auto_enable_toolsets=auto_enable_toolsets,
-            defer_prerequisites=defer_prerequisites,
-            force_recheck_prerequisites=force_recheck_prerequisites,
+            enable_all_toolsets_possible=enable_all_toolsets_possible,
+            prerequisite_cache=prerequisite_cache,
         )
 
     def list_console_toolsets(
@@ -270,9 +258,8 @@ class ToolsetManager:
         return self.prepare_toolsets(
             dal,
             toolset_tag_filter=[ToolsetTag.CORE, ToolsetTag.CLI],
-            auto_enable_toolsets=True,
-            defer_prerequisites=True,
-            force_recheck_prerequisites=refresh_status,
+            enable_all_toolsets_possible=True,
+            prerequisite_cache=PrerequisiteCacheMode.FORCE_REFRESH if refresh_status else PrerequisiteCacheMode.ENABLED,
         )
 
     def list_server_toolsets(
@@ -285,8 +272,8 @@ class ToolsetManager:
         return self.prepare_toolsets(
             dal,
             toolset_tag_filter=[ToolsetTag.CORE, ToolsetTag.CLUSTER],
-            auto_enable_toolsets=False,
-            defer_prerequisites=False,
+            enable_all_toolsets_possible=False,
+            prerequisite_cache=PrerequisiteCacheMode.DISABLED,
         )
 
     def refresh_toolsets_and_get_changes(
@@ -294,7 +281,7 @@ class ToolsetManager:
         current_toolsets: List[Toolset],
         dal: Optional[SupabaseDal] = None,
         toolset_tag_filter: Optional[List[ToolsetTag]] = None,
-        auto_enable_toolsets: bool = False,
+        enable_all_toolsets_possible: bool = False,
     ) -> tuple[List[Toolset], List[tuple[str, ToolsetStatusEnum, ToolsetStatusEnum]]]:
         old_status_by_name: dict[str, ToolsetStatusEnum] = {
             toolset.name: toolset.status for toolset in current_toolsets
@@ -303,7 +290,7 @@ class ToolsetManager:
         new_toolsets = self._list_all_toolsets(
             dal,
             check_prerequisites=True,
-            enable_all_toolsets=auto_enable_toolsets,
+            enable_all_toolsets_possible=enable_all_toolsets_possible,
             toolset_tags=toolset_tag_filter,
             silent=True,
         )
@@ -329,7 +316,7 @@ class ToolsetManager:
             current_toolsets,
             dal,
             toolset_tag_filter=[ToolsetTag.CORE, ToolsetTag.CLUSTER],
-            auto_enable_toolsets=False,
+            enable_all_toolsets_possible=False,
         )
 
     # ------------------------------------------------------------------
@@ -339,14 +326,14 @@ class ToolsetManager:
     def _refresh_toolset_status(
         self,
         dal: Optional[SupabaseDal] = None,
-        enable_all_toolsets=False,
+        enable_all_toolsets_possible=False,
         toolset_tags: Optional[List[ToolsetTag]] = None,
     ):
         """Refresh the status of all toolsets and cache to disk."""
         all_toolsets = self._list_all_toolsets(
             dal=dal,
             check_prerequisites=True,
-            enable_all_toolsets=enable_all_toolsets,
+            enable_all_toolsets_possible=enable_all_toolsets_possible,
             toolset_tags=toolset_tags,
         )
 
@@ -382,7 +369,7 @@ class ToolsetManager:
         self,
         dal: Optional[SupabaseDal] = None,
         refresh_status: bool = False,
-        enable_all_toolsets=False,
+        enable_all_toolsets_possible=False,
         toolset_tags: Optional[List[ToolsetTag]] = None,
     ) -> List[Toolset]:
         """Load toolsets with status from cache, refreshing if needed."""
@@ -396,7 +383,7 @@ class ToolsetManager:
         if not os.path.exists(self.toolset_status_location) or refresh_status:
             logging.info("Refreshing available datasources (toolsets)")
             self.refresh_toolset_status(
-                dal, enable_all_toolsets=enable_all_toolsets, toolset_tags=toolset_tags
+                dal, enable_all_toolsets_possible=enable_all_toolsets_possible, toolset_tags=toolset_tags
             )
             using_cached = False
         else:
