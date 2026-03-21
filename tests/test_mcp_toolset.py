@@ -1966,7 +1966,7 @@ class TestRequestContextPassthrough:
         captured_headers = None
 
         def capture_sse_client_call(
-            _url, headers, *, sse_read_timeout, httpx_client_factory=None
+            _url, headers, *, sse_read_timeout, httpx_client_factory=None, auth=None
         ):
             nonlocal captured_headers
             captured_headers = headers
@@ -2043,7 +2043,7 @@ class TestRequestContextPassthrough:
         captured_headers = None
 
         def capture_sse_client_call(
-            _url, headers, *, sse_read_timeout, httpx_client_factory=None
+            _url, headers, *, sse_read_timeout, httpx_client_factory=None, auth=None
         ):
             nonlocal captured_headers
             captured_headers = headers

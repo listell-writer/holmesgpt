@@ -7,14 +7,19 @@ from enum import Enum
 from typing import Any, ClassVar, Dict, List, Optional, Tuple, Type, Union
 
 import httpx
+from mcp.client.auth import OAuthClientProvider
 from mcp.client.session import ClientSession
 from mcp.client.sse import sse_client
 from mcp.client.stdio import StdioServerParameters, stdio_client
 from mcp.client.streamable_http import streamablehttp_client
+from mcp.shared.auth import OAuthClientMetadata
 from mcp.types import Tool as MCP_Tool
 from pydantic import AnyUrl, Field, model_validator
 
 from holmes.common.env_vars import SSE_READ_TIMEOUT
+from holmes.core.auth.elicitation import cli_elicitation_callback
+from holmes.core.auth.oauth_handlers import CLIOAuthCallbackHandler
+from holmes.core.auth.token_storage import FileTokenStorage
 from holmes.core.tools import (
     CallablePrerequisite,
     StructuredToolResult,
@@ -124,6 +129,28 @@ class MCPConfig(ToolsetConfig):
             }
         ],
     )
+    oauth: bool = Field(
+        default=False,
+        title="OAuth",
+        description=(
+            "Enable OAuth 2.1 authentication per the MCP Authorization spec. "
+            "When enabled, Holmes will automatically handle the OAuth flow "
+            "(discovery, PKCE, dynamic client registration, token refresh) "
+            "when the MCP server returns a 401 Unauthorized response. "
+            "The user will be prompted to authenticate via their browser."
+        ),
+        examples=[True],
+    )
+    oauth_client_name: str = Field(
+        default="HolmesGPT",
+        title="OAuth Client Name",
+        description="Client name used during OAuth dynamic client registration.",
+    )
+    oauth_timeout: float = Field(
+        default=300.0,
+        title="OAuth Timeout",
+        description="Timeout in seconds for the OAuth browser flow.",
+    )
     icon_url: str = Field(
         default="https://registry.npmmirror.com/@lobehub/icons-static-png/1.46.0/files/light/mcp.png",
         description="Icon URL for this MCP server, displayed in the UI for tool calls.",
@@ -168,12 +195,43 @@ class StdioMCPConfig(ToolsetConfig):
         return str(self.command)
 
 
+def _create_oauth_provider(config: MCPConfig) -> Tuple[OAuthClientProvider, CLIOAuthCallbackHandler]:
+    """Create an OAuthClientProvider for an MCP server using the CLI browser flow."""
+    url = str(config.url)
+    callback_handler = CLIOAuthCallbackHandler(timeout=config.oauth_timeout)
+    storage = FileTokenStorage(server_url=url)
+
+    client_metadata = OAuthClientMetadata(
+        redirect_uris=[AnyUrl(callback_handler.redirect_uri)],
+        client_name=config.oauth_client_name,
+        grant_types=["authorization_code", "refresh_token"],
+        response_types=["code"],
+        token_endpoint_auth_method="none",  # Public client (CLI), no secret
+    )
+
+    provider = OAuthClientProvider(
+        server_url=url,
+        client_metadata=client_metadata,
+        storage=storage,
+        redirect_handler=callback_handler.redirect,
+        callback_handler=callback_handler.callback,
+        timeout=config.oauth_timeout,
+    )
+
+    return provider, callback_handler
+
+
 @asynccontextmanager
 async def get_initialized_mcp_session(
     toolset: "RemoteMCPToolset", request_context: Optional[Dict[str, Any]] = None
 ):
     if toolset._mcp_config is None:
         raise ValueError("MCP config is not initialized")
+
+    # Determine elicitation callback based on context
+    # CLI mode uses terminal prompts; server mode can be extended with
+    # a server-specific callback that forwards to the frontend.
+    elicitation_callback = cli_elicitation_callback
 
     if isinstance(toolset._mcp_config, StdioMCPConfig):
         server_params = StdioServerParameters(
@@ -185,40 +243,66 @@ async def get_initialized_mcp_session(
             read_stream,
             write_stream,
         ):
-            async with ClientSession(read_stream, write_stream) as session:
+            async with ClientSession(
+                read_stream,
+                write_stream,
+                elicitation_callback=elicitation_callback,
+            ) as session:
                 _ = await session.initialize()
                 yield session
     elif toolset._mcp_config.mode == MCPMode.SSE:
         url = str(toolset._mcp_config.url)
         httpx_factory = create_mcp_http_client_factory(toolset._mcp_config.verify_ssl)
         rendered_headers = toolset._render_headers(request_context)
+
+        # Build auth provider if OAuth is enabled
+        oauth_auth: Optional[OAuthClientProvider] = None
+        if toolset._mcp_config.oauth:
+            oauth_auth, _ = _create_oauth_provider(toolset._mcp_config)
+
         async with sse_client(
             url,
             rendered_headers,
             sse_read_timeout=SSE_READ_TIMEOUT,
             httpx_client_factory=httpx_factory,
+            auth=oauth_auth,
         ) as (
             read_stream,
             write_stream,
         ):
-            async with ClientSession(read_stream, write_stream) as session:
+            async with ClientSession(
+                read_stream,
+                write_stream,
+                elicitation_callback=elicitation_callback,
+            ) as session:
                 _ = await session.initialize()
                 yield session
     else:
         url = str(toolset._mcp_config.url)
         httpx_factory = create_mcp_http_client_factory(toolset._mcp_config.verify_ssl)
         rendered_headers = toolset._render_headers(request_context)
+
+        # Build auth provider if OAuth is enabled
+        oauth_auth = None
+        if toolset._mcp_config.oauth:
+            oauth_auth, _ = _create_oauth_provider(toolset._mcp_config)
+
         async with streamablehttp_client(
             url,
             headers=rendered_headers,
             sse_read_timeout=SSE_READ_TIMEOUT,
             httpx_client_factory=httpx_factory,
+            auth=oauth_auth,
         ) as (
             read_stream,
             write_stream,
             _,
         ):
-            async with ClientSession(read_stream, write_stream) as session:
+            async with ClientSession(
+                read_stream,
+                write_stream,
+                elicitation_callback=elicitation_callback,
+            ) as session:
                 _ = await session.initialize()
                 yield session
 
