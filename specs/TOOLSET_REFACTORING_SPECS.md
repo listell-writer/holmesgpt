@@ -222,12 +222,29 @@ class ToolsetRegistry:
     ) -> bool:
         """Single source of truth for whether a toolset should be enabled.
 
+        This must preserve the exact existing behavior — this is a refactoring,
+        not a behavior change.
+
         Args:
             toolset: The toolset to evaluate.
-            explicitly_configured: True if the user named this toolset in their config.
+            explicitly_configured: True if the user named this toolset in their
+                config dict (including MCP servers merged into it).
             auto_enable: True if auto-enabling all toolsets that can work without config.
+
+        How explicitly_configured is determined:
+            Simply ``toolset_name in self.toolsets_config``. MCP servers from
+            config are merged into toolsets_config during __init__, so they count.
+            Custom toolsets from file paths are NOT in toolsets_config — they go
+            through _load_toolsets_from_paths and are handled separately (they
+            always get enabled=True set in _load_toolsets_from_config lines 290-293).
         """
-        # Explicitly configured → respect the enabled flag from config
+        # Explicitly configured → respect the enabled flag from config.
+        # This preserves current behavior: ToolsetYamlFromConfig defaults
+        # enabled=True, but override_with uses exclude_unset=True, so writing
+        # just `kubernetes/logs: {}` does NOT set enabled on the builtin.
+        # The enabled flag only flows through if the user explicitly wrote
+        # `enabled: true/false` in their config or if _load_toolsets_from_config
+        # set it (lines 290-293 for custom toolsets).
         if explicitly_configured:
             return toolset.enabled
 
@@ -260,18 +277,31 @@ class ToolsetRegistry:
 | `ToolsetManager._list_all_toolsets` | enable_all logic (lines 182-190) | `ToolsetRegistry.should_enable_toolset()` |
 | `ToolsetManager._list_all_toolsets` | tag filtering (lines 218-223) | `ToolsetRegistry.get_all_toolsets()` |
 | `ToolsetManager` | `_inject_fast_model_into_transformers()` | stays on `ToolsetManager` (lifecycle concern) |
+| `ToolsetManager` | `handle_deprecated_toolset_name()` | `ToolsetRegistry` (called during config loading) |
 
-### Step 3: Simplify `ToolsetManager` → rename to lifecycle role
+**Re-exports for backwards compatibility**: `holmes/plugins/toolsets/__init__.py` must keep re-exports
+for `load_builtin_toolsets`, `load_toolsets_from_config`, `load_toolsets_from_file`, and
+`load_python_toolsets` since tests import them directly (e.g. `test_fetch_logs.py`,
+`test_aks_transformers.py`, `test_transformer_validation.py`, `test_load_config.py`).
+
+### Step 3: Simplify `ToolsetManager` → lifecycle role
 
 **Rename the main public method**: `list_toolsets()` → `prepare_toolsets()`
 
 `ToolsetManager` keeps:
 - `prepare_toolsets()` — gets toolsets from registry, checks prerequisites, returns ready-to-use list
 - `refresh_toolset_status()` — eager prerequisite check + cache to disk
+- `refresh_toolsets_and_get_changes()` — re-checks all toolsets and diffs against previous status
 - `load_toolset_with_status()` — restore from cache + lazy init
 - `check_toolset_prerequisites()` / `_check_config_prerequisites()` — prerequisite orchestration
 - `_inject_fast_model_into_transformers()` — transformer config injection
 - Status cache I/O
+- CLI toolset conflict checking (custom_toolsets_from_cli raise on name conflict)
+
+**Deprecated wrappers to keep** (they delegate to `prepare_toolsets`):
+- `list_console_toolsets()` — called by `main.py` (list/refresh commands) and `toolset_config_tui.py`
+- `list_server_toolsets()` — called in tests
+- `refresh_server_toolsets_and_get_changes()` — deprecated wrapper for `refresh_toolsets_and_get_changes()`
 
 `ToolsetManager.__init__` takes a `ToolsetRegistry` instead of raw config dicts:
 
@@ -307,6 +337,7 @@ class ToolsetManager:
 - Unifying eager/lazy loading paths (future work)
 - Changing `ToolExecutor` (already clean)
 - Renaming `ToolsetManager` class itself (keep it, just clarify its role)
+- Changing any observable behavior — this is a pure refactoring
 
 ### Key invariants to preserve
 
@@ -314,9 +345,18 @@ class ToolsetManager:
 2. **Config overrides can disable builtins**: `kubernetes/logs: { enabled: false }` must still work
 3. **MCP servers default enabled** whether from config or file
 4. **Custom toolsets from CLI raise on conflict** with existing toolset names
-5. **Cache restoration** sets `enabled` from cached status (manager's responsibility, not registry's)
-6. **`is_default` toolsets** — `missing_config` currently treats these as "not missing config". After cleanup, `should_enable_toolset` must handle `is_default` builtins. If `is_default=True` and `auto_enable=True`, enable even if `missing_config=True`... OR we need to verify no `is_default` toolset actually has required config classes. Must check.
+5. **Cache restoration** sets `enabled` from cached status (manager's responsibility, not registry's).
+   Cache overrides the registry's decision when `using_cached=True`. Config hash checking
+   (`check_and_update_config_hashes`) invalidates cache when config files change, preventing
+   stale `enabled` values from persisting after config edits.
+6. **`is_default` toolsets** — VERIFIED: no `is_default=True` toolset has `config_classes` with
+   required fields. After removing the `is_default` guard from `missing_config`, these toolsets
+   will return `missing_config=False` anyway (they have no config_classes or all fields have defaults).
+   No special `is_default` branch needed in `should_enable_toolset`.
 7. **Deprecated toolset name mapping** (`coralogix/logs` → `coralogix`) — stays in registry
+8. **TUI direct mutation** — `toolset_config_tui.py` sets `toolset.enabled = True` directly
+   (lines 444, 1226) outside the registry pipeline. This is legitimate and must remain supported
+   since `enabled` stays a public field on `Toolset`.
 
 ---
 
