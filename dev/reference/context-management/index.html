@@ -10,13 +10,13 @@
       
       
       
-        <link rel="canonical" href="https://holmesgpt.dev/dev/reference/slash-commands/">
+        <link rel="canonical" href="https://holmesgpt.dev/dev/reference/context-management/">
       
       
-        <link rel="prev" href="../runbooks/">
+        <link rel="prev" href="../slash-commands/">
       
       
-        <link rel="next" href="../context-management/">
+        <link rel="next" href="../troubleshooting/">
       
       
         
@@ -27,7 +27,7 @@
     
     
       
-        <title>Slash Commands - HolmesGPT Documentation</title>
+        <title>Context Management - HolmesGPT Documentation</title>
       
     
     
@@ -89,7 +89,7 @@
     <div data-md-component="skip">
       
         
-        <a href="#slash-commands" class="md-skip">
+        <a href="#context-management" class="md-skip">
           Skip to content
         </a>
       
@@ -140,7 +140,7 @@
         <div class="md-header__topic" data-md-component="header-topic">
           <span class="md-ellipsis">
             
-              Slash Commands
+              Context Management
             
           </span>
         </div>
@@ -4333,6 +4333,34 @@
                 
   
   
+  
+  
+    <li class="md-nav__item">
+      <a href="../slash-commands/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Slash Commands
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
     
   
   
@@ -4352,7 +4380,7 @@
   <span class="md-ellipsis">
     
   
-    Slash Commands
+    Context Management
   
 
     
@@ -4370,7 +4398,7 @@
   <span class="md-ellipsis">
     
   
-    Slash Commands
+    Context Management
   
 
     
@@ -4396,10 +4424,10 @@
     <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
       
         <li class="md-nav__item">
-  <a href="#built-in-commands" class="md-nav__link">
+  <a href="#1-single-tool-result-spill-to-disk" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Built-in Commands
+        1. Single Tool Result Spill-to-Disk
       
     </span>
   </a>
@@ -4407,146 +4435,24 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#command-details" class="md-nav__link">
+  <a href="#2-conversation-history-compaction" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Command Details
-      
-    </span>
-  </a>
-  
-    <nav class="md-nav" aria-label="Command Details">
-      <ul class="md-nav__list">
-        
-          <li class="md-nav__item">
-  <a href="#help" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        /help
+        2. Conversation History Compaction
       
     </span>
   </a>
   
 </li>
-        
-          <li class="md-nav__item">
-  <a href="#exit" class="md-nav__link">
+      
+        <li class="md-nav__item">
+  <a href="#how-they-interact" class="md-nav__link">
     <span class="md-ellipsis">
       
-        /exit
+        How They Interact
       
     </span>
   </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#clear" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        /clear
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#tools" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        /tools
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#context" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        /context
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#auto" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        /auto
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#last" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        /last
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#show-numbername" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        /show [number|name]
-      
-    </span>
-  </a>
-  
-    <nav class="md-nav" aria-label="/show [number|name]">
-      <ul class="md-nav__list">
-        
-          <li class="md-nav__item">
-  <a href="#modal-navigation" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Modal Navigation
-      
-    </span>
-  </a>
-  
-</li>
-        
-      </ul>
-    </nav>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#run-command" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        /run &lt;command&gt;
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#shell" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        /shell
-      
-    </span>
-  </a>
-  
-</li>
-        
-      </ul>
-    </nav>
   
 </li>
       
@@ -4554,34 +4460,6 @@
   
 </nav>
       
-    </li>
-  
-
-              
-            
-              
-                
-  
-  
-  
-  
-    <li class="md-nav__item">
-      <a href="../context-management/" class="md-nav__link">
-        
-  
-  
-  <span class="md-ellipsis">
-    
-  
-    Context Management
-  
-
-    
-  </span>
-  
-  
-
-      </a>
     </li>
   
 
@@ -4676,10 +4554,10 @@
     <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
       
         <li class="md-nav__item">
-  <a href="#built-in-commands" class="md-nav__link">
+  <a href="#1-single-tool-result-spill-to-disk" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Built-in Commands
+        1. Single Tool Result Spill-to-Disk
       
     </span>
   </a>
@@ -4687,146 +4565,24 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#command-details" class="md-nav__link">
+  <a href="#2-conversation-history-compaction" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Command Details
-      
-    </span>
-  </a>
-  
-    <nav class="md-nav" aria-label="Command Details">
-      <ul class="md-nav__list">
-        
-          <li class="md-nav__item">
-  <a href="#help" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        /help
+        2. Conversation History Compaction
       
     </span>
   </a>
   
 </li>
-        
-          <li class="md-nav__item">
-  <a href="#exit" class="md-nav__link">
+      
+        <li class="md-nav__item">
+  <a href="#how-they-interact" class="md-nav__link">
     <span class="md-ellipsis">
       
-        /exit
+        How They Interact
       
     </span>
   </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#clear" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        /clear
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#tools" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        /tools
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#context" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        /context
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#auto" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        /auto
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#last" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        /last
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#show-numbername" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        /show [number|name]
-      
-    </span>
-  </a>
-  
-    <nav class="md-nav" aria-label="/show [number|name]">
-      <ul class="md-nav__list">
-        
-          <li class="md-nav__item">
-  <a href="#modal-navigation" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Modal Navigation
-      
-    </span>
-  </a>
-  
-</li>
-        
-      </ul>
-    </nav>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#run-command" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        /run &lt;command&gt;
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#shell" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        /shell
-      
-    </span>
-  </a>
-  
-</li>
-        
-      </ul>
-    </nav>
   
 </li>
       
@@ -4895,7 +4651,7 @@
 
 
   
-    <a href="https://github.com/HolmesGPT/holmesgpt/edit/master/docs/reference/slash-commands.md" title="Edit this page" class="md-content__button md-icon" rel="edit">
+    <a href="https://github.com/HolmesGPT/holmesgpt/edit/master/docs/reference/context-management.md" title="Edit this page" class="md-content__button md-icon" rel="edit">
       
       <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M10 20H6V4h7v5h5v3.1l2-2V8l-6-6H6c-1.1 0-2 .9-2 2v16c0 1.1.9 2 2 2h4zm10.2-7c.1 0 .3.1.4.2l1.3 1.3c.2.2.2.6 0 .8l-1 1-2.1-2.1 1-1c.1-.1.2-.2.4-.2m0 3.9L14.1 23H12v-2.1l6.1-6.1z"/></svg>
     </a>
@@ -4904,142 +4660,69 @@
     
       
     
-    <a href="https://github.com/HolmesGPT/holmesgpt/raw/master/docs/reference/slash-commands.md" title="View source of this page" class="md-content__button md-icon">
+    <a href="https://github.com/HolmesGPT/holmesgpt/raw/master/docs/reference/context-management.md" title="View source of this page" class="md-content__button md-icon">
       
       <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M17 18c.56 0 1 .44 1 1s-.44 1-1 1-1-.44-1-1 .44-1 1-1m0-3c-2.73 0-5.06 1.66-6 4 .94 2.34 3.27 4 6 4s5.06-1.66 6-4c-.94-2.34-3.27-4-6-4m0 6.5a2.5 2.5 0 0 1-2.5-2.5 2.5 2.5 0 0 1 2.5-2.5 2.5 2.5 0 0 1 2.5 2.5 2.5 2.5 0 0 1-2.5 2.5M9.27 20H6V4h7v5h5v4.07c.7.08 1.36.25 2 .49V8l-6-6H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h4.5a8.2 8.2 0 0 1-1.23-2"/></svg>
     </a>
   
 
 
-<h1 id="slash-commands">Slash Commands<a class="headerlink" href="#slash-commands" title="Permanent link">&para;</a></h1>
-<p>Slash commands provide special actions in HolmesGPT's interactive mode. Type any command with a leading <code>/</code> to execute it.</p>
-<h2 id="built-in-commands">Built-in Commands<a class="headerlink" href="#built-in-commands" title="Permanent link">&para;</a></h2>
-<table>
-<thead>
-<tr>
-<th>Command</th>
-<th>Description</th>
-</tr>
-</thead>
-<tbody>
-<tr>
-<td><code>/help</code></td>
-<td>Show all available commands and their descriptions</td>
-</tr>
-<tr>
-<td><code>/exit</code></td>
-<td>Exit interactive mode and return to shell</td>
-</tr>
-<tr>
-<td><code>/clear</code></td>
-<td>Clear conversation history and start fresh</td>
-</tr>
-<tr>
-<td><code>/tools</code></td>
-<td>Show available toolsets and their status</td>
-</tr>
-<tr>
-<td><code>/context</code></td>
-<td>Display token usage and context size information</td>
-</tr>
-<tr>
-<td><code>/auto</code></td>
-<td>Toggle automatic display of tool outputs</td>
-</tr>
-<tr>
-<td><code>/last</code></td>
-<td>Show tool outputs from the most recent AI response</td>
-</tr>
-<tr>
-<td><code>/show [number\|name]</code></td>
-<td>View specific tool output in scrollable modal</td>
-</tr>
-<tr>
-<td><code>/run &lt;command&gt;</code></td>
-<td>Execute shell command and optionally share with AI</td>
-</tr>
-<tr>
-<td><code>/shell</code></td>
-<td>Start interactive shell session</td>
-</tr>
-</tbody>
-</table>
-<h2 id="command-details">Command Details<a class="headerlink" href="#command-details" title="Permanent link">&para;</a></h2>
-<h3 id="help"><code>/help</code><a class="headerlink" href="#help" title="Permanent link">&para;</a></h3>
-<p>Displays all available slash commands and their descriptions.</p>
-<div class="language-text highlight"><pre><span></span><code><span id="__span-0-1"><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a>&gt; /help
-</span></code></pre></div>
-<h3 id="exit"><code>/exit</code><a class="headerlink" href="#exit" title="Permanent link">&para;</a></h3>
-<p>Exits the interactive session and returns to your shell. Alternative: press <code>Ctrl+C</code> twice.</p>
-<div class="language-text highlight"><pre><span></span><code><span id="__span-1-1"><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a>&gt; /exit
-</span></code></pre></div>
-<h3 id="clear"><code>/clear</code><a class="headerlink" href="#clear" title="Permanent link">&para;</a></h3>
-<p>Clears all conversation history and starts fresh. Useful when switching topics or when context becomes too large.</p>
-<div class="language-text highlight"><pre><span></span><code><span id="__span-2-1"><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a>&gt; /clear
-</span></code></pre></div>
-<h3 id="tools"><code>/tools</code><a class="headerlink" href="#tools" title="Permanent link">&para;</a></h3>
-<p>Lists all configured toolsets and their current status (enabled/disabled).</p>
-<div class="language-text highlight"><pre><span></span><code><span id="__span-3-1"><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a>&gt; /tools
-</span><span id="__span-3-2"><a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a>Available toolsets:
-</span><span id="__span-3-3"><a id="__codelineno-3-3" name="__codelineno-3-3" href="#__codelineno-3-3"></a>✓ kubernetes (enabled)
-</span><span id="__span-3-4"><a id="__codelineno-3-4" name="__codelineno-3-4" href="#__codelineno-3-4"></a>✓ prometheus (enabled)
-</span><span id="__span-3-5"><a id="__codelineno-3-5" name="__codelineno-3-5" href="#__codelineno-3-5"></a>✗ grafana (disabled - no URL configured)
-</span></code></pre></div>
-<h3 id="context"><code>/context</code><a class="headerlink" href="#context" title="Permanent link">&para;</a></h3>
-<p>Displays detailed information about token usage and context size.</p>
-<div class="language-text highlight"><pre><span></span><code><span id="__span-4-1"><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a>&gt; /context
-</span><span id="__span-4-2"><a id="__codelineno-4-2" name="__codelineno-4-2" href="#__codelineno-4-2"></a>Context Usage:
-</span><span id="__span-4-3"><a id="__codelineno-4-3" name="__codelineno-4-3" href="#__codelineno-4-3"></a>- System: 1,250 tokens
-</span><span id="__span-4-4"><a id="__codelineno-4-4" name="__codelineno-4-4" href="#__codelineno-4-4"></a>- User: 3,421 tokens
-</span><span id="__span-4-5"><a id="__codelineno-4-5" name="__codelineno-4-5" href="#__codelineno-4-5"></a>- Assistant: 2,156 tokens
-</span><span id="__span-4-6"><a id="__codelineno-4-6" name="__codelineno-4-6" href="#__codelineno-4-6"></a>- Tools: 5,234 tokens
-</span><span id="__span-4-7"><a id="__codelineno-4-7" name="__codelineno-4-7" href="#__codelineno-4-7"></a>Total: 12,061 / 128,000 tokens (9.4%)
-</span><span id="__span-4-8"><a id="__codelineno-4-8" name="__codelineno-4-8" href="#__codelineno-4-8"></a>
-</span><span id="__span-4-9"><a id="__codelineno-4-9" name="__codelineno-4-9" href="#__codelineno-4-9"></a>Top tools by token usage:
-</span><span id="__span-4-10"><a id="__codelineno-4-10" name="__codelineno-4-10" href="#__codelineno-4-10"></a>1. kubernetes_get_pod_logs: 2,341 tokens
-</span><span id="__span-4-11"><a id="__codelineno-4-11" name="__codelineno-4-11" href="#__codelineno-4-11"></a>2. kubernetes_describe_pod: 1,893 tokens
-</span></code></pre></div>
-<h3 id="auto"><code>/auto</code><a class="headerlink" href="#auto" title="Permanent link">&para;</a></h3>
-<p>Controls whether tool outputs are automatically shown after each AI response. When disabled, use <code>/last</code> to view outputs.</p>
-<div class="language-text highlight"><pre><span></span><code><span id="__span-5-1"><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a>&gt; /auto
-</span><span id="__span-5-2"><a id="__codelineno-5-2" name="__codelineno-5-2" href="#__codelineno-5-2"></a>Auto-display tool outputs: ON
-</span></code></pre></div>
-<h3 id="last"><code>/last</code><a class="headerlink" href="#last" title="Permanent link">&para;</a></h3>
-<p>Displays all tool outputs from the most recent AI response. Useful when auto-display is off or to review outputs again.</p>
-<div class="language-text highlight"><pre><span></span><code><span id="__span-6-1"><a id="__codelineno-6-1" name="__codelineno-6-1" href="#__codelineno-6-1"></a>&gt; /last
-</span></code></pre></div>
-<h3 id="show-numbername"><code>/show [number|name]</code><a class="headerlink" href="#show-numbername" title="Permanent link">&para;</a></h3>
-<p>Opens a scrollable modal to view full tool output. You can specify outputs by:
-- Number: <code>/show 3</code> (shows 3<sup>rd</sup> tool output)
-- Name: <code>/show kubernetes_get_pod_logs</code> (shows specific tool output)</p>
-<div class="language-text highlight"><pre><span></span><code><span id="__span-7-1"><a id="__codelineno-7-1" name="__codelineno-7-1" href="#__codelineno-7-1"></a>&gt; /show 1
-</span><span id="__span-7-2"><a id="__codelineno-7-2" name="__codelineno-7-2" href="#__codelineno-7-2"></a>&gt; /show kubernetes_get_pod_logs
-</span></code></pre></div>
-<h4 id="modal-navigation">Modal Navigation<a class="headerlink" href="#modal-navigation" title="Permanent link">&para;</a></h4>
+<h1 id="context-management">Context Management<a class="headerlink" href="#context-management" title="Permanent link">&para;</a></h1>
+<p>HolmesGPT uses two mechanisms to keep conversations within the LLM's context window.
+They run at different points in the pipeline and serve different purposes.</p>
+<h2 id="1-single-tool-result-spill-to-disk">1. Single Tool Result Spill-to-Disk<a class="headerlink" href="#1-single-tool-result-spill-to-disk" title="Permanent link">&para;</a></h2>
+<p><strong>Function:</strong> <code>spill_oversized_tool_result()</code> in <code>holmes/core/tools_utils/tool_context_window_limiter.py</code></p>
+<p><strong>When:</strong> Immediately after each tool call returns, before the result is added to conversation history.</p>
+<p><strong>What it does:</strong></p>
 <ul>
-<li><code>j</code>/<code>k</code> or ↑/↓ - Move up/down</li>
-<li><code>g</code>/<code>G</code> - Go to top/bottom</li>
-<li><code>d</code>/<code>u</code> - Half page down/up</li>
-<li><code>f</code>/<code>b</code> or PgDn/PgUp - Full page down/up</li>
-<li><code>w</code> - Toggle word wrap</li>
-<li><code>q</code> or Esc - Close modal</li>
+<li>Counts the tokens in the single tool result.</li>
+<li>If it exceeds <code>max_token_count_for_single_tool</code> (configured via <code>TOOL_MAX_ALLOCATED_CONTEXT_WINDOW_PCT</code>):<ul>
+<li>Saves the full text result to a file on disk.</li>
+<li>If the result contains images, saves them as separate files on disk.</li>
+<li>Replaces the in-conversation result with a pointer message containing the file path, a preview, and instructions for the LLM to <code>cat</code> the file or use <code>read_image_file</code> to load images back.</li>
+<li>If disk storage is unavailable, drops the data entirely and returns an error asking the LLM to narrow its query.</li>
 </ul>
-<h3 id="run-command"><code>/run &lt;command&gt;</code><a class="headerlink" href="#run-command" title="Permanent link">&para;</a></h3>
-<p>Runs a shell command and optionally shares the output with the AI.</p>
-<div class="language-text highlight"><pre><span></span><code><span id="__span-8-1"><a id="__codelineno-8-1" name="__codelineno-8-1" href="#__codelineno-8-1"></a>&gt; /run kubectl get pods -n production
-</span><span id="__span-8-2"><a id="__codelineno-8-2" name="__codelineno-8-2" href="#__codelineno-8-2"></a># Output displayed...
-</span><span id="__span-8-3"><a id="__codelineno-8-3" name="__codelineno-8-3" href="#__codelineno-8-3"></a>Share output with AI? (Y/n): y
-</span><span id="__span-8-4"><a id="__codelineno-8-4" name="__codelineno-8-4" href="#__codelineno-8-4"></a>Add a comment or question (optional): why are some pods in CrashLoopBackOff?
+</li>
+</ul>
+<p><strong>Called from:</strong> <code>tool_calling_llm.py</code> → <code>_invoke_llm_tool_call()</code>, after tool execution.</p>
+<p><strong>Scope:</strong> One tool result at a time. Does not look at the overall conversation size.</p>
+<h2 id="2-conversation-history-compaction">2. Conversation History Compaction<a class="headerlink" href="#2-conversation-history-compaction" title="Permanent link">&para;</a></h2>
+<p><strong>Function:</strong> <code>compact_conversation_history()</code> in <code>holmes/core/truncation/compaction.py</code>, orchestrated by <code>compact_if_necessary()</code> in <code>holmes/core/truncation/input_context_window_limiter.py</code></p>
+<p><strong>When:</strong> Before each LLM call in the agentic loop, if the total conversation tokens exceed a compaction threshold.</p>
+<p><strong>What it does:</strong></p>
+<ul>
+<li>Checks if <code>(total_tokens + max_output_tokens) &gt; (context_window_size * threshold_pct / 100)</code>.</li>
+<li>If so, sends the conversation history to the LLM with a compaction prompt, asking it to produce a concise summary.</li>
+<li>Replaces the old messages with: system prompt + compacted summary + last user message.</li>
+<li>Tracks compaction cost in <code>RequestStats</code>.</li>
+</ul>
+<p><strong>Guard:</strong> Controlled by <code>ENABLE_CONVERSATION_HISTORY_COMPACTION</code> env var (defaults to true).</p>
+<p><strong>Called from:</strong> <code>tool_calling_llm.py</code> → <code>call_stream()</code>, at the top of each agentic loop iteration.</p>
+<p><strong>Scope:</strong> The entire conversation history. Uses an LLM call (costs tokens/money).</p>
+<h2 id="how-they-interact">How They Interact<a class="headerlink" href="#how-they-interact" title="Permanent link">&para;</a></h2>
+<div class="language-text highlight"><pre><span></span><code><span id="__span-0-1"><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a>Tool executes
+</span><span id="__span-0-2"><a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a>    │
+</span><span id="__span-0-3"><a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a>    ▼
+</span><span id="__span-0-4"><a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a>┌─────────────────────────────┐
+</span><span id="__span-0-5"><a id="__codelineno-0-5" name="__codelineno-0-5" href="#__codelineno-0-5"></a>│ 1. spill_oversized_tool_result │  ← caps single tool result
+</span><span id="__span-0-6"><a id="__codelineno-0-6" name="__codelineno-0-6" href="#__codelineno-0-6"></a>└─────────────────────────────┘
+</span><span id="__span-0-7"><a id="__codelineno-0-7" name="__codelineno-0-7" href="#__codelineno-0-7"></a>    │
+</span><span id="__span-0-8"><a id="__codelineno-0-8" name="__codelineno-0-8" href="#__codelineno-0-8"></a>    ▼
+</span><span id="__span-0-9"><a id="__codelineno-0-9" name="__codelineno-0-9" href="#__codelineno-0-9"></a>Tool result added to conversation
+</span><span id="__span-0-10"><a id="__codelineno-0-10" name="__codelineno-0-10" href="#__codelineno-0-10"></a>    │
+</span><span id="__span-0-11"><a id="__codelineno-0-11" name="__codelineno-0-11" href="#__codelineno-0-11"></a>    ▼
+</span><span id="__span-0-12"><a id="__codelineno-0-12" name="__codelineno-0-12" href="#__codelineno-0-12"></a>┌─────────────────────────────┐
+</span><span id="__span-0-13"><a id="__codelineno-0-13" name="__codelineno-0-13" href="#__codelineno-0-13"></a>│ 2. compaction (if needed)   │  ← summarizes full conversation via LLM
+</span><span id="__span-0-14"><a id="__codelineno-0-14" name="__codelineno-0-14" href="#__codelineno-0-14"></a>└─────────────────────────────┘
+</span><span id="__span-0-15"><a id="__codelineno-0-15" name="__codelineno-0-15" href="#__codelineno-0-15"></a>    │
+</span><span id="__span-0-16"><a id="__codelineno-0-16" name="__codelineno-0-16" href="#__codelineno-0-16"></a>    ▼
+</span><span id="__span-0-17"><a id="__codelineno-0-17" name="__codelineno-0-17" href="#__codelineno-0-17"></a>LLM called with messages
 </span></code></pre></div>
-<h3 id="shell"><code>/shell</code><a class="headerlink" href="#shell" title="Permanent link">&para;</a></h3>
-<p>Starts an interactive shell session. When you exit, you can share the entire session with the AI.</p>
-<div class="language-text highlight"><pre><span></span><code><span id="__span-9-1"><a id="__codelineno-9-1" name="__codelineno-9-1" href="#__codelineno-9-1"></a>&gt; /shell
-</span><span id="__span-9-2"><a id="__codelineno-9-2" name="__codelineno-9-2" href="#__codelineno-9-2"></a>$ kubectl logs failing-pod-xyz
-</span><span id="__span-9-3"><a id="__codelineno-9-3" name="__codelineno-9-3" href="#__codelineno-9-3"></a>$ kubectl describe pod failing-pod-xyz
-</span><span id="__span-9-4"><a id="__codelineno-9-4" name="__codelineno-9-4" href="#__codelineno-9-4"></a>$ exit
-</span><span id="__span-9-5"><a id="__codelineno-9-5" name="__codelineno-9-5" href="#__codelineno-9-5"></a>Share shell session with AI? (Y/n): y
-</span><span id="__span-9-6"><a id="__codelineno-9-6" name="__codelineno-9-6" href="#__codelineno-9-6"></a>Add a comment or question (optional): The pod keeps failing with OOM errors
-</span></code></pre></div>
+<p>In practice:</p>
+<ul>
+<li>Mechanism 1 prevents any single tool from blowing up the context.</li>
+<li>Mechanism 2 prevents the cumulative conversation from growing unbounded.</li>
+</ul>
 
 
 
@@ -5077,7 +4760,7 @@
       <nav class="md-footer__inner md-grid" aria-label="Footer" >
         
           
-          <a href="../runbooks/" class="md-footer__link md-footer__link--prev" aria-label="Previous: Runbooks">
+          <a href="../slash-commands/" class="md-footer__link md-footer__link--prev" aria-label="Previous: Slash Commands">
             <div class="md-footer__button md-icon">
               
               <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11z"/></svg>
@@ -5087,20 +4770,20 @@
                 Previous
               </span>
               <div class="md-ellipsis">
-                Runbooks
+                Slash Commands
               </div>
             </div>
           </a>
         
         
           
-          <a href="../context-management/" class="md-footer__link md-footer__link--next" aria-label="Next: Context Management">
+          <a href="../troubleshooting/" class="md-footer__link md-footer__link--next" aria-label="Next: Troubleshooting">
             <div class="md-footer__title">
               <span class="md-footer__direction">
                 Next
               </span>
               <div class="md-ellipsis">
-                Context Management
+                Troubleshooting
               </div>
             </div>
             <div class="md-footer__button md-icon">
