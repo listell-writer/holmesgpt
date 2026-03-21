@@ -62,7 +62,7 @@ def test_cli_fast_model_integration_with_kubernetes():
 
     kubernetes_toolset = create_kubernetes_toolset()
 
-    with patch("holmes.core.toolset_manager.load_builtin_toolsets") as mock_load:
+    with patch("holmes.core.toolset_registry._discover_builtin_toolsets") as mock_load:
         mock_load.return_value = [kubernetes_toolset]
 
         manager = ToolsetManager(global_fast_model=global_fast_model)
@@ -123,7 +123,7 @@ def test_fast_model_injection_chain():
         tools=[tool_with_transformer, tool_without_transformer],
     )
 
-    with patch("holmes.core.toolset_manager.load_builtin_toolsets") as mock_load:
+    with patch("holmes.core.toolset_registry._discover_builtin_toolsets") as mock_load:
         mock_load.return_value = [toolset]
 
         manager = ToolsetManager(global_fast_model=global_fast_model)
@@ -192,7 +192,7 @@ def test_fast_model_injection_with_different_transformers():
         tools=[tool],
     )
 
-    with patch("holmes.core.toolset_manager.load_builtin_toolsets") as mock_load:
+    with patch("holmes.core.toolset_registry._discover_builtin_toolsets") as mock_load:
         mock_load.return_value = [toolset]
 
         manager = ToolsetManager(global_fast_model=global_fast_model)
@@ -232,7 +232,7 @@ def test_backward_compatibility():
         tools=[YAMLTool(name="simple_tool", description="Simple", command="echo")],
     )
 
-    with patch("holmes.core.toolset_manager.load_builtin_toolsets") as mock_load:
+    with patch("holmes.core.toolset_registry._discover_builtin_toolsets") as mock_load:
         mock_load.return_value = [simple_toolset]
 
         manager = ToolsetManager(global_fast_model=global_fast_model)
@@ -263,7 +263,7 @@ def test_no_global_configs_no_regression():
         transformers=toolset_configs,
     )
 
-    with patch("holmes.core.toolset_manager.load_builtin_toolsets") as mock_load:
+    with patch("holmes.core.toolset_registry._discover_builtin_toolsets") as mock_load:
         mock_load.return_value = [toolset]
 
         # No global configs (normal case)
@@ -311,7 +311,7 @@ def test_toolset_with_only_tool_level_transformers_gets_fast_model():
         # Note: NO transformers defined at toolset level
     )
 
-    with patch("holmes.core.toolset_manager.load_builtin_toolsets") as mock_load:
+    with patch("holmes.core.toolset_registry._discover_builtin_toolsets") as mock_load:
         mock_load.return_value = [toolset_without_toolset_transformers]
 
         manager = ToolsetManager(global_fast_model=global_fast_model)
@@ -376,7 +376,7 @@ def test_toolset_with_toolset_level_transformers_works():
         ],
     )
 
-    with patch("holmes.core.toolset_manager.load_builtin_toolsets") as mock_load:
+    with patch("holmes.core.toolset_registry._discover_builtin_toolsets") as mock_load:
         mock_load.return_value = [toolset_with_toolset_transformers]
 
         manager = ToolsetManager(global_fast_model=global_fast_model)

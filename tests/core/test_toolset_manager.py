@@ -33,19 +33,24 @@ def test_server_tool_tags(toolset_manager):
     assert ToolsetTag.CLUSTER in tags
 
 
-@patch("holmes.core.toolset_manager.load_builtin_toolsets")
-@patch("holmes.core.toolset_manager.load_toolsets_from_config")
+@patch("holmes.core.toolset_registry._discover_builtin_toolsets")
+@patch("holmes.core.toolset_registry._parse_toolset_config")
 def test__list_all_toolsets_merges_configs(
     mock_load_toolsets_from_config, mock_load_builtin_toolsets, toolset_manager
 ):
     builtin_toolset = MagicMock(spec=Toolset)
     builtin_toolset.name = "builtin"
     builtin_toolset.tags = [ToolsetTag.CORE]
+    builtin_toolset.type = ToolsetType.BUILTIN
+    builtin_toolset.enabled = False
+    builtin_toolset.missing_config = False
     builtin_toolset.check_prerequisites = MagicMock()
     mock_load_builtin_toolsets.return_value = [builtin_toolset]
     config_toolset = MagicMock(spec=Toolset)
     config_toolset.name = "config"
     config_toolset.tags = [ToolsetTag.CLI]
+    config_toolset.type = ToolsetType.CUSTOMIZED
+    config_toolset.enabled = True
     config_toolset.check_prerequisites = MagicMock()
     mock_load_toolsets_from_config.return_value = [config_toolset]
 
@@ -56,7 +61,7 @@ def test__list_all_toolsets_merges_configs(
     assert "config" in names
 
 
-@patch("holmes.core.toolset_manager.load_builtin_toolsets")
+@patch("holmes.core.toolset_registry._discover_builtin_toolsets")
 def test__list_all_toolsets_override_builtin_config(
     mock_load_builtin_toolsets, toolset_manager
 ):
@@ -73,7 +78,7 @@ def test__list_all_toolsets_override_builtin_config(
     assert toolsets[0].enabled is False
 
 
-@patch("holmes.core.toolset_manager.load_builtin_toolsets")
+@patch("holmes.core.toolset_registry._discover_builtin_toolsets")
 def test__list_all_toolsets_custom_toolset(mock_load_builtin_toolsets, toolset_manager):
     builtin_toolset = YAMLToolset(
         name="builtin",
@@ -174,7 +179,7 @@ def test_list_server_toolsets(mock_list_all_toolsets, toolset_manager):
     assert toolset in result
 
 
-@patch("holmes.core.toolset_manager.load_toolsets_from_config")
+@patch("holmes.core.toolset_registry._parse_toolset_config")
 def test_load_custom_toolsets_success(mock_load_toolsets_from_config, toolset_manager):
     yaml_toolset = MagicMock(spec=Toolset)
     yaml_toolset.name = "custom"
@@ -189,8 +194,8 @@ def test_load_custom_toolsets_success(mock_load_toolsets_from_config, toolset_ma
     os.remove(tmpfile_path)
 
 
-@patch("holmes.core.toolset_manager.load_toolsets_from_config")
-@patch("holmes.core.toolset_manager.benedict")
+@patch("holmes.core.toolset_registry._parse_toolset_config")
+@patch("holmes.core.toolset_registry.benedict")
 def test_load_custom_toolsets_no_file(
     mock_benedict, mock_load_toolsets_from_config, toolset_manager
 ):
@@ -447,7 +452,7 @@ def test_injection_only_affects_llm_summarize_transformers():
     assert config_dict["custom_transformer"]["param"] == "value"  # Unchanged
 
 
-@patch("holmes.core.toolset_manager.load_builtin_toolsets")
+@patch("holmes.core.toolset_registry._discover_builtin_toolsets")
 def test_list_all_toolsets_applies_fast_model_injection(mock_load_builtin_toolsets):
     """Integration test that global fast model is injected during toolset loading."""
     from holmes.core.transformers import Transformer
@@ -482,7 +487,7 @@ def test_list_all_toolsets_applies_fast_model_injection(mock_load_builtin_toolse
     assert config_dict["llm_summarize"]["prompt"] == "K8s prompt"  # Original
 
 
-@patch("holmes.core.toolset_manager.load_builtin_toolsets")
+@patch("holmes.core.toolset_registry._discover_builtin_toolsets")
 def test_custom_runbook_catalogs_passed_to_builtin_toolsets(
     mock_load_builtin_toolsets, tmp_path
 ):
@@ -504,10 +509,13 @@ def test_custom_runbook_catalogs_passed_to_builtin_toolsets(
     }
     custom_catalog_file.write_text(json.dumps(catalog_data))
 
-    # Mock load_builtin_toolsets to return a dummy toolset
+    # Mock _discover_builtin_toolsets to return a dummy toolset
     builtin_toolset = MagicMock(spec=Toolset)
     builtin_toolset.name = "builtin"
     builtin_toolset.tags = [ToolsetTag.CORE]
+    builtin_toolset.type = ToolsetType.BUILTIN
+    builtin_toolset.enabled = False
+    builtin_toolset.missing_config = False
     builtin_toolset.check_prerequisites = MagicMock()
     mock_load_builtin_toolsets.return_value = [builtin_toolset]
 
@@ -517,18 +525,18 @@ def test_custom_runbook_catalogs_passed_to_builtin_toolsets(
     # Call _list_all_toolsets
     toolset_manager._list_all_toolsets(check_prerequisites=False)
 
-    # Verify load_builtin_toolsets was called with the correct additional_search_paths
+    # Verify _discover_builtin_toolsets was called with the correct additional_search_paths
     # It should contain the directory of the custom catalog file
     expected_search_path = str(custom_catalog_dir)
 
-    # Check the arguments passed to load_builtin_toolsets
+    # Check the arguments passed to _discover_builtin_toolsets
     args, _ = mock_load_builtin_toolsets.call_args
     # args[0] is dal, args[1] is additional_search_paths
     assert args[1] is not None
     assert expected_search_path in args[1]
 
 
-@patch("holmes.core.toolset_manager.load_builtin_toolsets")
+@patch("holmes.core.toolset_registry._discover_builtin_toolsets")
 def test_custom_runbook_catalogs_multiple_paths(mock_load_builtin_toolsets, tmp_path):
     """Test that multiple custom_runbook_catalogs paths are all passed correctly."""
     # Create multiple custom catalog files
@@ -554,10 +562,13 @@ def test_custom_runbook_catalogs_multiple_paths(mock_load_builtin_toolsets, tmp_
         catalog_dirs.append(catalog_dir)
         catalog_files.append(catalog_file)
 
-    # Mock load_builtin_toolsets
+    # Mock _discover_builtin_toolsets
     builtin_toolset = MagicMock(spec=Toolset)
     builtin_toolset.name = "builtin"
     builtin_toolset.tags = [ToolsetTag.CORE]
+    builtin_toolset.type = ToolsetType.BUILTIN
+    builtin_toolset.enabled = False
+    builtin_toolset.missing_config = False
     builtin_toolset.check_prerequisites = MagicMock()
     mock_load_builtin_toolsets.return_value = [builtin_toolset]
 
@@ -567,7 +578,7 @@ def test_custom_runbook_catalogs_multiple_paths(mock_load_builtin_toolsets, tmp_
     # Call _list_all_toolsets
     toolset_manager._list_all_toolsets(check_prerequisites=False)
 
-    # Verify all directories are passed to load_builtin_toolsets
+    # Verify all directories are passed to _discover_builtin_toolsets
     args, _ = mock_load_builtin_toolsets.call_args
     additional_search_paths = args[1]
 
@@ -580,16 +591,19 @@ def test_custom_runbook_catalogs_empty_list(tmp_path):
     """Test that an empty custom_runbook_catalogs list is handled correctly."""
     toolset_manager = ToolsetManager(custom_runbook_catalogs=[])
 
-    with patch("holmes.core.toolset_manager.load_builtin_toolsets") as mock_load:
+    with patch("holmes.core.toolset_registry._discover_builtin_toolsets") as mock_load:
         builtin_toolset = MagicMock(spec=Toolset)
         builtin_toolset.name = "builtin"
         builtin_toolset.tags = [ToolsetTag.CORE]
+        builtin_toolset.type = ToolsetType.BUILTIN
+        builtin_toolset.enabled = False
+        builtin_toolset.missing_config = False
         builtin_toolset.check_prerequisites = MagicMock()
         mock_load.return_value = [builtin_toolset]
 
         toolset_manager._list_all_toolsets(check_prerequisites=False)
 
-        # Verify load_builtin_toolsets was called with None or empty additional_search_paths
+        # Verify _discover_builtin_toolsets was called with None or empty additional_search_paths
         args, _ = mock_load.call_args
         additional_search_paths = args[1]
         assert additional_search_paths is None or additional_search_paths == []
@@ -599,10 +613,13 @@ def test_custom_runbook_catalogs_none(tmp_path):
     """Test that None custom_runbook_catalogs is handled correctly."""
     toolset_manager = ToolsetManager(custom_runbook_catalogs=None)
 
-    with patch("holmes.core.toolset_manager.load_builtin_toolsets") as mock_load:
+    with patch("holmes.core.toolset_registry._discover_builtin_toolsets") as mock_load:
         builtin_toolset = MagicMock(spec=Toolset)
         builtin_toolset.name = "builtin"
         builtin_toolset.tags = [ToolsetTag.CORE]
+        builtin_toolset.type = ToolsetType.BUILTIN
+        builtin_toolset.enabled = False
+        builtin_toolset.missing_config = False
         builtin_toolset.check_prerequisites = MagicMock()
         mock_load.return_value = [builtin_toolset]
 
