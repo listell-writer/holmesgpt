@@ -169,6 +169,23 @@ class LLMSummarizeTransformer(BaseTransformer):
             logger.error(error_msg)
             raise TransformerError(error_msg) from e
 
+    def set_global_fast_model(self, model: str) -> None:
+        """Set global_fast_model at runtime, creating the LLM instance if needed.
+
+        Only takes effect when no explicit ``fast_model`` is configured on the
+        transformer (explicit always wins).
+        """
+        if self.fast_model:
+            return  # explicit fast_model takes precedence
+
+        self.global_fast_model = model
+        try:
+            self._fast_llm = DefaultLLM(model, self.api_key)
+            logger.info(f"Set global fast model on transformer: {model}")
+        except Exception as e:
+            logger.warning(f"Failed to create fast LLM with global model {model}: {e}")
+            self._fast_llm = None
+
     @property
     def name(self) -> str:
         """Get the transformer name."""

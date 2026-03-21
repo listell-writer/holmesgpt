@@ -524,136 +524,27 @@ class ToolsetManager:
     # ------------------------------------------------------------------
 
     def _inject_fast_model_into_transformers(self, toolsets: List[Toolset]) -> None:
+        """Propagate ``global_fast_model`` to cached transformer instances.
+
+        Iterates every already-created :class:`LLMSummarizeTransformer` instance
+        on each tool and calls :meth:`set_global_fast_model` — no config-dict
+        mutation or instance recreation required.
         """
-        Inject global fast_model setting into all llm_summarize transformers that don't already have fast_model.
-        This ensures --fast-model reaches all tools regardless of toolset-level transformer configuration.
-
-        IMPORTANT: This also forces recreation of transformer instances since they may already be created.
-        """
-        import logging
-
-        from holmes.core.transformers import registry
-
-        logger = logging.getLogger(__name__)
-
-        logger.debug(
-            f"Starting fast_model injection. global_fast_model={self.global_fast_model}"
-        )
-
         if not self.global_fast_model:
-            logger.debug("No global_fast_model configured, skipping injection")
             return
 
-        injected_count = 0
-        toolset_count = 0
+        from holmes.core.transformers.llm_summarize import LLMSummarizeTransformer
 
+        injected = 0
         for toolset in toolsets:
-            toolset_count += 1
-            toolset_injected = 0
-            logger.debug(
-                f"Processing toolset '{toolset.name}', has toolset transformers: {toolset.transformers is not None}"
-            )
+            if not hasattr(toolset, "tools") or not toolset.tools:
+                continue
+            for tool in toolset.tools:
+                for instance in tool._transformer_instances or []:
+                    if isinstance(instance, LLMSummarizeTransformer):
+                        instance.set_global_fast_model(self.global_fast_model)
+                        injected += 1
 
-            # Inject into toolset-level transformers
-            if toolset.transformers:
-                logger.debug(
-                    f"Toolset '{toolset.name}' has {len(toolset.transformers)} toolset-level transformers"
-                )
-                for transformer in toolset.transformers:
-                    logger.debug(
-                        f"  Toolset transformer: name='{transformer.name}', config keys={list(transformer.config.keys())}"
-                    )
-                    if (
-                        transformer.name == "llm_summarize"
-                        and "fast_model" not in transformer.config
-                    ):
-                        transformer.config["global_fast_model"] = self.global_fast_model
-                        injected_count += 1
-                        toolset_injected += 1
-                        logger.info(
-                            f"  ✓ Injected global_fast_model into toolset '{toolset.name}' transformer"
-                        )
-                    elif transformer.name == "llm_summarize":
-                        logger.debug(
-                            f"  - Toolset transformer already has fast_model: {transformer.config.get('fast_model')}"
-                        )
-            else:
-                logger.debug(
-                    f"Toolset '{toolset.name}' has no toolset-level transformers"
-                )
-
-            # Inject into tool-level transformers
-            if hasattr(toolset, "tools") and toolset.tools:
-                logger.debug(f"Toolset '{toolset.name}' has {len(toolset.tools)} tools")
-                for tool in toolset.tools:
-                    logger.debug(
-                        f"  Processing tool '{tool.name}', has transformers: {tool.transformers is not None}"
-                    )
-                    if tool.transformers:
-                        logger.debug(
-                            f"    Tool '{tool.name}' has {len(tool.transformers)} transformers"
-                        )
-                        tool_updated = False
-                        for transformer in tool.transformers:
-                            logger.debug(
-                                f"      Tool transformer: name='{transformer.name}', config keys={list(transformer.config.keys())}"
-                            )
-                            if (
-                                transformer.name == "llm_summarize"
-                                and "fast_model" not in transformer.config
-                            ):
-                                transformer.config["global_fast_model"] = (
-                                    self.global_fast_model
-                                )
-                                injected_count += 1
-                                toolset_injected += 1
-                                tool_updated = True
-                                logger.info(
-                                    f"      ✓ Injected global_fast_model into tool '{tool.name}' transformer"
-                                )
-                            elif transformer.name == "llm_summarize":
-                                logger.debug(
-                                    f"      - Tool transformer already has fast_model: {transformer.config.get('fast_model')}"
-                                )
-
-                        # CRITICAL: Force recreation of transformer instances if we updated the config
-                        if tool_updated:
-                            logger.info(
-                                f"      🔄 Recreating transformer instances for tool '{tool.name}' after injection"
-                            )
-                            if tool.transformers:
-                                tool._transformer_instances = []
-                                for transformer in tool.transformers:
-                                    if not transformer:
-                                        continue
-                                    try:
-                                        # Create transformer instance with updated config
-                                        transformer_instance = (
-                                            registry.create_transformer(
-                                                transformer.name, transformer.config
-                                            )
-                                        )
-                                        tool._transformer_instances.append(
-                                            transformer_instance
-                                        )
-                                        logger.debug(
-                                            f"        Recreated transformer '{transformer.name}' for tool '{tool.name}' with config: {transformer.config}"
-                                        )
-                                    except Exception as e:
-                                        logger.warning(
-                                            f"        Failed to recreate transformer '{transformer.name}' for tool '{tool.name}': {e}"
-                                        )
-                                        continue
-                    else:
-                        logger.debug(f"    Tool '{tool.name}' has no transformers")
-            else:
-                logger.debug(f"Toolset '{toolset.name}' has no tools")
-
-            if toolset_injected > 0:
-                logger.info(
-                    f"Toolset '{toolset.name}': injected into {toolset_injected} transformers"
-                )
-
-        logger.info(
-            f"Fast_model injection complete: {injected_count} transformers updated across {toolset_count} toolsets"
+        logging.debug(
+            f"Injected global_fast_model={self.global_fast_model!r} into {injected} transformer instances"
         )
