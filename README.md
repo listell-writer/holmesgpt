@@ -119,23 +119,22 @@ Distributed under the Apache 2.0 License. See [LICENSE](https://github.com/Holme
 
 ## Maintainers & Contributors
 
-See [GOVERNANCE.md](GOVERNANCE.md) for role definitions and how to get involved.
+See [MAINTAINERS.md](MAINTAINERS.md) for the full list and [GOVERNANCE.md](GOVERNANCE.md) for role definitions.
 
 ### Maintainers
 
-| Name | GitHub | Status |
-|------|--------|--------|
-| Natan Yellin | [@aantn](https://github.com/aantn) | Active |
-| Avi | [@Avi-Robusta](https://github.com/Avi-Robusta) | Active |
-
-### Contributors
-
-| Name | GitHub | Status |
-|------|--------|--------|
-| Pavan Gudiwada | [@pavangudiwada](https://github.com/pavangudiwada) | Active |
-| Robert Moucha | [@robert-moucha](https://github.com/robert-moucha) | Active |
-| Yakir Shriker | [@yakir-shriker](https://github.com/yakir-shriker) | Active |
-| Naomi Caren | [@naomi-caren](https://github.com/naomi-caren) | Active |
+| Name | GitHub | Affiliation | Status |
+|------|--------|-------------|--------|
+| Natan Yellin | [@aantn](https://github.com/aantn) | [Robusta](https://github.com/robusta-dev) | Active |
+| Arik Alon | [@arikalon1](https://github.com/arikalon1) | [Robusta](https://github.com/robusta-dev) | Active |
+| Avi Kotlicky | [@Avi-Robusta](https://github.com/Avi-Robusta) | [Robusta](https://github.com/robusta-dev) | Active |
+| Pavan Gudiwada | [@pavangudiwada](https://github.com/pavangudiwada) | [Robusta](https://github.com/robusta-dev) | Active |
+| Nicolas Herment | [@nherment](https://github.com/nherment) | [Robusta](https://github.com/robusta-dev) | Active |
+| Tomer Keshet | [@Sheeproid](https://github.com/Sheeproid) | [Robusta](https://github.com/robusta-dev) | Active |
+| Roi Glinik | [@RoiGlinik](https://github.com/RoiGlinik) | [Robusta](https://github.com/robusta-dev) | Active |
+| Moshe Morad | [@moshemorad](https://github.com/moshemorad) | [Robusta](https://github.com/robusta-dev) | Active |
+| Qingchuan Hao | [@mainred](https://github.com/mainred) | [Microsoft](https://github.com/microsoft) | Active |
+| Dmytro Chievtaiev | [@itisallgood](https://github.com/itisallgood) | [Robusta](https://github.com/robusta-dev) | Emeritus |
 
 ## Community
 
