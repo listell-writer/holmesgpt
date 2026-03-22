@@ -44,7 +44,7 @@ before_test: |
           command: ["sleep", "3600"]
           env:
           - name: OPENAI_API_KEY
-            value: "HOLMES-EVAL-254-fake-openai-key-9x7m2p"
+            value: "T3BlbkFJ9x7mR2qW4vN8pL5sXdummy"
           - name: LOG_LEVEL
             value: "INFO"
           - name: ENABLE_TELEMETRY
@@ -71,7 +71,7 @@ before_test: |
           command: ["sleep", "3600"]
           env:
           - name: STRIPE_SECRET_KEY
-            value: "HOLMES-EVAL-254-fake-stripe-key-4eC39H"
+            value: "whsec_4eC39HqLyjWDarjtT1zdp7dc"
           - name: SERVICE_PORT
             value: "8443"
   ---
