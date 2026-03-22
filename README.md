@@ -129,7 +129,7 @@ See [MAINTAINERS.md](MAINTAINERS.md) for the full list and [GOVERNANCE.md](GOVER
 | Arik Alon | [@arikalon1](https://github.com/arikalon1) | [Robusta](https://github.com/robusta-dev) | Active |
 | Avi Kotlicky | [@Avi-Robusta](https://github.com/Avi-Robusta) | [Robusta](https://github.com/robusta-dev) | Active |
 | Pavan Gudiwada | [@pavangudiwada](https://github.com/pavangudiwada) | [Robusta](https://github.com/robusta-dev) | Active |
-| Nicolas Herment | [@nherment](https://github.com/nherment) | Independent | Active |
+| Nicolas Herment | [@nherment](https://github.com/nherment) | | Active |
 | Tomer Keshet | [@Sheeproid](https://github.com/Sheeproid) | [Robusta](https://github.com/robusta-dev) | Active |
 | Roi Glinik | [@RoiGlinik](https://github.com/RoiGlinik) | [Robusta](https://github.com/robusta-dev) | Active |
 | Moshe Morad | [@moshemorad](https://github.com/moshemorad) | [Robusta](https://github.com/robusta-dev) | Active |
