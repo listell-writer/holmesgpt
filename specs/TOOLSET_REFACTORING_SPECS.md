@@ -112,7 +112,6 @@ Single source of truth for whether a toolset should be enabled:
 **Key fields:**
 - `registry` — the `ToolsetRegistry` instance
 - `custom_toolsets_from_cli` — CLI-provided toolset files (not cached, always rechecked)
-- `global_fast_model` — set once in `__init__` as a class-level default on `LLMSummarizeTransformer`
 - `toolset_status_location` — path to cached status JSON
 - `config_file_path` — main config path for hash tracking
 
@@ -136,10 +135,9 @@ Single source of truth for whether a toolset should be enabled:
 - `_check_config_prerequisites()` — fast config-only checks
 
 **Fast model setup:**
-`global_fast_model` is set once in `ToolsetManager.__init__()` via
-`LLMSummarizeTransformer.set_default_fast_model()`. This sets a class-level default
-so all future `LLMSummarizeTransformer` instances pick it up automatically. No
-per-toolset or per-tool injection is needed.
+`Config.toolset_manager` (property) calls `LLMSummarizeTransformer.set_default_fast_model()`
+once at startup. This sets a class-level default so all future `LLMSummarizeTransformer`
+instances pick it up automatically. `ToolsetManager` is unaware of transformer internals.
 
 ---
 

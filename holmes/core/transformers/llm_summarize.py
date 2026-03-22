@@ -36,8 +36,8 @@ class LLMSummarizeTransformer(BaseTransformer):
 - When listing problematic entries, also try to use aggregate descriptions when possible
 - When possible, mention exact keywords, IDs, or patterns so the user can filter/search the original data and drill down on the parts they care about (extraction over abstraction)"""
 
-    # Class-level default fast model — set once at startup by ToolsetManager.
-    # Individual instances can override via ``fast_model`` field.
+    # Class-level default fast model — set once at startup by Config.
+    # Individual instances can override via the ``fast_model`` field.
     _default_fast_model: ClassVar[Optional[str]] = None
 
     # Pydantic fields with validation

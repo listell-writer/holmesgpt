@@ -84,7 +84,8 @@ class TestFastModelClassDefault:
             mock_load.return_value = [toolset]
 
             with patch("holmes.core.transformers.llm_summarize.DefaultLLM") as mock_llm:
-                manager = ToolsetManager(global_fast_model="azure/gpt-4.1")
+                LLMSummarizeTransformer.set_default_fast_model("azure/gpt-4.1")
+                manager = ToolsetManager()
                 toolsets = manager._list_all_toolsets(check_prerequisites=False)
 
                 # Trigger lazy init
@@ -120,7 +121,8 @@ class TestFastModelClassDefault:
             mock_load.return_value = [toolset]
 
             with patch("holmes.core.transformers.llm_summarize.DefaultLLM") as mock_llm:
-                manager = ToolsetManager(global_fast_model="gpt-4.1")
+                LLMSummarizeTransformer.set_default_fast_model("gpt-4.1")
+                manager = ToolsetManager()
                 toolsets = manager._list_all_toolsets(check_prerequisites=False)
 
                 # Trigger lazy init
@@ -155,7 +157,8 @@ class TestFastModelClassDefault:
             mock_load.return_value = [toolset]
 
             with patch("holmes.core.transformers.llm_summarize.DefaultLLM") as mock_llm:
-                manager = ToolsetManager(global_fast_model="gpt-4.1")
+                LLMSummarizeTransformer.set_default_fast_model("gpt-4.1")
+                manager = ToolsetManager()
                 toolsets = manager._list_all_toolsets(check_prerequisites=False)
 
                 # Tool inherited transformer from toolset
@@ -168,10 +171,10 @@ class TestFastModelClassDefault:
 
 
 class TestToolsetManagerWithoutFastModelInjection:
-    """Verify ToolsetManager no longer injects fast_model into transformer configs."""
+    """Verify ToolsetManager does not inject fast_model into transformer configs."""
 
-    def test_toolsets_loaded_without_global_fast_model_param(self):
-        """ToolsetManager works without global_fast_model parameter."""
+    def test_toolsets_loaded_without_class_default(self):
+        """ToolsetManager works without a class-level fast_model default."""
         toolset = YAMLToolset(
             name="test_toolset",
             tags=[ToolsetTag.CORE],

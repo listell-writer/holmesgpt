@@ -13,7 +13,6 @@ from holmes.core.config import config_path_dir
 from holmes.core.init_event import EventCallback, StatusEvent, StatusEventKind, ToolsetStatus
 from holmes.core.supabase_dal import SupabaseDal
 from holmes.core.tools import PrerequisiteCacheMode, Toolset, ToolsetStatusEnum, ToolsetTag, ToolsetType
-from holmes.core.transformers.llm_summarize import LLMSummarizeTransformer
 from holmes.core.toolset_registry import (
     ToolsetRegistry,
     _merge_onto,
@@ -41,7 +40,6 @@ class ToolsetManager:
         mcp_servers: Optional[dict[str, dict[str, Any]]] = None,
         custom_toolsets: Optional[List[FilePath]] = None,
         custom_toolsets_from_cli: Optional[List[FilePath]] = None,
-        global_fast_model: Optional[str] = None,
         toolset_status_location: Optional[FilePath] = None,
         custom_runbook_catalogs: Optional[List[Union[str, FilePath]]] = None,
         config_file_path: Optional[Path] = None,
@@ -67,12 +65,6 @@ class ToolsetManager:
         )
 
         self.custom_toolsets_from_cli = custom_toolsets_from_cli
-        self.global_fast_model = global_fast_model
-
-        # Set class-level default once — all future LLMSummarizeTransformer
-        # instances will pick it up automatically (no per-tool injection).
-        if global_fast_model:
-            LLMSummarizeTransformer.set_default_fast_model(global_fast_model)
         self.config_file_path = config_file_path
         # Keep reference to custom_toolset_paths for hash tracking
         self._custom_toolset_paths = custom_toolset_paths
