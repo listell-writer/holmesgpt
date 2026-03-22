@@ -20,6 +20,9 @@ spec:
       annotations:
         # checksum annotation triggering pod reload when .Values.toolsets changes by helm upgrade
         checksum/toolset-config: {{ list .Values.toolsets .Values.modelList .Values.mcp_servers | toYaml | sha256sum }}
+        {{- if .Values.sentryDSN }}
+        checksum/secret-sentry-dsn: {{ .Values.sentryDSN | sha256sum }}
+        {{- end }}
         {{- with .Values.podAnnotations }}
         {{- toYaml . | nindent 8 }}
         {{- end }}
