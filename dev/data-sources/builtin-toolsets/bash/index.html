@@ -2118,6 +2118,17 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#large-tool-result-storage" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Large Tool Result Storage
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#blocked-commands" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -4650,6 +4661,17 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#large-tool-result-storage" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Large Tool Result Storage
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#blocked-commands" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -4953,6 +4975,33 @@
 <div class="language-bash highlight"><pre><span></span><code><span id="__span-3-1"><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a>kubectl<span class="w"> </span>get<span class="w"> </span>pods<span class="w"> </span><span class="p">|</span><span class="w"> </span>grep<span class="w"> </span>error<span class="w"> </span><span class="p">|</span><span class="w"> </span>head<span class="w"> </span>-10
 </span></code></pre></div>
 <p>This requires <code>kubectl get</code>, <code>grep</code>, and <code>head</code> to all be allowed.</p>
+<h2 id="large-tool-result-storage">Large Tool Result Storage<a class="headerlink" href="#large-tool-result-storage" title="Permanent link">&para;</a></h2>
+<p>When a tool response exceeds the LLM context window limit, Holmes saves the result to disk and gives the LLM a file path. The bash toolset automatically allows read-only commands (<code>cat</code>, <code>head</code>, <code>tail</code>, <code>wc</code>, <code>jq</code>) on the storage directory so the LLM can access saved results without approval prompts.</p>
+<table>
+<thead>
+<tr>
+<th>Variable</th>
+<th>Default</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>HOLMES_TOOL_RESULT_STORAGE_ENABLED</code></td>
+<td><code>true</code></td>
+<td>Enable/disable saving large results to disk. When disabled, oversized results are dropped and the LLM is asked to retry with a narrower query.</td>
+</tr>
+<tr>
+<td><code>HOLMES_TOOL_RESULT_STORAGE_PATH</code></td>
+<td><code>/tmp/.holmes</code></td>
+<td>Directory for saved results. Auto-cleaned per session.</td>
+</tr>
+</tbody>
+</table>
+<div class="language-bash highlight"><pre><span></span><code><span id="__span-4-1"><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a><span class="c1"># Disable filesystem storage entirely</span>
+</span><span id="__span-4-2"><a id="__codelineno-4-2" name="__codelineno-4-2" href="#__codelineno-4-2"></a><span class="nb">export</span><span class="w"> </span><span class="nv">HOLMES_TOOL_RESULT_STORAGE_ENABLED</span><span class="o">=</span><span class="nb">false</span>
+</span></code></pre></div>
+<p>See <a href="../../../reference/environment-variables/#tool-result-size-limits">Environment Variables</a> for the full list of size-limit settings.</p>
 <h2 id="blocked-commands">Blocked Commands<a class="headerlink" href="#blocked-commands" title="Permanent link">&para;</a></h2>
 <p>The following are always blocked and cannot be overridden:</p>
 <ul>
