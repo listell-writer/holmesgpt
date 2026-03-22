@@ -1,3 +1,4 @@
+import contextvars
 import logging
 import math
 import os
@@ -2617,7 +2618,10 @@ def run_interactive_loop(
                     finally:
                         _event_queue.put(_SENTINEL)
 
-                ai_thread = threading.Thread(target=_run_ai_stream, daemon=True)
+                # Copy context so Braintrust's current_span ContextVar propagates to the thread,
+                # otherwise ChatCompletionWrapper spans won't nest under the trace span.
+                ctx = contextvars.copy_context()
+                ai_thread = threading.Thread(target=ctx.run, args=(_run_ai_stream,), daemon=True)
                 ai_thread.start()
 
                 # Start escape listener in a background thread so the main
