@@ -83,9 +83,6 @@ additionalEnvVars:
       key: openai-api-key
 ```
 
-!!! tip "Avoid plaintext API keys in production"
-    Setting API keys using `value: "your-api-key"` directly works for quick testing, but plaintext values are visible in the pod spec and may be flagged by HolmesGPT or other security scanners when scanning your cluster.
-
 #### Toolset Configuration
 
 Control which capabilities HolmesGPT has access to:
