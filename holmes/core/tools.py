@@ -282,35 +282,33 @@ class Tool(ABC, BaseModel):
         description="If True, tool requires runbook authorization or restricted_tools=true to use",
     )
 
-    # Lazy-initialized transformer instances — created on first use so that
-    # toolset-level merges and fast_model injection can freely mutate
-    # ``self.transformers`` without worrying about stale cached instances.
+    # Private attribute to store initialized transformer instances for performance
     _transformer_instances: Optional[List["BaseTransformer"]] = PrivateAttr(
         default=None
     )
-    _transformers_initialized: bool = PrivateAttr(default=False)
 
-    @property
-    def transformer_instances(self) -> List["BaseTransformer"]:
-        """Return cached transformer instances, creating them on first access."""
-        if not self._transformers_initialized:
-            self._transformers_initialized = True
-            if self.transformers:
-                self._transformer_instances = []
-                for transformer in self.transformers:
-                    if not transformer:
-                        continue
-                    try:
-                        instance = registry.create_transformer(
-                            transformer.name, transformer.config
-                        )
-                        self._transformer_instances.append(instance)
-                    except Exception as e:
-                        logger.warning(
-                            f"Failed to initialize transformer '{transformer.name}' "
-                            f"for tool '{self.name}': {e}"
-                        )
-        return self._transformer_instances or []
+    def model_post_init(self, __context) -> None:
+        """Initialize transformer instances once during tool creation for better performance."""
+        if self.transformers:
+            self._transformer_instances = []
+            for transformer in self.transformers:
+                if not transformer:
+                    continue
+                try:
+                    transformer_instance = registry.create_transformer(
+                        transformer.name, transformer.config
+                    )
+                    self._transformer_instances.append(transformer_instance)
+                    logger.debug(
+                        f"Initialized transformer '{transformer.name}' for tool '{self.name}'"
+                    )
+                except Exception as e:
+                    logger.warning(
+                        f"Failed to initialize transformer '{transformer.name}' for tool '{self.name}': {e}"
+                    )
+                    continue
+        else:
+            self._transformer_instances = None
 
     def _coerce_params(self, params: Dict) -> Dict:
         """Coerce LLM tool-call parameters to match their JSON Schema types.
@@ -424,7 +422,7 @@ class Tool(ABC, BaseModel):
             The tool result with transformed data, or original result if transformation fails
         """
         if (
-            not self.transformer_instances
+            not self._transformer_instances
             or result.status != StructuredToolResultStatus.SUCCESS
         ):
             return result
@@ -437,7 +435,7 @@ class Tool(ABC, BaseModel):
         transformed_data = original_data
         transformers_applied = []
 
-        for transformer_instance in self.transformer_instances:
+        for transformer_instance in self._transformer_instances:
             try:
                 # Check if transformer should be applied
                 if not transformer_instance.should_apply(transformed_data):

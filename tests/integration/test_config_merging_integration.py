@@ -56,118 +56,92 @@ class TestFastModelClassDefault:
             mock_llm.assert_not_called()
             assert instance._fast_llm is None
 
-    def test_lazy_instances_pick_up_class_default(self):
+    def test_instances_pick_up_class_default(self):
         """Transformer instances created after set_default_fast_model use the default."""
-        toolset = YAMLToolset(
-            name="kubernetes/core",
-            tags=[ToolsetTag.CORE],
-            description="Kubernetes toolset",
-            tools=[
-                {
-                    "name": "kubectl_describe",
-                    "description": "Run kubectl describe",
-                    "command": "kubectl describe {{ kind }} {{ name }}",
-                    "transformers": [
-                        Transformer(
-                            name="llm_summarize",
-                            config={
-                                "input_threshold": 1000,
-                                "prompt": "Summarize kubectl describe output...",
-                            },
-                        )
-                    ],
-                }
-            ],
-        )
+        with patch("holmes.core.transformers.llm_summarize.DefaultLLM") as mock_llm:
+            LLMSummarizeTransformer.set_default_fast_model("azure/gpt-4.1")
 
-        with patch("holmes.core.toolset_registry._discover_builtin_toolsets") as mock_load:
-            mock_load.return_value = [toolset]
+            toolset = YAMLToolset(
+                name="kubernetes/core",
+                tags=[ToolsetTag.CORE],
+                description="Kubernetes toolset",
+                tools=[
+                    {
+                        "name": "kubectl_describe",
+                        "description": "Run kubectl describe",
+                        "command": "kubectl describe {{ kind }} {{ name }}",
+                        "transformers": [
+                            Transformer(
+                                name="llm_summarize",
+                                config={
+                                    "input_threshold": 1000,
+                                    "prompt": "Summarize kubectl describe output...",
+                                },
+                            )
+                        ],
+                    }
+                ],
+            )
 
-            with patch("holmes.core.transformers.llm_summarize.DefaultLLM") as mock_llm:
-                LLMSummarizeTransformer.set_default_fast_model("azure/gpt-4.1")
-                manager = ToolsetManager()
-                toolsets = manager._list_all_toolsets(check_prerequisites=False)
-
-                # Trigger lazy init
-                k8s_tool = toolsets[0].tools[0]
-                instances = k8s_tool.transformer_instances
-
-                assert len(instances) == 1
-                # DefaultLLM should have been called with the class default
-                mock_llm.assert_called_with("azure/gpt-4.1", None)
+            k8s_tool = toolset.tools[0]
+            assert len(k8s_tool._transformer_instances) == 1
+            mock_llm.assert_called_with("azure/gpt-4.1", None)
 
     def test_explicit_fast_model_wins_over_class_default(self):
         """Per-transformer fast_model takes precedence over class default."""
-        toolset = YAMLToolset(
-            name="test_toolset",
-            tags=[ToolsetTag.CORE],
-            description="Test toolset",
-            tools=[
-                {
-                    "name": "tool_with_explicit",
-                    "description": "Tool with explicit fast_model",
-                    "command": "echo test",
-                    "transformers": [
-                        Transformer(
-                            name="llm_summarize",
-                            config={"input_threshold": 2000, "fast_model": "my-explicit-model"},
-                        )
-                    ],
-                },
-            ],
-        )
+        with patch("holmes.core.transformers.llm_summarize.DefaultLLM") as mock_llm:
+            LLMSummarizeTransformer.set_default_fast_model("gpt-4.1")
 
-        with patch("holmes.core.toolset_registry._discover_builtin_toolsets") as mock_load:
-            mock_load.return_value = [toolset]
+            toolset = YAMLToolset(
+                name="test_toolset",
+                tags=[ToolsetTag.CORE],
+                description="Test toolset",
+                tools=[
+                    {
+                        "name": "tool_with_explicit",
+                        "description": "Tool with explicit fast_model",
+                        "command": "echo test",
+                        "transformers": [
+                            Transformer(
+                                name="llm_summarize",
+                                config={"input_threshold": 2000, "fast_model": "my-explicit-model"},
+                            )
+                        ],
+                    },
+                ],
+            )
 
-            with patch("holmes.core.transformers.llm_summarize.DefaultLLM") as mock_llm:
-                LLMSummarizeTransformer.set_default_fast_model("gpt-4.1")
-                manager = ToolsetManager()
-                toolsets = manager._list_all_toolsets(check_prerequisites=False)
-
-                # Trigger lazy init
-                tool = toolsets[0].tools[0]
-                tool.transformer_instances
-
-                # Should use explicit, not global
-                mock_llm.assert_called_with("my-explicit-model", None)
+            # Should use explicit, not global
+            mock_llm.assert_called_with("my-explicit-model", None)
 
     def test_toolset_transformer_inheritance_with_class_default(self):
         """Tools that inherit toolset-level transformers also pick up class default."""
-        toolset = YAMLToolset(
-            name="test_toolset",
-            tags=[ToolsetTag.CORE],
-            description="Test toolset",
-            transformers=[
-                Transformer(
-                    name="llm_summarize",
-                    config={"input_threshold": 1000, "prompt": "Toolset prompt"},
-                )
-            ],
-            tools=[
-                {
-                    "name": "generic_tool",
-                    "description": "Generic tool (inherits toolset transformers)",
-                    "command": "echo generic",
-                },
-            ],
-        )
+        with patch("holmes.core.transformers.llm_summarize.DefaultLLM") as mock_llm:
+            LLMSummarizeTransformer.set_default_fast_model("gpt-4.1")
 
-        with patch("holmes.core.toolset_registry._discover_builtin_toolsets") as mock_load:
-            mock_load.return_value = [toolset]
+            toolset = YAMLToolset(
+                name="test_toolset",
+                tags=[ToolsetTag.CORE],
+                description="Test toolset",
+                transformers=[
+                    Transformer(
+                        name="llm_summarize",
+                        config={"input_threshold": 1000, "prompt": "Toolset prompt"},
+                    )
+                ],
+                tools=[
+                    {
+                        "name": "generic_tool",
+                        "description": "Generic tool (inherits toolset transformers)",
+                        "command": "echo generic",
+                    },
+                ],
+            )
 
-            with patch("holmes.core.transformers.llm_summarize.DefaultLLM") as mock_llm:
-                LLMSummarizeTransformer.set_default_fast_model("gpt-4.1")
-                manager = ToolsetManager()
-                toolsets = manager._list_all_toolsets(check_prerequisites=False)
-
-                # Tool inherited transformer from toolset
-                tool = toolsets[0].tools[0]
-                assert tool.transformers is not None
-
-                # Trigger lazy init — should use class default
-                tool.transformer_instances
-                mock_llm.assert_called_with("gpt-4.1", None)
+            # Tool inherited transformer from toolset
+            tool = toolset.tools[0]
+            assert tool.transformers is not None
+            mock_llm.assert_called_with("gpt-4.1", None)
 
 
 class TestToolsetManagerWithoutFastModelInjection:
