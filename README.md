@@ -117,6 +117,26 @@ By design, HolmesGPT has **read-only access** and respects RBAC permissions. It 
 Distributed under the Apache 2.0 License. See [LICENSE](https://github.com/HolmesGPT/holmesgpt/blob/master/LICENSE) for more information.
 <!-- Change License -->
 
+## Maintainers & Contributors
+
+See [GOVERNANCE.md](GOVERNANCE.md) for role definitions and how to get involved.
+
+### Maintainers
+
+| Name | GitHub | Status |
+|------|--------|--------|
+| Natan Yellin | [@aantn](https://github.com/aantn) | Active |
+| Avi | [@Avi-Robusta](https://github.com/Avi-Robusta) | Active |
+
+### Contributors
+
+| Name | GitHub | Status |
+|------|--------|--------|
+| Pavan Gudiwada | [@pavangudiwada](https://github.com/pavangudiwada) | Active |
+| Robert Moucha | [@robert-moucha](https://github.com/robert-moucha) | Active |
+| Yakir Shriker | [@yakir-shriker](https://github.com/yakir-shriker) | Active |
+| Naomi Caren | [@naomi-caren](https://github.com/naomi-caren) | Active |
+
 ## Community
 
 Join our community to discuss the HolmesGPT roadmap and share feedback:
