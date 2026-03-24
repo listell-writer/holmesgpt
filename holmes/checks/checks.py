@@ -26,6 +26,7 @@ from holmes.core.issue import Issue, IssueStatus
 from holmes.core.tool_calling_llm import LLMResult, ToolCallingLLM
 from holmes.plugins.destinations.pagerduty.plugin import PagerDutyDestination
 from holmes.plugins.destinations.slack.plugin import SlackDestination
+from holmes.plugins.destinations.teams.plugin import TeamsDestination
 
 CHECK_RESPONSE_FORMAT = {
     "type": "json_schema",
@@ -233,6 +234,13 @@ class CheckRunner:
                 if not dest_config.integration_key:
                     errors.append(
                         f"PagerDuty destination '{name}': Missing integration_key in destination config"
+                    )
+
+            elif name == "teams":
+                # Check Teams configuration
+                if not dest_config.webhook_url:
+                    errors.append(
+                        f"Teams destination '{name}': Missing webhook_url in destination config"
                     )
 
             else:
@@ -491,6 +499,29 @@ class CheckRunner:
                 except Exception as e:
                     self.console.print(
                         f"  [red]Failed to send PagerDuty alert: {str(e)}[/red]"
+                    )
+
+            elif dest_name == "teams":
+                teams_config: Optional[DestinationConfig] = (
+                    self._destinations_config.get(dest_name)
+                )
+                if not teams_config or not teams_config.webhook_url:
+                    self.console.print(
+                        "  [yellow]Teams not configured (missing webhook_url)[/yellow]"
+                    )
+                    continue
+
+                try:
+                    teams = TeamsDestination(teams_config.webhook_url)
+                    teams.send_issue(issue, llm_result)
+
+                    if self.verbose:
+                        self.console.print(
+                            "  [green]Alert sent to Microsoft Teams[/green]"
+                        )
+                except Exception as e:
+                    self.console.print(
+                        f"  [red]Failed to send Teams alert: {str(e)}[/red]"
                     )
 
             else:
