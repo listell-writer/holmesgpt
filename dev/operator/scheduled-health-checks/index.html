@@ -928,6 +928,8 @@
       
         
       
+        
+      
     
     
     
@@ -975,6 +977,34 @@
           </label>
           <ul class="md-nav__list" data-md-scrollfix>
             
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../deployment-verification/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Deployment Verification
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
               
             
               
@@ -5047,7 +5077,33 @@
 </ul>
 <div class="admonition warning">
 <p class="admonition-title">Cost Management</p>
-<p>Each scheduled execution creates at least one LLM API call. A schedule running every 5 minutes = 288 API calls per day. Start with infrequent schedules (hourly or daily) and monitor costs before increasing frequency.</p>
+<p>Each scheduled execution makes at least one LLM API call, and a complex check could cost $1 or more with state-of-the-art models like Claude Opus. Start with infrequent schedules (hourly or daily) and monitor costs before increasing frequency.</p>
+<table>
+<thead>
+<tr>
+<th>Schedule</th>
+<th>Runs per day</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>0 9 * * *</code> (daily)</td>
+<td>1</td>
+</tr>
+<tr>
+<td><code>0 * * * *</code> (hourly)</td>
+<td>24</td>
+</tr>
+<tr>
+<td><code>*/15 * * * *</code> (every 15 min)</td>
+<td>96</td>
+</tr>
+<tr>
+<td><code>*/5 * * * *</code> (every 5 min)</td>
+<td>288</td>
+</tr>
+</tbody>
+</table>
 </div>
 <h2 id="creating-a-scheduled-check">Creating a Scheduled Check<a class="headerlink" href="#creating-a-scheduled-check" title="Permanent link">&para;</a></h2>
 <p>The simplest ScheduledHealthCheck requires a cron schedule and a query:</p>

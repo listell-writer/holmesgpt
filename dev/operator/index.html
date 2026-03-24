@@ -16,7 +16,7 @@
         <link rel="prev" href="../walkthrough/investigating-using-aks-mcp-server/">
       
       
-        <link rel="next" href="health-checks/">
+        <link rel="next" href="deployment-verification/">
       
       
         
@@ -928,6 +928,8 @@
       
         
       
+        
+      
     
     
     
@@ -975,6 +977,34 @@
           </label>
           <ul class="md-nav__list" data-md-scrollfix>
             
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="deployment-verification/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Deployment Verification
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
               
             
               
@@ -4705,7 +4735,12 @@
 
 
 <h1 id="holmes-operator-overview-installation">Holmes Operator - Overview &amp; Installation<a class="headerlink" href="#holmes-operator-overview-installation" title="Permanent link">&para;</a></h1>
-<p>Holmes Operator extends HolmesGPT with Kubernetes-native, LLM-driven health checks using Custom Resource Definitions (CRDs). It provides a declarative way to define and schedule LLM-driven investigations, proactively notifying your team when it finds issues.</p>
+<p>Most AI agents are great at troubleshooting problems, but still need a human to notice something is wrong and trigger an investigation. Operator mode fixes that — HolmesGPT runs in the background 24/7, spots problems before your customers notice, and messages you in Slack with the fix.</p>
+<p>Under the hood, it uses Kubernetes CRDs to declaratively define one-time and scheduled health checks. While the operator itself runs in Kubernetes, <strong>health checks can query any data source Holmes is connected to</strong> — VMs, cloud services, databases, SaaS platforms, and more. If you've <a href="../data-sources/builtin-toolsets/">connected a data source</a>, operator checks can query it.</p>
+<div class="admonition tip">
+<p class="admonition-title">Recommended: Connect the GitHub integration</p>
+<p>Connect the <a href="../data-sources/builtin-toolsets/github-mcp/">GitHub MCP server</a> so Holmes can open PRs to fix the problems it finds — not just report them.</p>
+</div>
 <div class="admonition warning">
 <p class="admonition-title">Holmes Operator - Alpha Release</p>
 <p><strong>Important Considerations:</strong></p>
@@ -4717,8 +4752,10 @@
 </div>
 <h2 id="features">Features<a class="headerlink" href="#features" title="Permanent link">&para;</a></h2>
 <ul>
-<li><strong>One-time Health Checks</strong>: Create <code>HealthCheck</code> resources that run immediately and report results</li>
-<li><strong>Scheduled Health Checks</strong>: Create <code>ScheduledHealthCheck</code> resources that run on cron schedules</li>
+<li><strong><a href="deployment-verification/">Deployment Verification</a></strong>: Deploy a HealthCheck alongside your app to verify the new version is healthy — and gate CI/CD on the result</li>
+<li><strong><a href="health-checks/">One-time Health Checks</a></strong>: Create <code>HealthCheck</code> resources that run immediately and report results</li>
+<li><strong><a href="scheduled-health-checks/">Scheduled Health Checks</a></strong>: Create <code>ScheduledHealthCheck</code> resources that run on cron schedules for continuous monitoring</li>
+<li><strong>Not just Kubernetes</strong>: Health checks can query any connected data source — Prometheus, Datadog, AWS, databases, and <a href="../data-sources/builtin-toolsets/">more</a></li>
 <li><strong>Kubernetes-native</strong>: Uses standard CRDs with kubectl support</li>
 <li><strong>Status Tracking</strong>: Full execution history and results stored in resource status</li>
 <li><strong>Alert Integration</strong>: Send notifications to Slack and other destinations on failures</li>
@@ -4815,6 +4852,7 @@
 </span></code></pre></div>
 <h2 id="next-steps">Next Steps<a class="headerlink" href="#next-steps" title="Permanent link">&para;</a></h2>
 <ul>
+<li><strong><a href="deployment-verification/">Deployment Verification</a></strong> - Verify new deploys are healthy and gate CI/CD pipelines on the result</li>
 <li><strong><a href="health-checks/">Health Checks</a></strong> - Learn how to create and manage one-time HealthCheck resources</li>
 <li><strong><a href="scheduled-health-checks/">Scheduled Health Checks</a></strong> - Set up recurring health checks with cron schedules</li>
 <li><strong><a href="destinations/">Alert Destinations</a></strong> - Configure Slack and PagerDuty notifications</li>
@@ -4896,13 +4934,13 @@
         
         
           
-          <a href="health-checks/" class="md-footer__link md-footer__link--next" aria-label="Next: Health Checks">
+          <a href="deployment-verification/" class="md-footer__link md-footer__link--next" aria-label="Next: Deployment Verification">
             <div class="md-footer__title">
               <span class="md-footer__direction">
                 Next
               </span>
               <div class="md-ellipsis">
-                Health Checks
+                Deployment Verification
               </div>
             </div>
             <div class="md-footer__button md-icon">
