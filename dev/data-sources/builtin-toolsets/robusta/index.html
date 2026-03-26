@@ -4941,26 +4941,26 @@
 
 <h1 id="robusta">Robusta<a class="headerlink" href="#robusta" title="Permanent link">&para;</a></h1>
 <div class="admonition warning">
-<p class="admonition-title">Optional - Requires Robusta SaaS</p>
-<p>This toolset is <strong>NOT</strong> enabled by default. It requires integration with the Robusta SaaS platform and proper authentication credentials.</p>
+<p class="admonition-title">Optional - Requires Robusta</p>
+<p>This toolset is <strong>NOT</strong> enabled by default. It requires integration with the Robusta platform and proper authentication credentials.</p>
 </div>
-<p>The Robusta toolset provides advanced observability capabilities by connecting HolmesGPT to the Robusta SaaS platform. When enabled, it gives HolmesGPT access to historical data, change tracking, and resource recommendations that are not available from standard Kubernetes APIs.</p>
+<p>The Robusta toolset provides advanced observability capabilities by connecting HolmesGPT to the Robusta platform. When enabled, it gives HolmesGPT access to historical data, change tracking, and resource recommendations that are not available from standard Kubernetes APIs.</p>
 <h2 id="prerequisites">Prerequisites<a class="headerlink" href="#prerequisites" title="Permanent link">&para;</a></h2>
 <p>To use this toolset, you need:</p>
 <ol>
-<li>An active Robusta SaaS account</li>
+<li>An active Robusta account</li>
 <li>Valid authentication credentials (provided via environment variables or configuration file)</li>
 <li>The Robusta platform deployed in your cluster</li>
 </ol>
 <h2 id="what-it-adds">What It Adds<a class="headerlink" href="#what-it-adds" title="Permanent link">&para;</a></h2>
-<p>When connected to Robusta SaaS, HolmesGPT gains access to:</p>
+<p>When connected to Robusta, HolmesGPT gains access to:</p>
 <ul>
 <li><strong>Historical Alert Data</strong>: Fetch detailed metadata about past alerts and incidents, including context that may no longer be available in Prometheus or AlertManager</li>
 <li><strong>Change Tracking</strong>: Query configuration changes across your entire cluster within specific time ranges, helping identify what changed before an incident</li>
 <li><strong>Resource Recommendations</strong>: Get AI-powered recommendations for resource requests and limits based on actual historical usage patterns</li>
 </ul>
 <h2 id="configuration">Configuration<a class="headerlink" href="#configuration" title="Permanent link">&para;</a></h2>
-<p>The toolset requires authentication to Robusta SaaS. You can provide credentials in three ways:</p>
+<p>The toolset requires authentication to Robusta. You can provide credentials in three ways:</p>
 <h3 id="option-1-automatic-via-robusta-helm-chart">Option 1: Automatic (via Robusta Helm Chart)<a class="headerlink" href="#option-1-automatic-via-robusta-helm-chart" title="Permanent link">&para;</a></h3>
 <p>If you deploy HolmesGPT as part of the Robusta Helm chart, credentials are automatically configured. The Helm chart handles mounting the necessary secrets and configuration files.</p>
 <h3 id="option-2-environment-variables">Option 2: Environment Variables<a class="headerlink" href="#option-2-environment-variables" title="Permanent link">&para;</a></h3>
@@ -5008,7 +5008,7 @@
 </tbody>
 </table>
 <h3 id="multi-cluster-support">Multi-Cluster Support<a class="headerlink" href="#multi-cluster-support" title="Permanent link">&para;</a></h3>
-<p>All tools that fetch data from Robusta SaaS support querying across multiple clusters:</p>
+<p>All tools that fetch data from Robusta support querying across multiple clusters:</p>
 <ul>
 <li><strong>Default behavior</strong>: Queries the current cluster only</li>
 <li><strong>all_clusters=true</strong>: Searches across all clusters in your account</li>
@@ -5027,7 +5027,7 @@
 </ul>
 <h2 id="notes">Notes<a class="headerlink" href="#notes" title="Permanent link">&para;</a></h2>
 <ul>
-<li>The toolset will only be functional if valid Robusta SaaS credentials are provided</li>
+<li>The toolset will only be functional if valid Robusta credentials are provided</li>
 <li>If credentials are missing or invalid, the toolset will be disabled automatically</li>
 <li>This integration provides read-only access to your Robusta data</li>
 </ul>
