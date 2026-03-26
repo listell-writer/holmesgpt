@@ -16,6 +16,8 @@ from holmes.core.tools import (
 )
 from holmes.plugins.runbooks import (
     DEFAULT_RUNBOOK_SEARCH_PATH,
+    RobustaRunbookInstruction,
+    RunbookCatalogEntry,
     get_runbook_by_path,
     load_runbook_catalog,
 )
@@ -27,6 +29,7 @@ class RunbookFetcher(Tool):
     available_runbooks: List[str] = []
     additional_search_paths: Optional[List[str]] = None
     _dal: Optional[SupabaseDal] = None
+    _runbook_names: dict = {}
 
     def __init__(
         self,
@@ -39,8 +42,14 @@ class RunbookFetcher(Tool):
             dal=dal, custom_catalog_paths=custom_catalog_paths
         )
         available_runbooks = []
+        runbook_names: dict = {}
         if catalog:
             available_runbooks = catalog.list_available_runbooks()
+            for entry in catalog.catalog:
+                if isinstance(entry, RobustaRunbookInstruction):
+                    runbook_names[entry.id] = entry.title
+                elif isinstance(entry, RunbookCatalogEntry):
+                    runbook_names[entry.link] = entry.description
 
         if additional_search_paths:
             for search_path in additional_search_paths:
@@ -68,6 +77,7 @@ class RunbookFetcher(Tool):
             additional_search_paths=additional_search_paths,  # type: ignore[call-arg]
         )
         self._dal = dal
+        self._runbook_names = runbook_names
 
     def _invoke(self, params: dict, context: ToolInvokeContext) -> StructuredToolResult:
         runbook_id: str = params.get("runbook_id", "")
@@ -221,8 +231,9 @@ class RunbookFetcher(Tool):
             )
 
     def get_parameterized_one_liner(self, params) -> str:
-        path: str = params.get("runbook_id", "")
-        return f"{toolset_name_for_one_liner(self.toolset.name)}: Fetch Runbook {path}"
+        runbook_id: str = params.get("runbook_id", "")
+        display_name = self._runbook_names.get(runbook_id, runbook_id)
+        return f"{toolset_name_for_one_liner(self.toolset.name)}: Fetch Runbook {display_name}"
 
 
 class RunbookToolset(Toolset):
