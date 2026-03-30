@@ -122,6 +122,7 @@ class ToolApprovalDecision(BaseModel):
     approved: bool
     save_prefixes: Optional[List[str]] = None  # Prefixes to remember for session
     feedback: Optional[str] = None  # User feedback when denying a tool call
+    encrypted_token: Optional[str] = None  # RSA-encrypted OAuth token from frontend (base64)
 
 
 class ChatRequestBaseModel(BaseModel):

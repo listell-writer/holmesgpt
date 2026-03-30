@@ -225,6 +225,9 @@ class ToolCallingLLM:
             return messages, events
 
         # Create decision lookup
+        logging.warning("OAuth flow: received %d tool decisions: %s",
+            len(tool_decisions),
+            [(d.tool_call_id, d.approved, bool(d.encrypted_token)) for d in tool_decisions])
         decisions_by_tool_call_id = {
             decision.tool_call_id: decision for decision in tool_decisions
         }
@@ -249,8 +252,9 @@ class ToolCallingLLM:
                             )
                         )
 
+        logging.warning("OAuth flow: found %d pending tool calls with pending_approval flag", len(pending_tool_calls))
         if not pending_tool_calls:
-            error_message = f"Received {len(tool_decisions)} tool decisions but no pending approvals found"
+            error_message = f"Received {len(tool_decisions)} tool decisions but no pending approvals found in conversation history"
             logging.error(error_message)
             raise Exception(error_message)
         # Extract existing session prefixes from conversation history
@@ -261,6 +265,25 @@ class ToolCallingLLM:
             decision = tool_call_with_decision.decision
             tool_result: Optional[ToolCallResult] = None
             if decision and decision.approved:
+                # Exchange encrypted OAuth auth code for token if present (from frontend browser OAuth flow).
+                # The encrypted token is passed via save_prefixes with a "__oauth_token__:" marker
+                # to avoid needing changes to the relay's ToolApprovalDecision model.
+                encrypted_token = None
+                if decision.encrypted_token:
+                    encrypted_token = decision.encrypted_token
+                    decision.encrypted_token = None
+                elif decision.save_prefixes:
+                    for prefix in list(decision.save_prefixes):
+                        if prefix.startswith("__oauth_token__:"):
+                            encrypted_token = prefix[len("__oauth_token__:"):]
+                            decision.save_prefixes.remove(prefix)
+                            break
+
+                if encrypted_token:
+                    logging.warning("OAuth: received encrypted auth code for tool_call_id=%s, exchanging for token", tool_call.id)
+                    from holmes.plugins.toolsets.mcp.toolset_mcp import decrypt_code_and_exchange_for_token
+                    decrypt_code_and_exchange_for_token(tool_call.id, encrypted_token, request_context)
+
                 tool_result = self._invoke_llm_tool_call(
                     tool_to_call=tool_call,
                     previous_tool_calls=[],
@@ -1023,12 +1046,12 @@ class ToolCallingLLM:
                 # Update the tool number offset for the next iteration
                 tool_number_offset += len(tools_to_call)
 
-                # Re-fetch tools if runbook was just activated (enables restricted tools)
-                if self._runbook_in_use and tools is not None:
+                # Re-fetch tools if the tool list changed (runbook activation, OAuth tool discovery, etc.)
+                if tools is not None:
                     new_tools = self._get_tools()
                     if len(new_tools) != len(tools):
-                        logging.info(
-                            f"Runbook activated - refreshing tools list ({len(tools)} -> {len(new_tools)} tools)"
+                        logging.warning(
+                            f"Tool list changed - refreshing ({len(tools)} -> {len(new_tools)} tools)"
                         )
                         tools = new_tools
 

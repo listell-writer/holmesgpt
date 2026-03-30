@@ -1,23 +1,28 @@
 import asyncio
+import base64
 import json
 import logging
 import os
 import threading
+import time
 from contextlib import asynccontextmanager
 from enum import Enum
 from typing import Any, ClassVar, Dict, List, Optional, TextIO, Tuple, Type, Union
 
 import httpx
+from cryptography.hazmat.primitives import hashes, serialization
+from cryptography.hazmat.primitives.asymmetric import padding, rsa
 from mcp.client.session import ClientSession
 from mcp.client.sse import sse_client
 from mcp.client.stdio import StdioServerParameters, stdio_client
 from mcp.client.streamable_http import streamablehttp_client
 from mcp.types import Tool as MCP_Tool
-from pydantic import AnyUrl, Field, model_validator
+from pydantic import AnyUrl, BaseModel, Field, model_validator
 
 from holmes.common.env_vars import SSE_READ_TIMEOUT
 from holmes.core.config import config_path_dir
 from holmes.core.tools import (
+    ApprovalRequirement,
     CallablePrerequisite,
     StructuredToolResult,
     StructuredToolResultStatus,
@@ -92,6 +97,114 @@ class MCPMode(str, Enum):
     STDIO = "stdio"
 
 
+class MCPOAuthConfig(BaseModel):
+    """OAuth authorization_code config for MCP servers requiring user login."""
+
+    authorization_url: str = Field(description="IdP authorization endpoint URL.")
+    token_url: str = Field(description="IdP token endpoint URL.")
+    client_id: str = Field(description="OAuth public client ID (no secret needed for PKCE).")
+    scopes: Optional[List[str]] = Field(default=None, description="OAuth scopes to request.")
+
+
+class OAuthKeyExchange:
+    """RSA keypair for secure auth code transit from frontend to Holmes.
+
+    Holmes generates a keypair and sends the public key to the frontend.
+    The frontend encrypts the OAuth authorization code with it.
+    Holmes decrypts with the private key, then exchanges the code for
+    a token server-side (so the access token never leaves the cluster).
+    """
+
+    def __init__(self) -> None:
+        self._private_key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
+
+    def get_public_key_pem(self) -> str:
+        return self._private_key.public_key().public_bytes(
+            serialization.Encoding.PEM,
+            serialization.PublicFormat.SubjectPublicKeyInfo,
+        ).decode()
+
+    def decrypt(self, encrypted_b64: str) -> str:
+        """Decrypt a base64-encoded RSA-OAEP ciphertext."""
+        ciphertext = base64.b64decode(encrypted_b64)
+        plaintext = self._private_key.decrypt(
+            ciphertext,
+            padding.OAEP(
+                mgf=padding.MGF1(algorithm=hashes.SHA256()),
+                algorithm=hashes.SHA256(),
+                label=None,
+            ),
+        )
+        return plaintext.decode()
+
+
+def _generate_pkce() -> Tuple[str, str]:
+    """Generate PKCE code_verifier and code_challenge (S256).
+
+    Returns (code_verifier, code_challenge).
+    """
+    import hashlib
+    import secrets
+
+    code_verifier = secrets.token_urlsafe(64)[:128]
+    digest = hashlib.sha256(code_verifier.encode("ascii")).digest()
+    code_challenge = base64.urlsafe_b64encode(digest).rstrip(b"=").decode("ascii")
+    return code_verifier, code_challenge
+
+
+class OAuthTokenCache:
+    """TTL cache for OAuth access tokens keyed by conversation ID."""
+
+    def __init__(self, ttl_seconds: int = 3600) -> None:
+        self._ttl = ttl_seconds
+        self._cache: Dict[str, Tuple[float, str]] = {}
+        self._lock = threading.Lock()
+
+    def get(self, key: str) -> Optional[str]:
+        with self._lock:
+            entry = self._cache.get(key)
+            if entry is None:
+                return None
+            expires_at, token = entry
+            if time.monotonic() >= expires_at:
+                del self._cache[key]
+                return None
+            return token
+
+    def set(self, key: str, token: str) -> None:
+        with self._lock:
+            self._cache[key] = (time.monotonic() + self._ttl, token)
+
+    def has(self, key: str) -> bool:
+        return self.get(key) is not None
+
+
+class _PendingOAuthExchange:
+    """State for a pending OAuth approval: key exchange, PKCE verifier, and config."""
+
+    def __init__(self, key_exchange: OAuthKeyExchange, code_verifier: str, oauth_config: MCPOAuthConfig, redirect_uri: str) -> None:
+        self.key_exchange = key_exchange
+        self.code_verifier = code_verifier
+        self.oauth_config = oauth_config
+        self.redirect_uri = redirect_uri
+
+
+# Global caches
+_oauth_token_cache = OAuthTokenCache()
+_pending_exchanges: Dict[str, _PendingOAuthExchange] = {}
+_exchanges_lock = threading.Lock()
+
+
+def _get_conversation_key(request_context: Optional[Dict[str, Any]]) -> str:
+    """Extract a conversation key from request context headers."""
+    if request_context:
+        headers = request_context.get("headers", {})
+        for key in ("X-Conversation-Id", "x-conversation-id", "X-Session-Id", "x-session-id"):
+            if key in headers:
+                return str(headers[key])
+    return "__default__"
+
+
 class MCPConfig(ToolsetConfig):
     mode: MCPMode = Field(
         default=MCPMode.SSE,
@@ -131,6 +244,11 @@ class MCPConfig(ToolsetConfig):
         default="https://registry.npmmirror.com/@lobehub/icons-static-png/1.46.0/files/light/mcp.png",
         description="Icon URL for this MCP server, displayed in the UI for tool calls.",
         examples=["https://cdn.simpleicons.org/github/181717"],
+    )
+    oauth: Optional[MCPOAuthConfig] = Field(
+        default=None,
+        title="OAuth",
+        description="OAuth authorization_code configuration. When set, users authenticate via browser before tools can be used.",
     )
 
     def get_lock_string(self) -> str:
@@ -184,6 +302,90 @@ def _get_mcp_log_file(server_name: str) -> TextIO:
     return open(log_path, "w")
 
 
+def _inject_oauth_token(
+    toolset: "RemoteMCPToolset",
+    request_context: Optional[Dict[str, Any]],
+    headers: Optional[Dict[str, str]],
+) -> Optional[Dict[str, str]]:
+    """Inject cached OAuth Bearer token into headers if available."""
+    if not isinstance(toolset._mcp_config, MCPConfig) or not toolset._mcp_config.oauth:
+        return headers
+
+    conv_key = _get_conversation_key(request_context)
+    cached_token = _oauth_token_cache.get(conv_key)
+    if cached_token:
+        headers = headers or {}
+        headers["Authorization"] = f"Bearer {cached_token}"
+        logger.debug("OAuth token injected for conversation %s on server %s", conv_key, toolset.name)
+    else:
+        logger.warning("OAuth MCP server %s: no cached token for conversation %s — request will likely 401", toolset.name, conv_key)
+    return headers
+
+
+def decrypt_code_and_exchange_for_token(tool_call_id: str, encrypted_payload: str, request_context: Optional[Dict[str, Any]]) -> None:
+    """Decrypt an OAuth authorization code and exchange it for an access token.
+
+    The frontend encrypts a JSON payload: {"code": "...", "redirect_uri": "..."}.
+    Holmes decrypts it, then exchanges the code at the IdP's token_url using the
+    PKCE code_verifier (generated during requires_approval). The access token
+    stays server-side and never transits through the frontend.
+
+    Called from tool_calling_llm._execute_tool_decisions() when a decision
+    includes an encrypted_token from the frontend OAuth flow.
+    """
+    with _exchanges_lock:
+        pending = _pending_exchanges.pop(tool_call_id, None)
+
+    if pending is None:
+        logger.error("OAuth exchange failed: no pending key exchange for tool_call_id=%s (possible timeout or duplicate)", tool_call_id)
+        return
+
+    try:
+        # Decrypt the payload from frontend
+        logger.warning("OAuth: decrypting auth code payload for tool_call_id=%s", tool_call_id)
+        decrypted = pending.key_exchange.decrypt(encrypted_payload)
+        payload = json.loads(decrypted)
+        auth_code = payload["code"]
+        redirect_uri = payload.get("redirect_uri", "")
+        logger.warning("OAuth: auth code decrypted, exchanging at token endpoint %s", pending.oauth_config.token_url)
+
+        # Exchange auth code for access token at the IdP's token endpoint (server-side)
+        token_response = httpx.post(
+            pending.oauth_config.token_url,
+            data={
+                "grant_type": "authorization_code",
+                "code": auth_code,
+                "client_id": pending.oauth_config.client_id,
+                "code_verifier": pending.code_verifier,
+                "redirect_uri": redirect_uri,
+            },
+            headers={"Content-Type": "application/x-www-form-urlencoded"},
+            timeout=30,
+        )
+        if token_response.status_code != 200:
+            logger.error(
+                "OAuth token exchange failed: HTTP %d from %s — response: %s",
+                token_response.status_code, pending.oauth_config.token_url, token_response.text[:500],
+            )
+            token_response.raise_for_status()
+
+        token_data = token_response.json()
+        access_token = token_data.get("access_token")
+        if not access_token:
+            logger.error("OAuth token exchange: response missing 'access_token' field. Keys: %s", list(token_data.keys()))
+            return
+
+        conv_key = _get_conversation_key(request_context)
+        _oauth_token_cache.set(conv_key, access_token)
+        logger.info("OAuth token cached for conversation %s (exchanged via %s)", conv_key, pending.oauth_config.token_url)
+    except json.JSONDecodeError:
+        logger.exception("OAuth token exchange: failed to parse JSON response from %s", pending.oauth_config.token_url)
+    except httpx.HTTPStatusError:
+        pass  # Already logged above
+    except Exception:
+        logger.exception("OAuth token exchange failed (tool_call_id=%s, token_url=%s)", tool_call_id, pending.oauth_config.token_url)
+
+
 @asynccontextmanager
 async def get_initialized_mcp_session(
     toolset: "RemoteMCPToolset", request_context: Optional[Dict[str, Any]] = None
@@ -211,7 +413,7 @@ async def get_initialized_mcp_session(
     elif toolset._mcp_config.mode == MCPMode.SSE:
         url = str(toolset._mcp_config.url)
         httpx_factory = create_mcp_http_client_factory(toolset._mcp_config.verify_ssl)
-        rendered_headers = toolset._render_headers(request_context)
+        rendered_headers = _inject_oauth_token(toolset, request_context, toolset._render_headers(request_context))
         async with sse_client(
             url,
             rendered_headers,
@@ -227,7 +429,7 @@ async def get_initialized_mcp_session(
     else:
         url = str(toolset._mcp_config.url)
         httpx_factory = create_mcp_http_client_factory(toolset._mcp_config.verify_ssl)
-        rendered_headers = toolset._render_headers(request_context)
+        rendered_headers = _inject_oauth_token(toolset, request_context, toolset._render_headers(request_context))
         async with streamablehttp_client(
             url,
             headers=rendered_headers,
@@ -246,8 +448,64 @@ async def get_initialized_mcp_session(
 class RemoteMCPTool(Tool):
     toolset: "RemoteMCPToolset" = Field(exclude=True)
 
+    def requires_approval(
+        self, params: Dict, context: ToolInvokeContext
+    ) -> Optional[ApprovalRequirement]:
+        """Prompt user for OAuth browser login when no cached token exists."""
+        if not isinstance(self.toolset._mcp_config, MCPConfig) or not self.toolset._mcp_config.oauth:
+            return None
+
+        oauth_config = self.toolset._mcp_config.oauth
+        conv_key = _get_conversation_key(context.request_context)
+
+        if _oauth_token_cache.has(conv_key):
+            logger.debug("OAuth MCP %s: cached token found for conversation %s, skipping approval", self.toolset.name, conv_key)
+            return None
+
+        logger.info("OAuth MCP %s: no cached token for conversation %s, requesting user authentication", self.toolset.name, conv_key)
+
+        # Generate keypair for secure auth code transit and PKCE for token exchange
+        key_exchange = OAuthKeyExchange()
+        code_verifier, code_challenge = _generate_pkce()
+
+        # The frontend must tell us its redirect_uri so we can include it in the token exchange.
+        # We provide a placeholder; the frontend will use its own callback URL and include it
+        # in the encrypted payload alongside the auth code.
+        with _exchanges_lock:
+            _pending_exchanges[context.tool_call_id] = _PendingOAuthExchange(
+                key_exchange=key_exchange,
+                code_verifier=code_verifier,
+                oauth_config=oauth_config,
+                redirect_uri="",  # Set by frontend in the encrypted payload
+            )
+
+        # Inject OAuth metadata into params so the frontend can initiate browser login.
+        # Frontend handles: open browser to authorization_url with code_challenge,
+        # user logs in, gets auth code, encrypts it with our public key, sends it back.
+        # Holmes handles: decrypt auth code, exchange at token_url with code_verifier.
+        params["__oauth_metadata"] = {
+            "authorization_url": oauth_config.authorization_url,
+            "client_id": oauth_config.client_id,
+            "scopes": oauth_config.scopes or [],
+            "code_challenge": code_challenge,
+            "code_challenge_method": "S256",
+            "encryption_public_key": key_exchange.get_public_key_pem(),
+        }
+
+        return ApprovalRequirement(
+            needs_approval=True,
+            reason=f"OAuth authentication required for MCP server '{self.toolset.name}'",
+        )
+
+    def _is_placeholder_connect_tool(self) -> bool:
+        return self.name.endswith("_connect") and "requires OAuth" in self.description
+
     def _invoke(self, params: dict, context: ToolInvokeContext) -> StructuredToolResult:
         try:
+            # For OAuth placeholder tools: load real tools after authentication
+            if self._is_placeholder_connect_tool():
+                return self._invoke_oauth_connect(params, context)
+
             # Serialize calls to the same MCP server to prevent SSE conflicts
             # Different servers can still run in parallel
             if not self.toolset._mcp_config:
@@ -263,6 +521,57 @@ class RemoteMCPTool(Tool):
                 error=error_detail,
                 params=params,
                 invocation=f"MCPtool {self.name} with params {params}",
+            )
+
+    def _invoke_oauth_connect(self, params: dict, context: ToolInvokeContext) -> StructuredToolResult:
+        """Handle the OAuth placeholder tool: load real tools from the MCP server after authentication."""
+        try:
+            if not self.toolset._mcp_config:
+                raise ValueError("MCP config not initialized")
+
+            lock = get_server_lock(str(self.toolset._mcp_config.get_lock_string()))
+            with lock:
+                tools_result = asyncio.run(self.toolset._get_server_tools_with_context(context.request_context))
+
+            real_tools = [RemoteMCPTool.create(tool, self.toolset) for tool in tools_result.tools]
+
+            if real_tools:
+                # Replace the placeholder with real tools on the toolset
+                self.toolset.tools = real_tools
+
+                # Register new tools in the tool executor so the LLM can call them
+                tool_executor = getattr(context.llm, "tool_executor", None)
+                if tool_executor:
+                    # Remove the placeholder
+                    tool_executor.tools_by_name.pop(self.name, None)
+                    tool_executor._tool_to_toolset.pop(self.name, None)
+                    # Register real tools
+                    for tool in real_tools:
+                        tool_executor.tools_by_name[tool.name] = tool
+                        tool_executor._tool_to_toolset[tool.name] = self.toolset
+
+                tool_names = [t.name for t in real_tools]
+                logger.warning("OAuth MCP %s: loaded %d tools after authentication: %s", self.toolset.name, len(real_tools), tool_names)
+                return StructuredToolResult(
+                    status=StructuredToolResultStatus.SUCCESS,
+                    data=f"Successfully authenticated and discovered {len(real_tools)} tools: {', '.join(tool_names)}. You can now call these tools directly.",
+                    params=params,
+                    invocation=f"OAuth connect to {self.toolset.name}",
+                )
+            else:
+                return StructuredToolResult(
+                    status=StructuredToolResultStatus.ERROR,
+                    error=f"Authenticated but no tools found on MCP server {self.toolset.name}",
+                    params=params,
+                    invocation=f"OAuth connect to {self.toolset.name}",
+                )
+        except Exception as e:
+            error_detail = _extract_root_error_message(e)
+            return StructuredToolResult(
+                status=StructuredToolResultStatus.ERROR,
+                error=f"OAuth connect failed: {error_detail}",
+                params=params,
+                invocation=f"OAuth connect to {self.toolset.name}",
             )
 
     @staticmethod
@@ -595,6 +904,12 @@ class RemoteMCPToolset(Toolset):
                 ):
                     self._mcp_config.url = AnyUrl(clean_url_str + "/sse")
 
+            # For OAuth-protected servers, skip full MCP session init (it will 401).
+            # Just verify the server is reachable and register a placeholder tool
+            # that triggers the OAuth flow on first use. Tools are loaded after auth.
+            if isinstance(self._mcp_config, MCPConfig) and self._mcp_config.oauth:
+                return self._check_oauth_server_reachable()
+
             tools_result = asyncio.run(self._get_server_tools())
 
             self.tools = [
@@ -613,6 +928,61 @@ class RemoteMCPToolset(Toolset):
                 ". If the server is still starting up, Holmes will retry automatically",
             )
 
+    def _check_oauth_server_reachable(self) -> Tuple[bool, str]:
+        """For OAuth MCP servers, verify reachability without authenticating.
+
+        If a cached token exists (from a previous request in the same conversation),
+        load the real tools directly. Otherwise, register a placeholder tool that
+        triggers the OAuth flow on first use.
+        """
+        assert isinstance(self._mcp_config, MCPConfig)
+        url = str(self._mcp_config.url).rstrip("/")
+
+        # If we already have a cached token, try to load real tools directly
+        # This happens on subsequent requests in the same conversation after OAuth
+        if _oauth_token_cache.has("__default__"):
+            try:
+                tools_result = asyncio.run(self._get_server_tools())
+                self.tools = [RemoteMCPTool.create(tool, self) for tool in tools_result.tools]
+                if self.tools:
+                    logging.warning(f"OAuth MCP server {self.name}: loaded {len(self.tools)} tools using cached token")
+                    return (True, "")
+            except Exception as e:
+                logging.warning(f"OAuth MCP server {self.name}: cached token failed, falling back to placeholder: {_extract_root_error_message(e)}")
+
+        try:
+            # Try the well-known endpoint first (no auth needed)
+            response = httpx.get(
+                f"{url}/.well-known/oauth-protected-resource",
+                timeout=10,
+                verify=self._mcp_config.verify_ssl,
+            )
+            if response.status_code not in (200, 401):
+                # Also try the root — a 401 means server is up but needs auth
+                response = httpx.post(url, timeout=10, verify=self._mcp_config.verify_ssl)
+
+            if response.status_code not in (200, 401):
+                return (False, f"MCP server {self.name} returned HTTP {response.status_code}")
+
+        except Exception as e:
+            return (False, f"MCP server {self.name} unreachable: {_extract_root_error_message(e)}")
+
+        # Register a placeholder tool that will trigger OAuth on first call.
+        # After auth succeeds, _invoke will load the real tools dynamically.
+        from mcp.types import Tool as MCP_Tool
+        placeholder = MCP_Tool(
+            name=f"{self.name}_connect",
+            description=f"Connect to {self.name} (requires OAuth authentication). Call this tool to authenticate and discover available tools.",
+            inputSchema={"type": "object", "properties": {}},
+        )
+        self.tools = [RemoteMCPTool.create(placeholder, self)]
+        logging.info(f"OAuth MCP server {self.name} is reachable, registered placeholder tool (auth required)")
+        return (True, "")
+
     async def _get_server_tools(self):
         async with get_initialized_mcp_session(self, None) as session:
+            return await session.list_tools()
+
+    async def _get_server_tools_with_context(self, request_context: Optional[Dict[str, Any]]):
+        async with get_initialized_mcp_session(self, request_context) as session:
             return await session.list_tools()
