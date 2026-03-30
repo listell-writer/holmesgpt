@@ -346,6 +346,89 @@ SSE transport is deprecated. Use `streamable-http` for new integrations.
 
 The URL should end with `/sse`. If it doesn't, HolmesGPT will automatically append it.
 
+## OAuth Authentication
+
+MCP servers that require OAuth can be configured with the `oauth` block. When Holmes encounters an OAuth-protected MCP server, it prompts the user to authenticate via their browser. After authentication, Holmes exchanges the authorization code for an access token and caches it for the duration of the conversation.
+
+!!! warning "Authorization URL must be browser-accessible"
+    The `authorization_url` is opened in the user's browser for login. If it points to a cluster-internal service (e.g., `http://keycloak.default.svc.cluster.local:8080/...`), the user won't be able to reach it. Use an externally-accessible URL (via Ingress, LoadBalancer, or port-forward) for `authorization_url`. The `token_url` can be cluster-internal since Holmes calls it server-side.
+
+=== "Holmes CLI"
+
+    Add to `~/.holmes/config.yaml`:
+
+    ```yaml
+    mcp_servers:
+      my_secure_server:
+        description: "OAuth-protected MCP server"
+        config:
+          url: "http://my-mcp-server:8000"
+          mode: streamable-http
+          oauth:
+            authorization_url: "https://idp.example.com/authorize"
+            token_url: "http://keycloak.default.svc.cluster.local:8080/realms/my-realm/protocol/openid-connect/token"
+            client_id: "holmes-client"
+            scopes:
+              - "mcp:tools"
+        llm_instructions: "Use this server for secure data queries."
+    ```
+
+=== "Holmes Helm Chart"
+
+    ```yaml
+    mcp_servers:
+      my_secure_server:
+        description: "OAuth-protected MCP server"
+        config:
+          url: "http://my-mcp-server:8000"
+          mode: streamable-http
+          oauth:
+            authorization_url: "https://idp.example.com/authorize"
+            token_url: "http://keycloak.default.svc.cluster.local:8080/realms/my-realm/protocol/openid-connect/token"
+            client_id: "holmes-client"
+            scopes:
+              - "mcp:tools"
+        llm_instructions: "Use this server for secure data queries."
+    ```
+
+=== "Robusta Helm Chart"
+
+    ```yaml
+    holmes:
+      mcp_servers:
+        my_secure_server:
+          description: "OAuth-protected MCP server"
+          config:
+            url: "http://my-mcp-server:8000"
+            mode: streamable-http
+            oauth:
+              authorization_url: "https://idp.example.com/authorize"
+              token_url: "http://keycloak.default.svc.cluster.local:8080/realms/my-realm/protocol/openid-connect/token"
+              client_id: "holmes-client"
+              scopes:
+                - "mcp:tools"
+          llm_instructions: "Use this server for secure data queries."
+    ```
+
+**OAuth configuration fields:**
+
+| Field | Description |
+|-------|-------------|
+| `authorization_url` | IdP authorization endpoint (must be browser-accessible) |
+| `token_url` | IdP token endpoint (can be cluster-internal) |
+| `client_id` | OAuth client ID registered with your IdP |
+| `scopes` | List of OAuth scopes to request |
+
+**How it works:**
+
+1. Holmes detects the MCP server requires OAuth and prompts the user to authenticate
+2. The user's browser opens the `authorization_url` for login
+3. After login, the authorization code is encrypted and sent back to Holmes
+4. Holmes exchanges the code for an access token at the `token_url` (server-side, within the cluster)
+5. The access token is cached for the conversation and used for all subsequent MCP requests
+
+The access token never leaves the cluster. Only the authorization code transits through the browser, encrypted with a one-time RSA key.
+
 ## Advanced Configuration
 
 **Dynamic Headers with Request Context**

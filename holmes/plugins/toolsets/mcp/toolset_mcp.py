@@ -152,31 +152,82 @@ def _generate_pkce() -> Tuple[str, str]:
     return code_verifier, code_challenge
 
 
-class OAuthTokenCache:
-    """TTL cache for OAuth access tokens keyed by conversation ID."""
+class _CachedToken:
+    """Holds an access token, its expiry, and an optional refresh token."""
 
-    def __init__(self, ttl_seconds: int = 3600) -> None:
-        self._ttl = ttl_seconds
-        self._cache: Dict[str, Tuple[float, str]] = {}
+    def __init__(self, access_token: str, expires_at: float, refresh_token: Optional[str] = None, refresh_expires_at: Optional[float] = None) -> None:
+        self.access_token = access_token
+        self.expires_at = expires_at
+        self.refresh_token = refresh_token
+        self.refresh_expires_at = refresh_expires_at
+
+    @property
+    def access_expired(self) -> bool:
+        return time.monotonic() >= self.expires_at
+
+    @property
+    def refresh_expired(self) -> bool:
+        if self.refresh_token is None or self.refresh_expires_at is None:
+            return True
+        return time.monotonic() >= self.refresh_expires_at
+
+
+class OAuthTokenCache:
+    """TTL cache for OAuth tokens keyed by conversation ID, with refresh token support."""
+
+    def __init__(self) -> None:
+        self._cache: Dict[str, _CachedToken] = {}
         self._lock = threading.Lock()
 
     def get(self, key: str) -> Optional[str]:
+        """Return a valid access token, or None if expired and not refreshable."""
         with self._lock:
             entry = self._cache.get(key)
             if entry is None:
                 return None
-            expires_at, token = entry
-            if time.monotonic() >= expires_at:
-                del self._cache[key]
-                return None
-            return token
+            if not entry.access_expired:
+                return entry.access_token
+            # Access token expired — caller must try refresh
+            if not entry.refresh_expired:
+                return None  # Has refresh token but access expired — caller should refresh
+            # Both expired
+            del self._cache[key]
+            return None
 
-    def set(self, key: str, token: str) -> None:
+    def get_refresh_token(self, key: str) -> Optional[str]:
+        """Return the refresh token if it hasn't expired, even if the access token has."""
         with self._lock:
-            self._cache[key] = (time.monotonic() + self._ttl, token)
+            entry = self._cache.get(key)
+            if entry is None:
+                return None
+            if not entry.refresh_expired:
+                return entry.refresh_token
+            return None
+
+    def set(self, key: str, access_token: str, expires_in: int = 300, refresh_token: Optional[str] = None, refresh_expires_in: Optional[int] = None) -> None:
+        now = time.monotonic()
+        # Subtract a small buffer so we refresh before actual expiry
+        access_expires_at = now + max(expires_in - 30, 10)
+        refresh_expires_at = None
+        if refresh_token:
+            # Default to 24 hours if IdP doesn't return refresh_expires_in (not all do)
+            refresh_ttl = refresh_expires_in if refresh_expires_in else 86400
+            refresh_expires_at = now + max(refresh_ttl - 30, 10)
+        with self._lock:
+            self._cache[key] = _CachedToken(access_token, access_expires_at, refresh_token, refresh_expires_at)
 
     def has(self, key: str) -> bool:
-        return self.get(key) is not None
+        """True if there is a valid access token OR a valid refresh token."""
+        with self._lock:
+            entry = self._cache.get(key)
+            if entry is None:
+                return False
+            if not entry.access_expired:
+                return True
+            if not entry.refresh_expired:
+                return True
+            del self._cache[key]
+            return False
 
 
 class _PendingOAuthExchange:
@@ -313,10 +364,12 @@ def _inject_oauth_token(
 
     conv_key = _get_conversation_key(request_context)
     cached_token = _oauth_token_cache.get(conv_key)
+    if not cached_token:
+        # Access token expired or missing — try refresh before giving up
+        cached_token = _try_refresh_token(conv_key, toolset._mcp_config.oauth)
     if cached_token:
         headers = headers or {}
         headers["Authorization"] = f"Bearer {cached_token}"
-        logger.debug("OAuth token injected for conversation %s on server %s", conv_key, toolset.name)
     else:
         logger.warning("OAuth MCP server %s: no cached token for conversation %s — request will likely 401", toolset.name, conv_key)
     return headers
@@ -376,7 +429,13 @@ def decrypt_code_and_exchange_for_token(tool_call_id: str, encrypted_payload: st
             return
 
         conv_key = _get_conversation_key(request_context)
-        _oauth_token_cache.set(conv_key, access_token)
+        _oauth_token_cache.set(
+            conv_key,
+            access_token,
+            expires_in=token_data.get("expires_in", 300),
+            refresh_token=token_data.get("refresh_token"),
+            refresh_expires_in=token_data.get("refresh_expires_in"),
+        )
         logger.info("OAuth token cached for conversation %s (exchanged via %s)", conv_key, pending.oauth_config.token_url)
     except json.JSONDecodeError:
         logger.exception("OAuth token exchange: failed to parse JSON response from %s", pending.oauth_config.token_url)
@@ -384,6 +443,46 @@ def decrypt_code_and_exchange_for_token(tool_call_id: str, encrypted_payload: st
         pass  # Already logged above
     except Exception:
         logger.exception("OAuth token exchange failed (tool_call_id=%s, token_url=%s)", tool_call_id, pending.oauth_config.token_url)
+
+
+def _try_refresh_token(conv_key: str, oauth_config: MCPOAuthConfig) -> Optional[str]:
+    """Attempt to refresh an expired access token using the cached refresh token. Returns new access token or None."""
+    refresh_token = _oauth_token_cache.get_refresh_token(conv_key)
+    if not refresh_token:
+        return None
+
+    try:
+        response = httpx.post(
+            oauth_config.token_url,
+            data={
+                "grant_type": "refresh_token",
+                "refresh_token": refresh_token,
+                "client_id": oauth_config.client_id,
+            },
+            headers={"Content-Type": "application/x-www-form-urlencoded"},
+            timeout=30,
+        )
+        if response.status_code != 200:
+            logger.warning("OAuth refresh failed: HTTP %d from %s", response.status_code, oauth_config.token_url)
+            return None
+
+        token_data = response.json()
+        access_token = token_data.get("access_token")
+        if not access_token:
+            return None
+
+        _oauth_token_cache.set(
+            conv_key,
+            access_token,
+            expires_in=token_data.get("expires_in", 300),
+            refresh_token=token_data.get("refresh_token", refresh_token),
+            refresh_expires_in=token_data.get("refresh_expires_in"),
+        )
+        logger.info("OAuth token refreshed for conversation %s", conv_key)
+        return access_token
+    except Exception:
+        logger.warning("OAuth refresh failed for conversation %s", conv_key, exc_info=True)
+        return None
 
 
 @asynccontextmanager
@@ -459,8 +558,13 @@ class RemoteMCPTool(Tool):
         conv_key = _get_conversation_key(context.request_context)
 
         if _oauth_token_cache.has(conv_key):
-            logger.debug("OAuth MCP %s: cached token found for conversation %s, skipping approval", self.toolset.name, conv_key)
-            return None
+            # Try refresh if access token expired but refresh token is still valid
+            if _oauth_token_cache.get(conv_key) is None:
+                refreshed = _try_refresh_token(conv_key, oauth_config)
+                if refreshed:
+                    return None
+            else:
+                return None
 
         logger.info("OAuth MCP %s: no cached token for conversation %s, requesting user authentication", self.toolset.name, conv_key)
 
