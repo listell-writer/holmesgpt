@@ -95,6 +95,31 @@ class TestOAuthKeyExchange:
         kx2 = OAuthKeyExchange()
         assert kx1.get_public_key_pem() != kx2.get_public_key_pem()
 
+    def test_same_signing_key_produces_same_keypair(self, tmp_path):
+        """Same signing_key generates identical public+private keys across 5 instances."""
+        signing_key = "a1b2c3d4-e5f6-7890-abcd-ef1234567890"
+        key_dir = str(tmp_path / "keys")
+        keys = []
+        for _ in range(5):
+            kx = OAuthKeyExchange(signing_key=signing_key, key_store_dir=key_dir)
+            keys.append(kx.get_public_key_pem())
+            # Verify private key works too (decrypt roundtrip)
+            pub = serialization.load_pem_public_key(kx.get_public_key_pem().encode())
+            ct = pub.encrypt(
+                b"test-payload",
+                padding.OAEP(mgf=padding.MGF1(algorithm=hashes.SHA256()), algorithm=hashes.SHA256(), label=None),
+            )
+            assert kx.decrypt(base64.b64encode(ct).decode()) == "test-payload"
+
+        # All 5 should be identical (loaded from persisted file after first generation)
+        assert all(k == keys[0] for k in keys), "Same signing_key must produce identical keys every time"
+
+    def test_different_signing_keys_produce_different_keypairs(self, tmp_path):
+        """Different signing_keys generate different keypairs."""
+        kx1 = OAuthKeyExchange(signing_key="uuid-aaaa-1111-bbbb-2222", key_store_dir=str(tmp_path / "a"))
+        kx2 = OAuthKeyExchange(signing_key="uuid-cccc-3333-dddd-4444", key_store_dir=str(tmp_path / "b"))
+        assert kx1.get_public_key_pem() != kx2.get_public_key_pem(), "Different signing_keys must produce different keys"
+
 
 class TestPKCE:
     def test_generate_pkce(self):
