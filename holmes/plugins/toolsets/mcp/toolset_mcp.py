@@ -844,14 +844,18 @@ class RemoteMCPTool(Tool):
                 redirect_uri="",  # Set by frontend in the encrypted payload
             )
 
-        params["__oauth_metadata"] = {
+        metadata: Dict[str, Any] = {
             "authorization_url": oauth_config.authorization_url,
             "client_id": oauth_config.client_id,
-            "scopes": oauth_config.scopes or [],
             "code_challenge": code_challenge,
             "code_challenge_method": "S256",
             "encryption_public_key": key_exchange.get_public_key_pem(),
         }
+        if oauth_config.scopes:
+            metadata["scopes"] = oauth_config.scopes
+        if oauth_config.registration_endpoint:
+            metadata["registration_endpoint"] = oauth_config.registration_endpoint
+        params["__oauth_metadata"] = metadata
 
         return ApprovalRequirement(
             needs_approval=True,
@@ -1466,36 +1470,15 @@ class RemoteMCPToolset(Toolset):
             oauth_config.registration_endpoint = registration_endpoint
 
         # Step 3: Dynamic Client Registration if no client_id
+        # At startup, we don't know the redirect_uri (it depends on CLI port or frontend URL).
+        # Skip DCR here — it will be done at runtime by the CLI flow (with actual port)
+        # or by the frontend (with its own callback URL).
         if not oauth_config.client_id:
             if not registration_endpoint:
-                logging.warning("OAuth discovery %s: no client_id and no DCR endpoint available", self.name)
-                return False
-
-            try:
-                dcr_response = httpx.post(
-                    registration_endpoint,
-                    json={
-                        "client_name": f"HolmesGPT ({self.name})",
-                        "redirect_uris": ["http://127.0.0.1:0/callback"],
-                        "grant_types": ["authorization_code", "refresh_token"],
-                        "response_types": ["code"],
-                        "token_endpoint_auth_method": "none",
-                    },
-                    timeout=15, verify=verify_ssl,
-                )
-                if dcr_response.status_code in (200, 201):
-                    dcr_data = dcr_response.json()
-                    oauth_config.client_id = dcr_data.get("client_id")
-                    logging.warning("OAuth discovery %s: dynamically registered client_id=%s", self.name, oauth_config.client_id)
-                else:
-                    logging.warning(
-                        "OAuth discovery %s: DCR failed HTTP %d: %s",
-                        self.name, dcr_response.status_code, dcr_response.text[:200],
-                    )
-                    return False
-            except Exception:
-                logging.warning("OAuth discovery %s: DCR request failed", self.name, exc_info=True)
-                return False
+                logging.warning("OAuth discovery %s: no client_id and no DCR endpoint — frontend or CLI must provide client_id", self.name)
+                # Don't fail — the frontend may handle DCR itself
+            else:
+                logging.warning("OAuth discovery %s: no client_id, DCR deferred to runtime (registration_endpoint=%s)", self.name, registration_endpoint)
 
         logging.warning(
             "OAuth discovery %s complete: authorization_url=%s, token_url=%s, client_id=%s",
