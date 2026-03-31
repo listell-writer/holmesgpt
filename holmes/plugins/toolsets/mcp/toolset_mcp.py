@@ -1,5 +1,6 @@
 import asyncio
 import base64
+import hashlib
 import json
 import logging
 import os
@@ -256,6 +257,13 @@ def _get_conversation_key(request_context: Optional[Dict[str, Any]]) -> str:
     return "__default__"
 
 
+def _get_oauth_cache_key(oauth_config: MCPOAuthConfig, request_context: Optional[Dict[str, Any]]) -> str:
+    """Build a cache key from IdP identity + conversation. All MCP servers sharing the same IdP share the same token."""
+    conv_key = _get_conversation_key(request_context)
+    idp_key = hashlib.sha256(f"{oauth_config.authorization_url}:{oauth_config.client_id}".encode()).hexdigest()[:12]
+    return f"{conv_key}:{idp_key}"
+
+
 class MCPConfig(ToolsetConfig):
     mode: MCPMode = Field(
         default=MCPMode.SSE,
@@ -362,16 +370,20 @@ def _inject_oauth_token(
     if not isinstance(toolset._mcp_config, MCPConfig) or not toolset._mcp_config.oauth:
         return headers
 
-    conv_key = _get_conversation_key(request_context)
-    cached_token = _oauth_token_cache.get(conv_key)
+    oauth_config = toolset._mcp_config.oauth
+    cache_key = _get_oauth_cache_key(oauth_config, request_context)
+    cached_token = _oauth_token_cache.get(cache_key)
     if not cached_token:
         # Access token expired or missing — try refresh before giving up
-        cached_token = _try_refresh_token(conv_key, toolset._mcp_config.oauth)
+        cached_token = _try_refresh_token(cache_key, oauth_config)
+        if cached_token:
+            logger.warning("OAuth token refreshed for MCP server %s (idp=%s)", toolset.name, oauth_config.authorization_url)
     if cached_token:
         headers = headers or {}
         headers["Authorization"] = f"Bearer {cached_token}"
+        logger.warning("OAuth token injected for MCP server %s (cache_key=%s)", toolset.name, cache_key)
     else:
-        logger.warning("OAuth MCP server %s: no cached token for conversation %s — request will likely 401", toolset.name, conv_key)
+        logger.warning("OAuth MCP server %s: no cached token (cache_key=%s) — request will likely 401", toolset.name, cache_key)
     return headers
 
 
@@ -428,15 +440,18 @@ def decrypt_code_and_exchange_for_token(tool_call_id: str, encrypted_payload: st
             logger.error("OAuth token exchange: response missing 'access_token' field. Keys: %s", list(token_data.keys()))
             return
 
-        conv_key = _get_conversation_key(request_context)
+        cache_key = _get_oauth_cache_key(pending.oauth_config, request_context)
         _oauth_token_cache.set(
-            conv_key,
+            cache_key,
             access_token,
             expires_in=token_data.get("expires_in", 300),
             refresh_token=token_data.get("refresh_token"),
             refresh_expires_in=token_data.get("refresh_expires_in"),
         )
-        logger.info("OAuth token cached for conversation %s (exchanged via %s)", conv_key, pending.oauth_config.token_url)
+        logger.warning(
+            "OAuth token cached (cache_key=%s, idp=%s, expires_in=%s, has_refresh=%s)",
+            cache_key, pending.oauth_config.token_url, token_data.get("expires_in"), "refresh_token" in token_data,
+        )
     except json.JSONDecodeError:
         logger.exception("OAuth token exchange: failed to parse JSON response from %s", pending.oauth_config.token_url)
     except httpx.HTTPStatusError:
@@ -445,13 +460,14 @@ def decrypt_code_and_exchange_for_token(tool_call_id: str, encrypted_payload: st
         logger.exception("OAuth token exchange failed (tool_call_id=%s, token_url=%s)", tool_call_id, pending.oauth_config.token_url)
 
 
-def _try_refresh_token(conv_key: str, oauth_config: MCPOAuthConfig) -> Optional[str]:
+def _try_refresh_token(cache_key: str, oauth_config: MCPOAuthConfig) -> Optional[str]:
     """Attempt to refresh an expired access token using the cached refresh token. Returns new access token or None."""
-    refresh_token = _oauth_token_cache.get_refresh_token(conv_key)
+    refresh_token = _oauth_token_cache.get_refresh_token(cache_key)
     if not refresh_token:
         return None
 
     try:
+        logger.warning("OAuth: attempting token refresh at %s (cache_key=%s)", oauth_config.token_url, cache_key)
         response = httpx.post(
             oauth_config.token_url,
             data={
@@ -463,7 +479,7 @@ def _try_refresh_token(conv_key: str, oauth_config: MCPOAuthConfig) -> Optional[
             timeout=30,
         )
         if response.status_code != 200:
-            logger.warning("OAuth refresh failed: HTTP %d from %s", response.status_code, oauth_config.token_url)
+            logger.warning("OAuth refresh failed: HTTP %d from %s (cache_key=%s)", response.status_code, oauth_config.token_url, cache_key)
             return None
 
         token_data = response.json()
@@ -472,16 +488,16 @@ def _try_refresh_token(conv_key: str, oauth_config: MCPOAuthConfig) -> Optional[
             return None
 
         _oauth_token_cache.set(
-            conv_key,
+            cache_key,
             access_token,
             expires_in=token_data.get("expires_in", 300),
             refresh_token=token_data.get("refresh_token", refresh_token),
             refresh_expires_in=token_data.get("refresh_expires_in"),
         )
-        logger.info("OAuth token refreshed for conversation %s", conv_key)
+        logger.warning("OAuth token refreshed (cache_key=%s, expires_in=%s)", cache_key, token_data.get("expires_in"))
         return access_token
     except Exception:
-        logger.warning("OAuth refresh failed for conversation %s", conv_key, exc_info=True)
+        logger.warning("OAuth refresh failed (cache_key=%s)", cache_key, exc_info=True)
         return None
 
 
@@ -555,18 +571,20 @@ class RemoteMCPTool(Tool):
             return None
 
         oauth_config = self.toolset._mcp_config.oauth
-        conv_key = _get_conversation_key(context.request_context)
+        cache_key = _get_oauth_cache_key(oauth_config, context.request_context)
 
-        if _oauth_token_cache.has(conv_key):
+        if _oauth_token_cache.has(cache_key):
             # Try refresh if access token expired but refresh token is still valid
-            if _oauth_token_cache.get(conv_key) is None:
-                refreshed = _try_refresh_token(conv_key, oauth_config)
+            if _oauth_token_cache.get(cache_key) is None:
+                refreshed = _try_refresh_token(cache_key, oauth_config)
                 if refreshed:
+                    logger.warning("OAuth token refreshed for MCP %s, skipping approval (cache_key=%s)", self.toolset.name, cache_key)
                     return None
             else:
+                logger.warning("OAuth token reused for MCP %s from shared IdP cache (cache_key=%s)", self.toolset.name, cache_key)
                 return None
 
-        logger.info("OAuth MCP %s: no cached token for conversation %s, requesting user authentication", self.toolset.name, conv_key)
+        logger.warning("OAuth MCP %s: no cached token (cache_key=%s), requesting user authentication", self.toolset.name, cache_key)
 
         # Generate keypair for secure auth code transit and PKCE for token exchange
         key_exchange = OAuthKeyExchange()
@@ -663,6 +681,7 @@ class RemoteMCPTool(Tool):
                     invocation=f"OAuth connect to {self.toolset.name}",
                 )
             else:
+                logger.warning("OAuth MCP %s: authenticated but no tools found", self.toolset.name)
                 return StructuredToolResult(
                     status=StructuredToolResultStatus.ERROR,
                     error=f"Authenticated but no tools found on MCP server {self.toolset.name}",
@@ -671,6 +690,7 @@ class RemoteMCPTool(Tool):
                 )
         except Exception as e:
             error_detail = _extract_root_error_message(e)
+            logger.warning("OAuth MCP %s: connect failed: %s", self.toolset.name, error_detail)
             return StructuredToolResult(
                 status=StructuredToolResultStatus.ERROR,
                 error=f"OAuth connect failed: {error_detail}",
@@ -1044,7 +1064,8 @@ class RemoteMCPToolset(Toolset):
 
         # If we already have a cached token, try to load real tools directly
         # This happens on subsequent requests in the same conversation after OAuth
-        if _oauth_token_cache.has("__default__"):
+        startup_cache_key = _get_oauth_cache_key(self._mcp_config.oauth, None)
+        if _oauth_token_cache.has(startup_cache_key):
             try:
                 tools_result = asyncio.run(self._get_server_tools())
                 self.tools = [RemoteMCPTool.create(tool, self) for tool in tools_result.tools]

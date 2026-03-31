@@ -18,6 +18,7 @@ from holmes.plugins.toolsets.mcp.toolset_mcp import (
     RemoteMCPToolset,
     _generate_pkce,
     _get_conversation_key,
+    _get_oauth_cache_key,
     _oauth_token_cache,
     _pending_exchanges,
     _exchanges_lock,
@@ -111,27 +112,31 @@ class TestPKCE:
 
 class TestOAuthTokenCache:
     def test_set_and_get(self):
-        cache = OAuthTokenCache(ttl_seconds=60)
-        cache.set("conv-1", "token-abc")
+        cache = OAuthTokenCache()
+        cache.set("conv-1", "token-abc", expires_in=60)
         assert cache.get("conv-1") == "token-abc"
 
     def test_has(self):
-        cache = OAuthTokenCache(ttl_seconds=60)
+        cache = OAuthTokenCache()
         assert not cache.has("conv-1")
-        cache.set("conv-1", "token-abc")
+        cache.set("conv-1", "token-abc", expires_in=60)
         assert cache.has("conv-1")
 
     def test_expired_entry(self):
-        cache = OAuthTokenCache(ttl_seconds=0)
-        cache.set("conv-1", "token-abc")
-        time.sleep(0.01)
-        assert cache.get("conv-1") is None
-        assert not cache.has("conv-1")
+        cache = OAuthTokenCache()
+        # Set with 0 expires_in — the code does max(expires_in - 30, 10) so minimum is 10s
+        # Instead, directly manipulate the cache entry to test expiry
+        cache.set("conv-exp", "token-abc", expires_in=31)  # will be 1 second after buffer
+        # Manually expire it
+        cache._cache["conv-exp"].expires_at = time.monotonic() - 1
+        cache._cache["conv-exp"].refresh_expires_at = time.monotonic() - 1
+        assert cache.get("conv-exp") is None
+        assert not cache.has("conv-exp")
 
     def test_different_conversations(self):
-        cache = OAuthTokenCache(ttl_seconds=60)
-        cache.set("conv-1", "token-1")
-        cache.set("conv-2", "token-2")
+        cache = OAuthTokenCache()
+        cache.set("conv-1", "token-1", expires_in=60)
+        cache.set("conv-2", "token-2", expires_in=60)
         assert cache.get("conv-1") == "token-1"
         assert cache.get("conv-2") == "token-2"
 
@@ -207,8 +212,10 @@ class TestRequiresApproval:
             client_id="cid",
         )
         tool = self._make_tool(oauth)
-        _oauth_token_cache.set("cached-conv", "some-token")
-        context = self._make_context(conv_id="cached-conv")
+        context = self._make_context(conv_id="cached-conv-2")
+        # Cache using the real cache key (conv + idp hash)
+        cache_key = _get_oauth_cache_key(oauth, context.request_context)
+        _oauth_token_cache.set(cache_key, "some-token")
 
         result = tool.requires_approval({}, context)
         assert result is None
@@ -282,8 +289,9 @@ class TestDecryptCodeAndExchangeForToken:
             assert post_data["code_verifier"] == code_verifier
             assert post_data["redirect_uri"] == "http://frontend/callback"
 
-        # Verify token was cached
-        assert _oauth_token_cache.get(conv_id) == "final-access-token-abc"
+        # Verify token was cached using the real cache key
+        cache_key = _get_oauth_cache_key(oauth_config, request_context)
+        assert _oauth_token_cache.get(cache_key) == "final-access-token-abc"
 
         # Pending exchange should be consumed
         assert tool_call_id not in _pending_exchanges
@@ -292,3 +300,93 @@ class TestDecryptCodeAndExchangeForToken:
         """Gracefully handle missing pending exchange."""
         decrypt_code_and_exchange_for_token("nonexistent-id", "garbage", None)
         # Should log error but not raise
+
+
+class TestOAuthCacheKeySharedIdP:
+    """Tests that MCP servers sharing the same IdP share the same token."""
+
+    def test_same_idp_same_cache_key(self):
+        """Two MCP servers using the same authorization_url + client_id get the same cache key."""
+        oauth1 = MCPOAuthConfig(
+            authorization_url="http://keycloak:8080/realms/mcp/protocol/openid-connect/auth",
+            token_url="http://keycloak:8080/realms/mcp/protocol/openid-connect/token",
+            client_id="holmes-client",
+        )
+        oauth2 = MCPOAuthConfig(
+            authorization_url="http://keycloak:8080/realms/mcp/protocol/openid-connect/auth",
+            token_url="http://internal-keycloak:8080/realms/mcp/protocol/openid-connect/token",  # different token_url
+            client_id="holmes-client",
+        )
+        ctx = {"headers": {"X-Conversation-Id": "conv-shared"}}
+        key1 = _get_oauth_cache_key(oauth1, ctx)
+        key2 = _get_oauth_cache_key(oauth2, ctx)
+        assert key1 == key2, "Same authorization_url + client_id should produce same cache key"
+
+    def test_different_idp_different_cache_key(self):
+        """Two MCP servers using different IdPs get different cache keys."""
+        oauth1 = MCPOAuthConfig(
+            authorization_url="http://keycloak-a:8080/auth",
+            token_url="http://keycloak-a:8080/token",
+            client_id="holmes-client",
+        )
+        oauth2 = MCPOAuthConfig(
+            authorization_url="http://keycloak-b:8080/auth",
+            token_url="http://keycloak-b:8080/token",
+            client_id="holmes-client",
+        )
+        ctx = {"headers": {"X-Conversation-Id": "conv-diff"}}
+        key1 = _get_oauth_cache_key(oauth1, ctx)
+        key2 = _get_oauth_cache_key(oauth2, ctx)
+        assert key1 != key2, "Different authorization_urls should produce different cache keys"
+
+    def test_different_client_id_different_cache_key(self):
+        """Same IdP but different client_id gets different cache key."""
+        oauth1 = MCPOAuthConfig(
+            authorization_url="http://keycloak:8080/auth",
+            token_url="http://keycloak:8080/token",
+            client_id="client-a",
+        )
+        oauth2 = MCPOAuthConfig(
+            authorization_url="http://keycloak:8080/auth",
+            token_url="http://keycloak:8080/token",
+            client_id="client-b",
+        )
+        ctx = {"headers": {"X-Conversation-Id": "conv-cid"}}
+        key1 = _get_oauth_cache_key(oauth1, ctx)
+        key2 = _get_oauth_cache_key(oauth2, ctx)
+        assert key1 != key2, "Different client_ids should produce different cache keys"
+
+    def test_different_conversation_different_cache_key(self):
+        """Same IdP + client but different conversation gets different cache key."""
+        oauth = MCPOAuthConfig(
+            authorization_url="http://keycloak:8080/auth",
+            token_url="http://keycloak:8080/token",
+            client_id="holmes",
+        )
+        ctx1 = {"headers": {"X-Conversation-Id": "conv-1"}}
+        ctx2 = {"headers": {"X-Conversation-Id": "conv-2"}}
+        key1 = _get_oauth_cache_key(oauth, ctx1)
+        key2 = _get_oauth_cache_key(oauth, ctx2)
+        assert key1 != key2, "Different conversations should produce different cache keys"
+
+    def test_shared_token_across_mcp_servers(self):
+        """Token cached for one MCP server is reusable by another with same IdP."""
+        oauth1 = MCPOAuthConfig(
+            authorization_url="http://keycloak:8080/auth",
+            token_url="http://keycloak:8080/token",
+            client_id="shared-client",
+        )
+        oauth2 = MCPOAuthConfig(
+            authorization_url="http://keycloak:8080/auth",
+            token_url="http://internal:8080/token",  # different token_url, same auth
+            client_id="shared-client",
+        )
+        ctx = {"headers": {"X-Conversation-Id": "conv-share-test"}}
+
+        # Cache token via first MCP server's config
+        cache_key1 = _get_oauth_cache_key(oauth1, ctx)
+        _oauth_token_cache.set(cache_key1, "shared-token-xyz", expires_in=300)
+
+        # Second MCP server should find the same token
+        cache_key2 = _get_oauth_cache_key(oauth2, ctx)
+        assert _oauth_token_cache.get(cache_key2) == "shared-token-xyz"

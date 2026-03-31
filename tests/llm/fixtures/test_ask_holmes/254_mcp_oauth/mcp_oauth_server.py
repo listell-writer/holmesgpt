@@ -96,12 +96,15 @@ class KeycloakTokenVerifier(TokenVerifier):
                     logger.warning("Token audience mismatch")
                     return None
 
+                # AccessToken.resource expects a string, but aud can be a list
+                aud = data.get("aud")
+                matched_aud = self._find_matching_audience(aud)
                 return AccessToken(
                     token=token,
                     client_id=data.get("client_id", "unknown"),
                     scopes=data.get("scope", "").split() if data.get("scope") else [],
                     expires_at=data.get("exp"),
-                    resource=data.get("aud"),
+                    resource=matched_aud,
                 )
 
             except Exception:
@@ -118,6 +121,17 @@ class KeycloakTokenVerifier(TokenVerifier):
         return any(
             check_resource_allowed(self.resource_url, a) for a in audiences
         )
+
+    def _find_matching_audience(self, aud: Any) -> str | None:
+        """Return the audience string that matches this server, handling list or string aud."""
+        if aud is None:
+            return None
+        audiences = aud if isinstance(aud, list) else [aud]
+        for a in audiences:
+            if check_resource_allowed(self.resource_url, a):
+                return a
+        # Fallback: return first audience as string (shouldn't reach here if _validate_audience passed)
+        return audiences[0] if audiences else None
 
 
 def create_server() -> FastMCP:
