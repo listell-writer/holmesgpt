@@ -122,17 +122,95 @@ class MCPOAuthConfig(BaseModel):
         return self
 
 
+def _get_signing_key() -> Optional[str]:
+    """Load the signing_key from Robusta's global_config. Returns None in CLI mode."""
+    from holmes.utils.definitions import RobustaConfig
+
+    config_file_path = os.environ.get("RUNNER_CONFIG_PATH", "/etc/robusta/config/active_playbooks.yaml")
+    if not os.path.exists(config_file_path):
+        return None
+    try:
+        import yaml as _yaml
+
+        with open(config_file_path) as f:
+            yaml_content = _yaml.safe_load(f)
+            config = RobustaConfig(**yaml_content)
+            return config.global_config.get("signing_key")
+    except Exception:
+        logger.warning("Failed to load signing_key from Robusta config", exc_info=True)
+        return None
+
+
+# Cached singleton — derived once from signing_key, reused for all OAuth flows
+_deterministic_keypair: Optional["OAuthKeyExchange"] = None
+
+
 class OAuthKeyExchange:
     """RSA keypair for secure auth code transit from frontend to Holmes.
 
-    Holmes generates a keypair and sends the public key to the frontend.
-    The frontend encrypts the OAuth authorization code with it.
+    When a signing_key is available (in-cluster), derives a deterministic keypair
+    from it — same key every time, survives Holmes restarts. In CLI mode (no
+    signing_key), generates a random keypair per instance.
+
+    The frontend encrypts the OAuth authorization code with the public key.
     Holmes decrypts with the private key, then exchanges the code for
     a token server-side (so the access token never leaves the cluster).
     """
 
-    def __init__(self) -> None:
-        self._private_key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
+    def __init__(self, signing_key: Optional[str] = None, key_store_dir: Optional[str] = None) -> None:
+        if signing_key:
+            # Try to load a persisted keypair encrypted with the signing_key.
+            # If none exists, generate one and persist it.
+            self._private_key = self._load_or_generate_persistent_key(signing_key, key_store_dir)
+        else:
+            self._private_key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
+
+    @staticmethod
+    def _load_or_generate_persistent_key(signing_key: str, key_store_dir: Optional[str] = None) -> Any:
+        """Load persisted RSA key or generate + persist a new one, encrypted with signing_key."""
+        from cryptography.fernet import Fernet
+        from cryptography.hazmat.primitives.kdf.hkdf import HKDF
+        from pathlib import Path
+
+        # Derive a Fernet key from signing_key for encrypting the RSA private key at rest
+        fernet_key = base64.urlsafe_b64encode(
+            HKDF(algorithm=hashes.SHA256(), length=32, salt=b"holmesgpt-oauth-fernet", info=b"key-encryption")
+            .derive(signing_key.encode())
+        )
+        fernet = Fernet(fernet_key)
+
+        if key_store_dir:
+            key_path = Path(key_store_dir) / "oauth_keypair.enc"
+        else:
+            key_path = Path(os.environ.get("RUNNER_CONFIG_PATH", "/etc/robusta/config")).parent / "oauth_keypair.enc"
+
+        # Try to load existing key
+        if key_path.exists():
+            try:
+                encrypted_pem = key_path.read_bytes()
+                pem_bytes = fernet.decrypt(encrypted_pem)
+                logger.warning("OAuth: loaded persisted keypair from %s", key_path)
+                return serialization.load_pem_private_key(pem_bytes, password=None)
+            except Exception:
+                logger.warning("OAuth: failed to load persisted keypair, generating new one")
+
+        # Generate new keypair
+        private_key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
+
+        # Persist encrypted
+        try:
+            pem_bytes = private_key.private_bytes(
+                serialization.Encoding.PEM,
+                serialization.PrivateFormat.PKCS8,
+                serialization.NoEncryption(),
+            )
+            key_path.parent.mkdir(parents=True, exist_ok=True)
+            key_path.write_bytes(fernet.encrypt(pem_bytes))
+            logger.warning("OAuth: generated and persisted new keypair at %s", key_path)
+        except Exception:
+            logger.warning("OAuth: could not persist keypair (read-only filesystem?), will regenerate on restart", exc_info=True)
+
+        return private_key
 
     def get_public_key_pem(self) -> str:
         return self._private_key.public_key().public_bytes(
@@ -152,6 +230,19 @@ class OAuthKeyExchange:
             ),
         )
         return plaintext.decode()
+
+
+def get_oauth_key_exchange() -> OAuthKeyExchange:
+    """Get the singleton OAuthKeyExchange. Uses signing_key if available for persistence."""
+    global _deterministic_keypair
+    if _deterministic_keypair is None:
+        signing_key = _get_signing_key()
+        _deterministic_keypair = OAuthKeyExchange(signing_key=signing_key)
+        if signing_key:
+            logger.warning("OAuth: initialized deterministic keypair from signing_key (persistent across restarts)")
+        else:
+            logger.warning("OAuth: initialized random keypair (CLI mode, not persistent)")
+    return _deterministic_keypair
 
 
 def _generate_pkce() -> Tuple[str, str]:
@@ -838,7 +929,7 @@ class RemoteMCPTool(Tool):
                 # Fall through to frontend flow as fallback
 
         # Frontend mode: use RSA key exchange + approval mechanism
-        key_exchange = OAuthKeyExchange()
+        key_exchange = get_oauth_key_exchange()
         code_verifier, code_challenge = _generate_pkce()
 
         with _exchanges_lock:
