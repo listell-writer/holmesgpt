@@ -810,12 +810,9 @@ class RemoteMCPTool(Tool):
             logger.warning("OAuth MCP %s: loaded token from disk store", self.toolset.name)
             return None
 
-        # Detect CLI vs frontend mode based on request_context
-        is_frontend = bool(
-            context.request_context
-            and context.request_context.get("headers")
-            and any(k.lower() in ("x-conversation-id", "x-session-id", "authorization") for k in context.request_context.get("headers", {}))
-        )
+        # Detect CLI vs frontend mode: if request_context exists, the request came
+        # through the API server (frontend). CLI calls have request_context=None.
+        is_frontend = context.request_context is not None
 
         if not is_frontend:
             # CLI mode: run browser OAuth flow synchronously
