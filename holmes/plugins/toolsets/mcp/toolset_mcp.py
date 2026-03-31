@@ -623,7 +623,12 @@ def decrypt_code_and_exchange_for_token(tool_call_id: str, encrypted_payload: st
         payload = json.loads(decrypted)
         auth_code = payload["code"]
         redirect_uri = payload.get("redirect_uri", "")
-        logger.warning("OAuth: auth code decrypted, exchanging at token endpoint %s", pending.oauth_config.token_url)
+        # Frontend may include client_id from DCR (when Holmes didn't have one at discovery time)
+        client_id = payload.get("client_id") or pending.oauth_config.client_id
+        if client_id and not pending.oauth_config.client_id:
+            pending.oauth_config.client_id = client_id
+            logger.warning("OAuth: using client_id from frontend DCR: %s", client_id)
+        logger.warning("OAuth: auth code decrypted, exchanging at token endpoint %s (client_id=%s)", pending.oauth_config.token_url, client_id)
 
         # Exchange auth code for access token at the IdP's token endpoint (server-side)
         token_response = httpx.post(
@@ -631,7 +636,7 @@ def decrypt_code_and_exchange_for_token(tool_call_id: str, encrypted_payload: st
             data={
                 "grant_type": "authorization_code",
                 "code": auth_code,
-                "client_id": pending.oauth_config.client_id,
+                "client_id": client_id,
                 "code_verifier": pending.code_verifier,
                 "redirect_uri": redirect_uri,
             },
