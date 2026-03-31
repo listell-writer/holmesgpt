@@ -99,12 +99,27 @@ class MCPMode(str, Enum):
 
 
 class MCPOAuthConfig(BaseModel):
-    """OAuth authorization_code config for MCP servers requiring user login."""
+    """OAuth authorization_code config for MCP servers requiring user login.
 
-    authorization_url: str = Field(description="IdP authorization endpoint URL.")
-    token_url: str = Field(description="IdP token endpoint URL.")
-    client_id: str = Field(description="OAuth public client ID (no secret needed for PKCE).")
+    Set enabled=true with no other fields to auto-discover OAuth endpoints
+    via the MCP OAuth flow (RFC 9728 Protected Resource Metadata + OIDC Discovery + DCR).
+
+    If any of authorization_url, token_url, or client_id is set, enabled defaults to true.
+    """
+
+    enabled: bool = Field(default=False, description="Enable OAuth for this MCP server. Auto-set to true when other OAuth fields are provided.")
+    authorization_url: Optional[str] = Field(default=None, description="IdP authorization endpoint URL. Auto-discovered if omitted.")
+    token_url: Optional[str] = Field(default=None, description="IdP token endpoint URL. Auto-discovered if omitted.")
+    client_id: Optional[str] = Field(default=None, description="OAuth public client ID. Auto-registered via DCR if omitted.")
     scopes: Optional[List[str]] = Field(default=None, description="OAuth scopes to request.")
+    registration_endpoint: Optional[str] = Field(default=None, exclude=True, description="DCR endpoint (auto-populated during discovery, not user-facing).")
+
+    @model_validator(mode="after")
+    def auto_enable_when_configured(self):
+        """Auto-enable OAuth when any endpoint or client_id is explicitly set."""
+        if not self.enabled and (self.authorization_url or self.token_url or self.client_id):
+            self.enabled = True
+        return self
 
 
 class OAuthKeyExchange:
@@ -229,6 +244,202 @@ class OAuthTokenCache:
                 return True
             del self._cache[key]
             return False
+
+
+class DiskTokenStore:
+    """Persists OAuth tokens to ~/.holmes/auth/mcp_tokens.json for CLI usage."""
+
+    def __init__(self) -> None:
+        from holmes.core.config import config_path_dir
+        from pathlib import Path
+
+        self._path = Path(config_path_dir) / "auth" / "mcp_tokens.json"
+        self._path.parent.mkdir(parents=True, exist_ok=True)
+        self._lock = threading.Lock()
+
+    def get(self, key: str) -> Optional[Dict[str, Any]]:
+        with self._lock:
+            data = self._load()
+            token = data.get(key)
+            if token and token.get("expires_at", float("inf")) > time.time():
+                return token
+            return None
+
+    def set(self, key: str, token_data: Dict[str, Any]) -> None:
+        with self._lock:
+            data = self._load()
+            data[key] = token_data
+            with open(self._path, "w") as f:
+                json.dump(data, f, indent=2)
+
+    def has(self, key: str) -> bool:
+        return self.get(key) is not None
+
+    def _load(self) -> Dict[str, Any]:
+        if not self._path.exists():
+            return {}
+        try:
+            with open(self._path) as f:
+                return json.load(f)
+        except Exception:
+            return {}
+
+
+_disk_token_store = DiskTokenStore()
+
+
+def _cli_oauth_flow(oauth_config: MCPOAuthConfig, server_name: str) -> Optional[Dict[str, Any]]:
+    """Run OAuth authorization_code flow via local browser + callback server.
+
+    Opens the user's browser to the IdP login page, starts a local HTTP
+    server to receive the callback, exchanges the auth code for a token.
+    Returns the token data dict or None on failure.
+    """
+    import secrets
+    import socket
+    import webbrowser
+    from http.server import BaseHTTPRequestHandler, HTTPServer
+    from urllib.parse import parse_qs, urlencode, urlparse
+
+    if not oauth_config.authorization_url or not oauth_config.token_url or not oauth_config.client_id:
+        logger.warning("CLI OAuth %s: missing required OAuth endpoints", server_name)
+        return None
+
+    # Generate PKCE
+    code_verifier, code_challenge = _generate_pkce()
+    state = secrets.token_urlsafe(32)
+
+    # Start callback server on an available port
+    callback_server = None
+    callback_port = 0
+    for port in range(18900, 18920):
+        try:
+            callback_server = HTTPServer(("127.0.0.1", port), type("H", (BaseHTTPRequestHandler,), {"do_GET": lambda s: None, "log_message": lambda s, *a: None}))
+            callback_port = port
+            callback_server.server_close()
+            break
+        except socket.error:
+            continue
+
+    if callback_port == 0:
+        logger.warning("CLI OAuth %s: could not find available port for callback server", server_name)
+        return None
+
+    redirect_uri = f"http://127.0.0.1:{callback_port}/callback"
+
+    # Re-register via DCR with the actual redirect_uri if we have a registration endpoint
+    if oauth_config.registration_endpoint:
+        try:
+            dcr_response = httpx.post(
+                oauth_config.registration_endpoint,
+                json={
+                    "client_name": f"HolmesGPT ({server_name})",
+                    "redirect_uris": [redirect_uri],
+                    "grant_types": ["authorization_code", "refresh_token"],
+                    "response_types": ["code"],
+                    "token_endpoint_auth_method": "none",
+                },
+                timeout=15,
+            )
+            if dcr_response.status_code in (200, 201):
+                dcr_data = dcr_response.json()
+                oauth_config.client_id = dcr_data.get("client_id", oauth_config.client_id)
+                logger.warning("CLI OAuth %s: re-registered client_id=%s with redirect_uri=%s", server_name, oauth_config.client_id, redirect_uri)
+        except Exception:
+            logger.warning("CLI OAuth %s: DCR re-registration failed, using existing client_id", server_name, exc_info=True)
+
+    # Build authorization URL
+    auth_params = {
+        "response_type": "code",
+        "client_id": oauth_config.client_id,
+        "redirect_uri": redirect_uri,
+        "code_challenge": code_challenge,
+        "code_challenge_method": "S256",
+        "state": state,
+    }
+    if oauth_config.scopes:
+        auth_params["scope"] = " ".join(oauth_config.scopes)
+
+    auth_url = f"{oauth_config.authorization_url}?{urlencode(auth_params)}"
+
+    # Set up callback handler
+    result: Dict[str, Any] = {}
+    callback_event = threading.Event()
+
+    class CallbackHandler(BaseHTTPRequestHandler):
+        def do_GET(self):
+            parsed = urlparse(self.path)
+            params = parse_qs(parsed.query)
+            if "code" in params:
+                result["code"] = params["code"][0]
+                self.send_response(200)
+                self.send_header("Content-Type", "text/html")
+                self.end_headers()
+                self.wfile.write(b"<h1>Authenticated! You can close this tab.</h1>")
+            else:
+                result["error"] = params.get("error", ["unknown"])[0]
+                result["error_description"] = params.get("error_description", [""])[0]
+                self.send_response(400)
+                self.send_header("Content-Type", "text/html")
+                self.end_headers()
+                self.wfile.write(f"<h1>Error: {result['error']}</h1>".encode())
+            callback_event.set()
+
+        def log_message(self, format, *args):
+            pass
+
+    server = HTTPServer(("127.0.0.1", callback_port), CallbackHandler)
+    server_thread = threading.Thread(target=server.serve_forever, daemon=True)
+    server_thread.start()
+
+    try:
+        logger.warning("CLI OAuth %s: opening browser for authentication", server_name)
+        print(f"\nOpening browser for OAuth authentication to {server_name}...")
+        print(f"If browser doesn't open, visit: {auth_url}\n")
+        webbrowser.open(auth_url)
+
+        logger.warning("CLI OAuth %s: waiting for callback on port %d", server_name, callback_port)
+        callback_event.wait(timeout=300)
+
+        if "error" in result:
+            logger.warning("CLI OAuth %s: OAuth error: %s - %s", server_name, result["error"], result.get("error_description", ""))
+            return None
+
+        if "code" not in result:
+            logger.warning("CLI OAuth %s: no auth code received (timeout?)", server_name)
+            return None
+
+        # Exchange code for token
+        token_response = httpx.post(
+            oauth_config.token_url,
+            data={
+                "grant_type": "authorization_code",
+                "code": result["code"],
+                "client_id": oauth_config.client_id,
+                "code_verifier": code_verifier,
+                "redirect_uri": redirect_uri,
+            },
+            headers={"Content-Type": "application/x-www-form-urlencoded"},
+            timeout=30,
+        )
+        if token_response.status_code != 200:
+            logger.warning("CLI OAuth %s: token exchange failed HTTP %d: %s", server_name, token_response.status_code, token_response.text[:300])
+            return None
+
+        token_data = token_response.json()
+        if "access_token" not in token_data:
+            logger.warning("CLI OAuth %s: no access_token in response", server_name)
+            return None
+
+        # Add expires_at for disk storage
+        if "expires_in" in token_data and "expires_at" not in token_data:
+            token_data["expires_at"] = time.time() + token_data["expires_in"]
+
+        logger.warning("CLI OAuth %s: authentication successful", server_name)
+        return token_data
+
+    finally:
+        server.shutdown()
 
 
 class _PendingOAuthExchange:
@@ -367,7 +578,7 @@ def _inject_oauth_token(
     headers: Optional[Dict[str, str]],
 ) -> Optional[Dict[str, str]]:
     """Inject cached OAuth Bearer token into headers if available."""
-    if not isinstance(toolset._mcp_config, MCPConfig) or not toolset._mcp_config.oauth:
+    if not isinstance(toolset._mcp_config, MCPConfig) or not toolset._mcp_config.oauth or not toolset._mcp_config.oauth.enabled:
         return headers
 
     oauth_config = toolset._mcp_config.oauth
@@ -567,7 +778,7 @@ class RemoteMCPTool(Tool):
         self, params: Dict, context: ToolInvokeContext
     ) -> Optional[ApprovalRequirement]:
         """Prompt user for OAuth browser login when no cached token exists."""
-        if not isinstance(self.toolset._mcp_config, MCPConfig) or not self.toolset._mcp_config.oauth:
+        if not isinstance(self.toolset._mcp_config, MCPConfig) or not self.toolset._mcp_config.oauth or not self.toolset._mcp_config.oauth.enabled:
             return None
 
         oauth_config = self.toolset._mcp_config.oauth
@@ -586,13 +797,48 @@ class RemoteMCPTool(Tool):
 
         logger.warning("OAuth MCP %s: no cached token (cache_key=%s), requesting user authentication", self.toolset.name, cache_key)
 
-        # Generate keypair for secure auth code transit and PKCE for token exchange
+        # Also check disk store for CLI-persisted tokens
+        disk_key = str(self.toolset._mcp_config.url) if isinstance(self.toolset._mcp_config, MCPConfig) else cache_key
+        disk_token = _disk_token_store.get(disk_key)
+        if disk_token:
+            _oauth_token_cache.set(
+                cache_key,
+                disk_token["access_token"],
+                expires_in=int(disk_token.get("expires_at", time.time() + 300) - time.time()),
+                refresh_token=disk_token.get("refresh_token"),
+            )
+            logger.warning("OAuth MCP %s: loaded token from disk store", self.toolset.name)
+            return None
+
+        # Detect CLI vs frontend mode based on request_context
+        is_frontend = bool(
+            context.request_context
+            and context.request_context.get("headers")
+            and any(k.lower() in ("x-conversation-id", "x-session-id", "authorization") for k in context.request_context.get("headers", {}))
+        )
+
+        if not is_frontend:
+            # CLI mode: run browser OAuth flow synchronously
+            logger.warning("OAuth MCP %s: CLI mode detected, running browser OAuth flow", self.toolset.name)
+            token_data = _cli_oauth_flow(oauth_config, self.toolset.name)
+            if token_data:
+                _oauth_token_cache.set(
+                    cache_key,
+                    token_data["access_token"],
+                    expires_in=token_data.get("expires_in", 300),
+                    refresh_token=token_data.get("refresh_token"),
+                    refresh_expires_in=token_data.get("refresh_expires_in"),
+                )
+                _disk_token_store.set(disk_key, token_data)
+                return None  # Token obtained, no approval needed
+            else:
+                logger.warning("OAuth MCP %s: CLI OAuth flow failed", self.toolset.name)
+                # Fall through to frontend flow as fallback
+
+        # Frontend mode: use RSA key exchange + approval mechanism
         key_exchange = OAuthKeyExchange()
         code_verifier, code_challenge = _generate_pkce()
 
-        # The frontend must tell us its redirect_uri so we can include it in the token exchange.
-        # We provide a placeholder; the frontend will use its own callback URL and include it
-        # in the encrypted payload alongside the auth code.
         with _exchanges_lock:
             _pending_exchanges[context.tool_call_id] = _PendingOAuthExchange(
                 key_exchange=key_exchange,
@@ -601,10 +847,6 @@ class RemoteMCPTool(Tool):
                 redirect_uri="",  # Set by frontend in the encrypted payload
             )
 
-        # Inject OAuth metadata into params so the frontend can initiate browser login.
-        # Frontend handles: open browser to authorization_url with code_challenge,
-        # user logs in, gets auth code, encrypts it with our public key, sends it back.
-        # Holmes handles: decrypt auth code, exchange at token_url with code_verifier.
         params["__oauth_metadata"] = {
             "authorization_url": oauth_config.authorization_url,
             "client_id": oauth_config.client_id,
@@ -1031,7 +1273,7 @@ class RemoteMCPToolset(Toolset):
             # For OAuth-protected servers, skip full MCP session init (it will 401).
             # Just verify the server is reachable and register a placeholder tool
             # that triggers the OAuth flow on first use. Tools are loaded after auth.
-            if isinstance(self._mcp_config, MCPConfig) and self._mcp_config.oauth:
+            if isinstance(self._mcp_config, MCPConfig) and self._mcp_config.oauth and self._mcp_config.oauth.enabled:
                 return self._check_oauth_server_reachable()
 
             tools_result = asyncio.run(self._get_server_tools())
@@ -1056,24 +1298,40 @@ class RemoteMCPToolset(Toolset):
         """For OAuth MCP servers, verify reachability without authenticating.
 
         If a cached token exists (from a previous request in the same conversation),
-        load the real tools directly. Otherwise, register a placeholder tool that
-        triggers the OAuth flow on first use.
+        load the real tools directly. Otherwise, auto-discover OAuth endpoints if needed,
+        then register a placeholder tool that triggers the OAuth flow on first use.
         """
         assert isinstance(self._mcp_config, MCPConfig)
+        assert self._mcp_config.oauth is not None
         url = str(self._mcp_config.url).rstrip("/")
 
-        # If we already have a cached token, try to load real tools directly
-        # This happens on subsequent requests in the same conversation after OAuth
-        startup_cache_key = _get_oauth_cache_key(self._mcp_config.oauth, None)
-        if _oauth_token_cache.has(startup_cache_key):
-            try:
-                tools_result = asyncio.run(self._get_server_tools())
-                self.tools = [RemoteMCPTool.create(tool, self) for tool in tools_result.tools]
-                if self.tools:
-                    logging.warning(f"OAuth MCP server {self.name}: loaded {len(self.tools)} tools using cached token")
-                    return (True, "")
-            except Exception as e:
-                logging.warning(f"OAuth MCP server {self.name}: cached token failed, falling back to placeholder: {_extract_root_error_message(e)}")
+        # If we already have a cached token (in-memory or disk), try to load real tools directly
+        oauth_config = self._mcp_config.oauth
+        disk_key = str(self._mcp_config.url)
+
+        # Load disk token into in-memory cache if available
+        if oauth_config.authorization_url and oauth_config.client_id:
+            startup_cache_key = _get_oauth_cache_key(oauth_config, None)
+            if not _oauth_token_cache.has(startup_cache_key):
+                disk_token = _disk_token_store.get(disk_key)
+                if disk_token:
+                    _oauth_token_cache.set(
+                        startup_cache_key,
+                        disk_token["access_token"],
+                        expires_in=int(disk_token.get("expires_at", time.time() + 300) - time.time()),
+                        refresh_token=disk_token.get("refresh_token"),
+                    )
+                    logging.warning(f"OAuth MCP server {self.name}: loaded token from disk store into cache")
+
+            if _oauth_token_cache.has(startup_cache_key):
+                try:
+                    tools_result = asyncio.run(self._get_server_tools())
+                    self.tools = [RemoteMCPTool.create(tool, self) for tool in tools_result.tools]
+                    if self.tools:
+                        logging.warning(f"OAuth MCP server {self.name}: loaded {len(self.tools)} tools using cached token")
+                        return (True, "")
+                except Exception as e:
+                    logging.warning(f"OAuth MCP server {self.name}: cached token failed, falling back to placeholder: {_extract_root_error_message(e)}")
 
         try:
             # Try the well-known endpoint first (no auth needed)
@@ -1089,6 +1347,12 @@ class RemoteMCPToolset(Toolset):
             if response.status_code not in (200, 401):
                 return (False, f"MCP server {self.name} returned HTTP {response.status_code}")
 
+            # Auto-discover OAuth endpoints if not configured
+            if not oauth_config.authorization_url or not oauth_config.token_url or not oauth_config.client_id:
+                discovered = self._discover_oauth_endpoints(url, response)
+                if not discovered:
+                    return (False, f"MCP server {self.name}: OAuth enabled but auto-discovery failed. Configure authorization_url, token_url, and client_id manually.")
+
         except Exception as e:
             return (False, f"MCP server {self.name} unreachable: {_extract_root_error_message(e)}")
 
@@ -1103,6 +1367,144 @@ class RemoteMCPToolset(Toolset):
         self.tools = [RemoteMCPTool.create(placeholder, self)]
         logging.info(f"OAuth MCP server {self.name} is reachable, registered placeholder tool (auth required)")
         return (True, "")
+
+    def _discover_oauth_endpoints(self, mcp_url: str, initial_response: httpx.Response) -> bool:
+        """Auto-discover OAuth endpoints following the MCP SDK's discovery flow.
+
+        Discovery order (matching mcp.client.auth):
+        1. Try Protected Resource Metadata (RFC 9728) — path-based, then root-based
+        2. If PRM found auth server → fetch its OIDC/OAuth metadata
+        3. If PRM not found → legacy fallback: /.well-known/oauth-authorization-server on MCP server
+        4. Dynamic Client Registration if no client_id configured
+
+        Returns True if discovery succeeded and oauth config is fully populated.
+        """
+        import re
+        from urllib.parse import urlparse
+
+        assert isinstance(self._mcp_config, MCPConfig) and self._mcp_config.oauth is not None
+        oauth_config = self._mcp_config.oauth
+        verify_ssl = self._mcp_config.verify_ssl
+        parsed = urlparse(mcp_url)
+        base_url = f"{parsed.scheme}://{parsed.netloc}"
+
+        # Step 1: Try to find auth server via Protected Resource Metadata (RFC 9728)
+        auth_server_url = None
+        prm_urls = []
+
+        # From WWW-Authenticate header
+        www_auth = initial_response.headers.get("www-authenticate", "")
+        rm_match = re.search(r'resource_metadata="([^"]+)"', www_auth)
+        if rm_match:
+            prm_urls.append(rm_match.group(1))
+
+        # Path-based well-known (e.g. /.well-known/oauth-protected-resource/v1/mcp)
+        if parsed.path and parsed.path != "/":
+            prm_urls.append(f"{base_url}/.well-known/oauth-protected-resource{parsed.path}")
+
+        # Root-based well-known
+        prm_urls.append(f"{base_url}/.well-known/oauth-protected-resource")
+
+        for prm_url in prm_urls:
+            try:
+                prm_response = httpx.get(prm_url, timeout=10, verify=verify_ssl)
+                if prm_response.status_code == 200:
+                    prm = prm_response.json()
+                    auth_servers = prm.get("authorization_servers", [])
+                    if auth_servers:
+                        auth_server_url = auth_servers[0].rstrip("/")
+                        if not oauth_config.scopes and prm.get("scopes_supported"):
+                            oauth_config.scopes = prm["scopes_supported"]
+                        logging.warning("OAuth discovery %s: found auth server from PRM %s: %s", self.name, prm_url, auth_server_url)
+                        break
+            except Exception:
+                continue
+
+        # Step 2: Fetch OAuth/OIDC metadata from auth server (or legacy fallback)
+        oidc_config = None
+
+        if auth_server_url:
+            # Auth server found via PRM — try its OIDC/OAuth metadata
+            auth_parsed = urlparse(auth_server_url)
+            auth_base = f"{auth_parsed.scheme}://{auth_parsed.netloc}"
+            discovery_urls = []
+            if auth_parsed.path and auth_parsed.path != "/":
+                discovery_urls.append(f"{auth_base}/.well-known/oauth-authorization-server{auth_parsed.path.rstrip('/')}")
+                discovery_urls.append(f"{auth_base}/.well-known/openid-configuration{auth_parsed.path.rstrip('/')}")
+            discovery_urls.append(f"{auth_base}/.well-known/oauth-authorization-server")
+            discovery_urls.append(f"{auth_base}/.well-known/openid-configuration")
+        else:
+            # Legacy fallback (MCP spec 2025-03-26): try on the MCP server itself
+            discovery_urls = [
+                f"{base_url}/.well-known/oauth-authorization-server",
+                f"{base_url}/.well-known/openid-configuration",
+            ]
+
+        for disc_url in discovery_urls:
+            try:
+                disc_response = httpx.get(disc_url, timeout=10, verify=verify_ssl)
+                if disc_response.status_code == 200:
+                    oidc_config = disc_response.json()
+                    logging.warning("OAuth discovery %s: fetched OAuth metadata from %s", self.name, disc_url)
+                    break
+            except Exception:
+                continue
+
+        if not oidc_config:
+            logging.warning("OAuth discovery %s: all OAuth metadata discovery attempts failed", self.name)
+            return False
+
+        if not oauth_config.authorization_url:
+            oauth_config.authorization_url = oidc_config.get("authorization_endpoint")
+        if not oauth_config.token_url:
+            oauth_config.token_url = oidc_config.get("token_endpoint")
+
+        if not oauth_config.authorization_url or not oauth_config.token_url:
+            logging.warning("OAuth discovery %s: missing authorization or token endpoint in OAuth metadata", self.name)
+            return False
+
+        # Save registration endpoint for potential CLI re-registration later
+        registration_endpoint = oidc_config.get("registration_endpoint")
+        if registration_endpoint:
+            oauth_config.registration_endpoint = registration_endpoint
+
+        # Step 3: Dynamic Client Registration if no client_id
+        if not oauth_config.client_id:
+            if not registration_endpoint:
+                logging.warning("OAuth discovery %s: no client_id and no DCR endpoint available", self.name)
+                return False
+
+            try:
+                dcr_response = httpx.post(
+                    registration_endpoint,
+                    json={
+                        "client_name": f"HolmesGPT ({self.name})",
+                        "redirect_uris": ["http://127.0.0.1:0/callback"],
+                        "grant_types": ["authorization_code", "refresh_token"],
+                        "response_types": ["code"],
+                        "token_endpoint_auth_method": "none",
+                    },
+                    timeout=15, verify=verify_ssl,
+                )
+                if dcr_response.status_code in (200, 201):
+                    dcr_data = dcr_response.json()
+                    oauth_config.client_id = dcr_data.get("client_id")
+                    logging.warning("OAuth discovery %s: dynamically registered client_id=%s", self.name, oauth_config.client_id)
+                else:
+                    logging.warning(
+                        "OAuth discovery %s: DCR failed HTTP %d: %s",
+                        self.name, dcr_response.status_code, dcr_response.text[:200],
+                    )
+                    return False
+            except Exception:
+                logging.warning("OAuth discovery %s: DCR request failed", self.name, exc_info=True)
+                return False
+
+        logging.warning(
+            "OAuth discovery %s complete: authorization_url=%s, token_url=%s, client_id=%s",
+            self.name, oauth_config.authorization_url, oauth_config.token_url, oauth_config.client_id,
+        )
+        return True
 
     async def _get_server_tools(self):
         async with get_initialized_mcp_session(self, None) as session:
