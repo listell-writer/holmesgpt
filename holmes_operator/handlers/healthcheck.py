@@ -1,5 +1,6 @@
 """Kopf handlers for HealthCheck CRD."""
 
+import asyncio
 import logging
 from typing import Any, Dict, Optional
 
@@ -299,4 +300,34 @@ async def on_healthcheck_update(
             generation=generation,
             logger=logger,
             body=body,
+        )
+
+        # Clear the rerun annotation so the user can set it again later
+        await _clear_rerun_annotation(name=name, namespace=namespace, logger=logger)
+
+
+async def _clear_rerun_annotation(
+    name: str, namespace: str, logger: kopf.Logger
+) -> None:
+    """Remove the holmesgpt.dev/rerun annotation after processing."""
+    try:
+        await asyncio.to_thread(
+            context.k8s_api.patch_namespaced_custom_object,
+            group="holmesgpt.dev",
+            version="v1alpha1",
+            namespace=namespace,
+            plural="healthchecks",
+            name=name,
+            body={
+                "metadata": {
+                    "annotations": {
+                        "holmesgpt.dev/rerun": None,  # null removes the key
+                    }
+                }
+            },
+        )
+        logger.info(f"Cleared rerun annotation on {namespace}/{name}")
+    except Exception as e:
+        logger.warning(
+            f"Failed to clear rerun annotation on {namespace}/{name}: {e}"
         )

@@ -395,11 +395,11 @@ class TestHealthCheckUpdate:
         assert mock_k8s_api.patch_namespaced_custom_object_status.call_count == 0
 
     @patch("holmes_operator.handlers.healthcheck.kopf.event")
-    async def test_rerun_annotation_triggers_execution(
+    async def test_rerun_annotation_triggers_execution_and_clears(
         self, mock_event, setup_context, mock_k8s_api, mock_logger, respx_mock
     ):
         """Test that holmesgpt.dev/rerun=true annotation triggers re-execution
-        even when generation matches."""
+        even when generation matches, and the annotation is cleared afterward."""
         respx_mock.post("http://mock-holmes-api:80/api/checks/execute").mock(
             return_value=Response(
                 200,
@@ -450,3 +450,10 @@ class TestHealthCheckUpdate:
 
         # Verify the check was executed
         assert mock_k8s_api.patch_namespaced_custom_object_status.call_count == 4
+
+        # Verify the rerun annotation was cleared via patch_namespaced_custom_object
+        mock_k8s_api.patch_namespaced_custom_object.assert_called_once()
+        patch_call = mock_k8s_api.patch_namespaced_custom_object.call_args
+        assert patch_call[1]["name"] == name
+        assert patch_call[1]["namespace"] == namespace
+        assert patch_call[1]["body"]["metadata"]["annotations"]["holmesgpt.dev/rerun"] is None
