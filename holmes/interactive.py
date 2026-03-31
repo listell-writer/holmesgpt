@@ -86,6 +86,16 @@ from holmes.utils.colors import (
     TOOLS_COLOR,
     USER_COLOR,
 )
+from holmes.core.model_picker import (
+    RecommendedModel,
+    check_model_prerequisites,
+    get_env_var_for_api_key,
+    get_model_completions,
+    get_model_provider,
+    get_recommended_models,
+    is_known_model,
+    save_model_to_config,
+)
 from holmes.toolset_config_tui import run_toolset_config_tui
 from holmes.utils.console.consts import agent_name
 from holmes.utils.file_utils import write_json_file
@@ -1141,6 +1151,7 @@ class SlashCommands(Enum):
     CONTEXT = ("/context", "Show conversation context size and token count")
     SHOW = ("/show", "Show specific tool output in scrollable view")
     FEEDBACK = ("/feedback", "Provide feedback on the agent's response")
+    MODEL = ("/model", "Change the LLM model")
 
     def __init__(self, command, description):
         self.command = command
@@ -1778,6 +1789,206 @@ def _run_inline_menu(
     return result[0]
 
 
+def _format_model_option(model: RecommendedModel) -> str:
+    """Format a recommended model for display in the picker menu."""
+    parts = [f"{model.model_name}"]
+    parts.append(f"  {model.provider_display}")
+    parts.append(f"  {model.context_display} ctx")
+    parts.append(f"  {model.cost_display}")
+    if not model.is_configured:
+        missing = ", ".join(model.missing_keys)
+        parts.append(f"  [needs {missing}]")
+    return "".join(parts)
+
+
+def _prompt_for_api_key(
+    model_name: str,
+    provider: str,
+    missing_keys: List[str],
+    style: Style,
+    console: Console,
+) -> Optional[str]:
+    """Prompt user for a missing API key. Returns the key or None if cancelled."""
+    env_var = get_env_var_for_api_key(provider)
+    if not env_var or env_var not in missing_keys:
+        # Multiple things missing (e.g. Azure needs base+key+version) — guide user
+        console.print(
+            f"\n[bold {STATUS_COLOR}]{model_name} requires: {', '.join(missing_keys)}[/bold {STATUS_COLOR}]"
+        )
+        console.print(
+            f"[dim]Set these as environment variables and try again.[/dim]"
+        )
+        return None
+
+    console.print(
+        f"\n[bold {STATUS_COLOR}]{model_name} requires {env_var}[/bold {STATUS_COLOR}]"
+    )
+    console.print(
+        f"[dim]Enter your API key below, or set {env_var} as an environment variable.[/dim]"
+    )
+
+    session = PromptSession()
+    try:
+        api_key = session.prompt(
+            [("class:prompt", f"{env_var}: ")],
+            style=style,
+            is_password=True,
+        )
+        if api_key and api_key.strip():
+            # Set it in the current process so litellm can find it
+            os.environ[env_var] = api_key.strip()
+            return api_key.strip()
+    except (KeyboardInterrupt, EOFError):
+        pass
+    return None
+
+
+def _prompt_for_custom_model(style: Style, console: Console) -> Optional[str]:
+    """Prompt user to type a model name with autocomplete from litellm catalog."""
+
+    class ModelCompleter(Completer):
+        def get_completions(self, document: Document, complete_event):
+            text = document.text_before_cursor
+            if not text:
+                return
+            matches = get_model_completions(text)
+            for m in matches:
+                yield Completion(m, start_position=-len(text))
+
+    console.print(
+        f"\n[dim]Type a model name (e.g. anthropic/claude-sonnet-4-5-20250929, gpt-4.1, ollama/llama3).[/dim]"
+    )
+    console.print(
+        f"[dim]Tab for autocomplete from {len(get_model_completions(''))} known models. Press Esc or Ctrl+C to cancel.[/dim]"
+    )
+
+    session = PromptSession(completer=ModelCompleter(), complete_style=CompleteStyle.COLUMN)
+    try:
+        model_name = session.prompt(
+            [("class:prompt", "Model: ")],
+            style=style,
+        )
+        if model_name and model_name.strip():
+            return model_name.strip()
+    except (KeyboardInterrupt, EOFError):
+        pass
+    return None
+
+
+def run_model_picker(
+    console: Console,
+    style: Style,
+    config: Optional[Config] = None,
+    config_file_path: Optional[Path] = None,
+    show_current: bool = True,
+) -> Optional[str]:
+    """Run the interactive model picker.
+
+    Returns the selected model name, or None if cancelled.
+    If a model is selected, it is saved to the config file.
+    """
+    if show_current and config and config.model:
+        source = ""
+        if config._model_source and config._model_source != "default":
+            source = f" (configured {config._model_source})"
+        elif config._model_source == "default":
+            source = " (default)"
+        console.print(
+            f"\n[bold {STATUS_COLOR}]Current model:[/bold {STATUS_COLOR}] {config.model}{source}"
+        )
+
+    recommended = get_recommended_models()
+
+    # Build menu options
+    options: List[str] = []
+    models_list: List[Optional[RecommendedModel]] = []
+    for m in recommended:
+        options.append(_format_model_option(m))
+        models_list.append(m)
+    options.append("Enter a model name manually...")
+    models_list.append(None)  # sentinel for custom entry
+
+    header = Text.from_markup(
+        f"\n[bold {HELP_COLOR}]Select a model:[/bold {HELP_COLOR}]"
+    )
+
+    idx = _run_inline_menu(options, console, header=header)
+    if idx is None:
+        console.print(f"[dim]Model selection cancelled.[/dim]")
+        return None
+
+    selected_model = models_list[idx]
+
+    if selected_model is None:
+        # Custom entry mode
+        model_name = _prompt_for_custom_model(style, console)
+        if not model_name:
+            console.print(f"[dim]Model selection cancelled.[/dim]")
+            return None
+
+        # Check if it's a known model
+        if not is_known_model(model_name):
+            console.print(
+                f"[bold {STATUS_COLOR}]Warning: '{model_name}' is not in litellm's model catalog. "
+                f"It may still work with a custom endpoint.[/bold {STATUS_COLOR}]"
+            )
+
+        # Check prerequisites
+        prereqs = check_model_prerequisites(model_name)
+        if not prereqs.get("keys_in_environment", False):
+            missing = prereqs.get("missing_keys", [])
+            provider = get_model_provider(model_name) or "unknown"
+            api_key = _prompt_for_api_key(model_name, provider, missing, style, console)
+            if api_key is None:
+                return None
+            # Save model + key
+            if config_file_path:
+                save_model_to_config(config_file_path, model_name, api_key)
+                console.print(
+                    f"[bold {STATUS_COLOR}]Model and API key saved to {config_file_path}[/bold {STATUS_COLOR}]"
+                )
+                console.print(
+                    f"[dim]Tip: You can also set the API key as an environment variable instead.[/dim]"
+                )
+            return model_name
+
+        # Model is configured, just save it
+        if config_file_path:
+            save_model_to_config(config_file_path, model_name)
+            console.print(
+                f"[bold {STATUS_COLOR}]Model saved to {config_file_path}[/bold {STATUS_COLOR}]"
+            )
+        return model_name
+
+    # Recommended model selected
+    model_name = selected_model.model_name
+
+    if not selected_model.is_configured:
+        api_key = _prompt_for_api_key(
+            model_name, selected_model.provider, selected_model.missing_keys, style, console
+        )
+        if api_key is None:
+            return None
+        if config_file_path:
+            save_model_to_config(config_file_path, model_name, api_key)
+            console.print(
+                f"[bold {STATUS_COLOR}]Model and API key saved to {config_file_path}[/bold {STATUS_COLOR}]"
+            )
+            console.print(
+                f"[dim]Tip: You can also set {get_env_var_for_api_key(selected_model.provider)} "
+                f"as an environment variable instead of storing it in the config.[/dim]"
+            )
+        return model_name
+
+    # Model is already configured
+    if config_file_path:
+        save_model_to_config(config_file_path, model_name)
+        console.print(
+            f"[bold {STATUS_COLOR}]Model saved to {config_file_path}[/bold {STATUS_COLOR}]"
+        )
+    return model_name
+
+
 def handle_tool_approval(
     pending_approval: PendingToolApproval,
     style: Style,
@@ -2373,6 +2584,49 @@ def run_interactive_loop(
         welcome_banner += f", [bold]{SlashCommands.FEEDBACK.command}[/bold] for feedback"
     console.print(welcome_banner)
 
+    # Show current model info, and offer picker on first run if using defaults
+    if config and config.model:
+        source_hint = ""
+        if config._model_source and config._model_source != "default":
+            source_hint = f" (configured {config._model_source})"
+        console.print(
+            f"[dim]Model: {config.model}{source_hint} — "
+            f"use [bold]{SlashCommands.MODEL.command}[/bold] to change[/dim]"
+        )
+    if (
+        config
+        and config_file_path
+        and (config._model_source == "default" or config.model is None)
+        and not initial_user_input
+    ):
+        # First run with default model — offer the picker
+        console.print(
+            f"\n[bold {STATUS_COLOR}]No model explicitly configured. "
+            f"Pick one now, or press Esc to continue with the default.[/bold {STATUS_COLOR}]"
+        )
+        selected = run_model_picker(
+            console,
+            style,
+            config=config,
+            config_file_path=config_file_path,
+            show_current=False,
+        )
+        if selected:
+            config.model = selected
+            config._model_source = "via /model"
+            try:
+                new_llm = config._get_llm(model_key=selected)
+                ai.llm = new_llm
+                context_size = config._format_token_count(new_llm.get_context_window_size())
+                console.print(
+                    f"[bold {STATUS_COLOR}]Using {selected} "
+                    f"({context_size} context)[/bold {STATUS_COLOR}]"
+                )
+            except Exception as e:
+                console.print(
+                    f"[bold {ERROR_COLOR}]Failed to load model {selected}: {e}[/bold {ERROR_COLOR}]"
+                )
+
     if initial_user_input:
         console.print(
             f"\n[bold {USER_COLOR}]User:[/bold {USER_COLOR}] {initial_user_input}"
@@ -2495,6 +2749,36 @@ def run_interactive_loop(
                     and feedback_callback is not None
                 ):
                     handle_feedback_command(style, console, feedback, feedback_callback)
+                    continue
+                elif command == SlashCommands.MODEL.command:
+                    selected = run_model_picker(
+                        console,
+                        style,
+                        config=config,
+                        config_file_path=config_file_path,
+                    )
+                    if selected and config:
+                        # Rebuild LLM with new model
+                        config.model = selected
+                        config._model_source = "via /model"
+                        try:
+                            new_llm = config._get_llm(model_key=selected)
+                            ai.llm = new_llm
+                            context_size = config._format_token_count(new_llm.get_context_window_size())
+                            console.print(
+                                f"[bold {STATUS_COLOR}]Switched to {selected} "
+                                f"({context_size} context)[/bold {STATUS_COLOR}]"
+                            )
+                            # Reset conversation since model changed
+                            messages = None
+                            last_response = None
+                            all_tool_calls_history.clear()
+                            show_completer.update_history([])
+                            ai.reset_interaction_state()
+                        except Exception as e:
+                            console.print(
+                                f"[bold {ERROR_COLOR}]Failed to load model {selected}: {e}[/bold {ERROR_COLOR}]"
+                            )
                     continue
                 else:
                     console.print(f"Unknown command: {command}")
