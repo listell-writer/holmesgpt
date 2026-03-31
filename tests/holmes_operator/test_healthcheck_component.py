@@ -78,7 +78,7 @@ def mock_logger():
     return logger
 
 
-def _make_body(name, namespace, uid, spec, generation=1):
+def _make_body(name, namespace, uid, spec, generation=1, annotations=None):
     """Helper to build a HealthCheck resource body with metadata.generation."""
     return {
         "apiVersion": "holmesgpt.dev/v1alpha1",
@@ -88,7 +88,7 @@ def _make_body(name, namespace, uid, spec, generation=1):
             "namespace": namespace,
             "uid": uid,
             "generation": generation,
-            "annotations": {},
+            "annotations": annotations or {},
         },
         "spec": spec,
         "status": {},
@@ -284,6 +284,85 @@ class TestHealthCheckCreate:
         assert status["phase"] == CheckPhase.FAILED.value
         assert status["result"] == CheckStatus.ERROR.value
         assert status["observedGeneration"] == 1
+
+
+    @patch("holmes_operator.handlers.healthcheck.kopf.event")
+    async def test_create_with_rerun_annotation_clears_it(
+        self, mock_event, setup_context, mock_k8s_api, mock_logger, respx_mock
+    ):
+        """Test that creating a HealthCheck with rerun=true clears the annotation
+        after execution, enabling the toggle pattern for Helm/ArgoCD."""
+        respx_mock.post("http://mock-holmes-api:80/api/checks/execute").mock(
+            return_value=Response(
+                200,
+                json={
+                    "status": "pass",
+                    "message": "All healthy",
+                    "duration": 1.0,
+                    "model_used": "gpt-4.1",
+                },
+            )
+        )
+
+        spec = {"query": "Is checkout-api healthy?", "timeout": 30, "mode": "monitor"}
+        name = "test-check-helm"
+        namespace = "default"
+        uid = "test-uid-helm"
+
+        await on_healthcheck_create(
+            spec=spec,
+            name=name,
+            namespace=namespace,
+            uid=uid,
+            logger=mock_logger,
+            body=_make_body(
+                name, namespace, uid, spec,
+                annotations={"holmesgpt.dev/rerun": "true"},
+            ),
+        )
+
+        # Verify the check ran (4 status updates)
+        assert mock_k8s_api.patch_namespaced_custom_object_status.call_count == 4
+
+        # Verify the rerun annotation was cleared
+        mock_k8s_api.patch_namespaced_custom_object.assert_called_once()
+        patch_call = mock_k8s_api.patch_namespaced_custom_object.call_args
+        assert patch_call[1]["body"]["metadata"]["annotations"]["holmesgpt.dev/rerun"] is None
+
+    @patch("holmes_operator.handlers.healthcheck.kopf.event")
+    async def test_create_without_rerun_annotation_does_not_clear(
+        self, mock_event, setup_context, mock_k8s_api, mock_logger, respx_mock
+    ):
+        """Test that creating without rerun annotation doesn't attempt to clear."""
+        respx_mock.post("http://mock-holmes-api:80/api/checks/execute").mock(
+            return_value=Response(
+                200,
+                json={
+                    "status": "pass",
+                    "message": "All healthy",
+                    "duration": 1.0,
+                    "model_used": "gpt-4.1",
+                },
+            )
+        )
+
+        spec = {"query": "Is checkout-api healthy?", "timeout": 30, "mode": "monitor"}
+        name = "test-check-no-ann"
+        namespace = "default"
+        uid = "test-uid-no-ann"
+
+        await on_healthcheck_create(
+            spec=spec,
+            name=name,
+            namespace=namespace,
+            uid=uid,
+            logger=mock_logger,
+            body=_make_body(name, namespace, uid, spec),
+        )
+
+        # Check ran but no annotation clearing happened
+        assert mock_k8s_api.patch_namespaced_custom_object_status.call_count == 4
+        mock_k8s_api.patch_namespaced_custom_object.assert_not_called()
 
 
 class TestHealthCheckUpdate:

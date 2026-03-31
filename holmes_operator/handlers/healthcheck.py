@@ -228,6 +228,7 @@ async def on_healthcheck_create(
     4. Call Holmes API via HTTP client
     5. Update status with result ("Completed" or "Failed")
     6. Set conditions and observedGeneration
+    7. Clear rerun annotation if present (so next apply can re-add it)
     """
     body = kwargs.get("body", {})
     generation = body.get("metadata", {}).get("generation")
@@ -241,6 +242,12 @@ async def on_healthcheck_create(
         logger=logger,
         body=body,
     )
+
+    # Clear rerun annotation if present, so that the next kubectl apply
+    # (which restores it from the manifest) triggers a re-run
+    annotations = body.get("metadata", {}).get("annotations", {})
+    if annotations.get("holmesgpt.dev/rerun") == "true":
+        await _clear_rerun_annotation(name=name, namespace=namespace, logger=logger)
 
 
 @kopf.on.update("holmesgpt.dev", "v1alpha1", "healthchecks")

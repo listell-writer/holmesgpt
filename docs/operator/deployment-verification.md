@@ -1,10 +1,19 @@
 # Deployment Verification
 
-A common pattern is deploying a HealthCheck alongside your application to verify the new version is working correctly. HealthChecks run automatically on creation, and **re-run automatically whenever you change the spec** (e.g., updating the query to reference a new image tag). This means you can include a HealthCheck in the same manifest as your deployment and it will re-execute on every `kubectl apply` that changes the spec.
+A common pattern is deploying a HealthCheck alongside your application to verify the new version is working correctly. By adding the `holmesgpt.dev/rerun: "true"` annotation to your HealthCheck manifest, the operator will **re-run the check on every deploy** — no manual intervention needed.
 
-## One-Time Verification with HealthCheck
+## How It Works
 
-Include a [HealthCheck](health-checks.md) in the same manifest as your deployment. Update the query to reference the new version — this bumps `metadata.generation` and triggers automatic re-execution.
+The `holmesgpt.dev/rerun` annotation creates an automatic toggle:
+
+1. Your manifest includes `holmesgpt.dev/rerun: "true"`
+2. On `kubectl apply`, the operator runs the check and **clears the annotation**
+3. On the next deploy, `kubectl apply` sees the annotation is missing (operator cleared it) but the manifest says it should be `"true"` → restores it → triggers re-run
+4. Repeat forever
+
+This means every `helm upgrade` or ArgoCD sync automatically triggers a fresh health check.
+
+## Example: HealthCheck Alongside a Deployment
 
 ```yaml
 # app-deployment.yaml
@@ -32,10 +41,12 @@ kind: HealthCheck
 metadata:
   name: checkout-api-deploy-check
   namespace: production
+  annotations:
+    holmesgpt.dev/rerun: "true"
   labels:
     app: checkout-api
 spec:
-  query: "We just rolled out checkout-api v2.4.1 to production. Compare logs, error rates, latency, and resource usage before and after the deploy. Flag anything that changed or looks off."
+  query: "We just rolled out a new version of checkout-api to production. Compare logs, error rates, latency, and resource usage before and after the deploy. Flag anything that changed or looks off."
   timeout: 120
   mode: alert
   destinations:
@@ -44,13 +55,52 @@ spec:
         channel: "#deploy-alerts"
 ```
 
-Apply both together:
-
 ```bash
 kubectl apply -f app-deployment.yaml
 ```
 
-On the first deploy, the HealthCheck is created and runs immediately. On subsequent deploys, update the query (e.g., change `v2.4.1` to `v2.4.2`) — the operator detects the spec change and re-runs the check automatically. If pods crash or fail readiness, the check fails and alerts your team.
+## Helm
+
+```yaml
+# templates/healthcheck.yaml
+apiVersion: holmesgpt.dev/v1alpha1
+kind: HealthCheck
+metadata:
+  name: {{ .Release.Name }}-deploy-check
+  annotations:
+    holmesgpt.dev/rerun: "true"
+spec:
+  query: "Is the {{ .Release.Name }} deployment fully rolled out and healthy? Check pod status, logs, and error rates."
+  timeout: 120
+  mode: alert
+  destinations:
+    - type: slack
+      config:
+        channel: "#deploy-alerts"
+```
+
+Every `helm upgrade` triggers a fresh check — no templating tricks needed.
+
+## ArgoCD
+
+Add the HealthCheck to your application manifests. Every sync triggers a re-run:
+
+```yaml
+apiVersion: holmesgpt.dev/v1alpha1
+kind: HealthCheck
+metadata:
+  name: checkout-api-deploy-check
+  annotations:
+    holmesgpt.dev/rerun: "true"
+spec:
+  query: "Is the checkout-api deployment fully rolled out and healthy? Check pod status, logs, and error rates."
+  timeout: 120
+  mode: alert
+  destinations:
+    - type: slack
+      config:
+        channel: "#deploy-alerts"
+```
 
 ## Gating CI/CD on the Result
 
@@ -78,11 +128,8 @@ exit 1
 
 One-time deploy checks catch immediate failures, but some problems only appear later — memory leaks, connection pool exhaustion, gradual performance degradation. [Scheduled Health Checks](scheduled-health-checks.md) run on a cron schedule to catch these regressions automatically.
 
-## Tips for Deployment HealthChecks
+## Tips
 
-- **Use a fixed name, update the query.** The operator re-runs the check whenever the spec changes, so you don't need a unique name per deploy. Just reference the new version in the query (e.g., `"...running image v2.4.2..."`) and `kubectl apply` will trigger re-execution automatically.
-- **For audit trails**, you can still use versioned names (e.g., `checkout-api-deploy-check`) so each deploy creates a distinct resource. This is optional — use it when you want historical results to persist side by side.
 - **Set a longer timeout** (60–120s) to give the rollout time to complete before Holmes evaluates.
-- **Use labels** like `deploy-version` to query checks for a specific release: `kubectl get hc -l deploy-version=v2.4.1`.
-- **Force re-run without spec changes:** If you need to re-run the exact same check, use `kubectl annotate hc/checkout-api-deploy-check holmesgpt.dev/rerun=true`. The annotation is cleared automatically after execution.
-- **Combine with ArgoCD**: If you use ArgoCD, the query can reference sync status — e.g., *"Is the ArgoCD application 'checkout-api' synced and healthy with no degraded resources?"* — since Holmes has access to the [ArgoCD toolset](../data-sources/builtin-toolsets/argocd.md).
+- **Use labels** to query checks for a specific app: `kubectl get hc -l app=checkout-api`.
+- **Combine with ArgoCD**: The query can reference sync status — e.g., *"Is the ArgoCD application 'checkout-api' synced and healthy with no degraded resources?"* — since Holmes has access to the [ArgoCD toolset](../data-sources/builtin-toolsets/argocd.md).
