@@ -450,8 +450,16 @@ def _cli_oauth_flow(oauth_config: MCPOAuthConfig, server_name: str) -> Optional[
     from http.server import BaseHTTPRequestHandler, HTTPServer
     from urllib.parse import parse_qs, urlencode, urlparse
 
-    if not oauth_config.authorization_url or not oauth_config.token_url or not oauth_config.client_id:
-        logger.warning("CLI OAuth %s: missing required OAuth endpoints", server_name)
+    if not oauth_config.authorization_url or not oauth_config.token_url:
+        logger.warning("CLI OAuth %s: missing authorization_url or token_url", server_name)
+        return None
+
+    # DCR if no client_id (e.g. Atlassian auto-discovery)
+    if not oauth_config.client_id and oauth_config.registration_endpoint:
+        logger.warning("CLI OAuth %s: no client_id, performing DCR at %s", server_name, oauth_config.registration_endpoint)
+        # We don't know the callback port yet — register with a placeholder, re-register after starting the server
+    elif not oauth_config.client_id:
+        logger.warning("CLI OAuth %s: no client_id and no registration_endpoint", server_name)
         return None
 
     # Generate PKCE
@@ -476,7 +484,7 @@ def _cli_oauth_flow(oauth_config: MCPOAuthConfig, server_name: str) -> Optional[
 
     redirect_uri = f"http://127.0.0.1:{callback_port}/callback"
 
-    # Re-register via DCR with the actual redirect_uri if we have a registration endpoint
+    # Register or re-register via DCR with the actual redirect_uri
     if oauth_config.registration_endpoint:
         try:
             dcr_response = httpx.post(
@@ -493,9 +501,19 @@ def _cli_oauth_flow(oauth_config: MCPOAuthConfig, server_name: str) -> Optional[
             if dcr_response.status_code in (200, 201):
                 dcr_data = dcr_response.json()
                 oauth_config.client_id = dcr_data.get("client_id", oauth_config.client_id)
-                logger.warning("CLI OAuth %s: re-registered client_id=%s with redirect_uri=%s", server_name, oauth_config.client_id, redirect_uri)
+                logger.warning("CLI OAuth %s: DCR registered client_id=%s with redirect_uri=%s", server_name, oauth_config.client_id, redirect_uri)
+            elif not oauth_config.client_id:
+                logger.warning("CLI OAuth %s: DCR failed HTTP %d and no client_id available", server_name, dcr_response.status_code)
+                return None
         except Exception:
+            if not oauth_config.client_id:
+                logger.warning("CLI OAuth %s: DCR failed and no client_id available", server_name, exc_info=True)
+                return None
             logger.warning("CLI OAuth %s: DCR re-registration failed, using existing client_id", server_name, exc_info=True)
+
+    if not oauth_config.client_id:
+        logger.warning("CLI OAuth %s: no client_id after DCR attempt", server_name)
+        return None
 
     # Build authorization URL
     auth_params = {
