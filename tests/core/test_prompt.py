@@ -1,0 +1,476 @@
+import re
+from pathlib import Path
+from types import SimpleNamespace
+from typing import Optional
+from unittest.mock import Mock
+
+import pytest
+from rich.console import Console
+
+from holmes.config import Config
+from holmes.core.conversations import (
+    build_chat_messages,
+)
+from holmes.core.prompt import (
+    PromptComponent,
+    append_all_files_to_user_prompt,
+    append_file_to_user_prompt,
+    build_initial_ask_messages,
+    generate_user_prompt,
+    get_tasks_management_system_reminder,
+    is_component_enabled,
+)
+from holmes.utils.global_instructions import generate_runbooks_args
+
+
+class DummyRunbookCatalog:
+    """Mock runbook catalog for testing."""
+
+    def to_prompt_string(self):
+        return "RUNBOOK CATALOG PROMPT"
+
+
+class DummyInstructions:
+    def __init__(self, instructions):
+        self.instructions = instructions
+
+
+@pytest.fixture
+def console():
+    return Console(force_terminal=False, force_jupyter=False)
+
+
+@pytest.fixture
+def mock_tool_executor():
+    tool_executor = Mock()
+    tool_executor.toolsets = []
+    return tool_executor
+
+
+@pytest.fixture
+def mock_config(tmp_path):
+    """Create a mock config for testing."""
+    config = Mock(spec=Config)
+    config.cluster_name = "test-cluster"
+    config.get_runbook_catalog = Mock(return_value=None)
+    return config
+
+
+@pytest.fixture
+def mock_ai(mock_tool_executor):
+    """Create a mock AI/LLM instance."""
+    ai = Mock()
+    ai.tool_executor = mock_tool_executor
+    ai.llm = Mock()
+    ai.llm.get_context_window_size = Mock(return_value=128000)
+    ai.llm.count_tokens = Mock(return_value=Mock(total_tokens=1000))
+    ai.llm.get_maximum_output_token = Mock(return_value=4096)
+    return ai
+
+
+def get_user_message_from_messages(messages: list, get_last: bool = False) -> str:
+    """Extract user message content from messages list.
+
+    Args:
+        messages: List of message dictionaries with 'role' and 'content' keys
+        get_last: If True, return the last user message (for conversation history).
+                  If False, assert exactly one user message exists.
+
+    Returns:
+        Content of the user message
+
+    Raises:
+        AssertionError: If no user message found, or if get_last=False and multiple user messages found
+    """
+    user_messages = [m for m in messages if m.get("role") == "user"]
+    assert len(user_messages) > 0, "No user messages found in messages list"
+
+    if get_last:
+        return user_messages[-1]["content"]
+    else:
+        assert (
+            len(user_messages) == 1
+        ), f"Expected exactly one user message, found {len(user_messages)}"
+        return user_messages[0]["content"]
+
+
+def create_test_files(file_paths: list, tmp_path: Path) -> Optional[list]:
+    """Create test files in temporary directory.
+
+    Args:
+        file_paths: List of file names to create
+        tmp_path: Temporary directory path
+
+    Returns:
+        List of Path objects for created files, or None if no files to create
+    """
+    if not file_paths:
+        return None
+
+    test_files = []
+    for file_name in file_paths:
+        test_file = tmp_path / file_name
+        test_file.write_text(f"Content of {file_name}")
+        test_files.append(test_file)
+    return test_files
+
+
+def extract_instructions(instructions_obj):
+    """Extract instruction list from DummyInstructions object or return None."""
+    return instructions_obj.instructions if instructions_obj else None
+
+
+def assert_user_prompt_contains_timestamp(user_prompt: str):
+    """Assert that user prompt contains the UTC timestamp in seconds."""
+    timestamp_pattern = r"The current UTC timestamp in seconds is (\d+)\."
+    match = re.search(timestamp_pattern, user_prompt)
+    assert match is not None, (
+        f"User prompt does not contain UTC timestamp in seconds. "
+        f"Expected pattern: 'The current UTC timestamp in seconds is <number>.'\n"
+        f"User prompt content:\n{user_prompt}"
+    )
+    timestamp_value = int(match.group(1))
+    assert (
+        946684800 <= timestamp_value <= 32503680000
+    ), f"Timestamp value {timestamp_value} is outside reasonable range"
+    return timestamp_value
+
+
+def validate_user_prompt(
+    user_content: str,
+    original_prompt: str,
+    expected_runbooks: bool = False,
+    expected_global_instructions: Optional[list] = None,
+    expected_issue_instructions: Optional[list] = None,
+    expected_resource_instructions: Optional[list] = None,
+):
+    """Validate user prompt contains expected components."""
+    assert (
+        original_prompt in user_content
+    ), f"Original prompt '{original_prompt}' not found in user content"
+    assert_user_prompt_contains_timestamp(user_content)
+
+    if expected_runbooks:
+        assert (
+            "RUNBOOK CATALOG PROMPT" in user_content
+        ), "Runbook catalog not found when expected"
+
+    if expected_global_instructions:
+        for instruction in expected_global_instructions:
+            assert (
+                instruction in user_content
+            ), f"Global instruction '{instruction}' not found"
+
+    if expected_issue_instructions:
+        for instruction in expected_issue_instructions:
+            assert (
+                f"* {instruction}" in user_content
+            ), f"Issue instruction '{instruction}' not found"
+
+    if expected_resource_instructions:
+        for instruction in expected_resource_instructions:
+            assert (
+                f"* {instruction}" in user_content
+            ), f"Resource instruction '{instruction}' not found"
+
+
+class TestBuildInitialAskMessages:
+    """Test user prompt validation for build_initial_ask_messages flows."""
+
+    @pytest.mark.parametrize(
+        "user_prompt,file_paths,runbooks",
+        [
+            ("What's wrong with my pod?", None, None),
+            ("Analyze this file", ["test.txt"], None),
+            ("What should I check?", None, DummyRunbookCatalog()),
+            ("Complex case", ["file.txt"], DummyRunbookCatalog()),
+        ],
+    )
+    def test_ask_command_user_prompt(
+        self,
+        mock_tool_executor,
+        tmp_path,
+        user_prompt,
+        file_paths,
+        runbooks,
+    ):
+        """Test user prompt in ask command flow with various configurations."""
+        test_files = create_test_files(file_paths, tmp_path)
+
+        messages = build_initial_ask_messages(
+            user_prompt,
+            test_files,
+            mock_tool_executor,
+            runbooks,
+            None,
+        )
+
+        assert len(messages) == 2
+        assert messages[0]["role"] == "system"
+
+        user_content = get_user_message_from_messages(messages)
+
+        validate_user_prompt(
+            user_content,
+            user_prompt,
+            expected_runbooks=runbooks is not None,
+        )
+
+        assert get_tasks_management_system_reminder() in user_content
+
+        if test_files:
+            for test_file in test_files:
+                assert test_file.read_text() in user_content
+                assert "<attached-file" in user_content
+
+    def test_build_initial_ask_messages_with_system_prompt_additions(
+        self, mock_tool_executor
+    ):
+        """Test message building with system prompt additions."""
+        system_additions = "Additional system instructions here."
+        messages = build_initial_ask_messages(
+            "Test prompt",
+            None,
+            mock_tool_executor,
+            None,
+            system_additions,
+        )
+
+        assert len(messages) == 2
+        assert messages[0]["role"] == "system"
+        assert "Additional" in messages[0]["content"]
+        assert messages[1]["role"] == "user"
+        user_content = messages[1]["content"]
+        assert "Test prompt" in user_content
+        assert get_tasks_management_system_reminder() in user_content
+        assert "The current UTC timestamp in seconds is" in user_content
+
+
+class TestServerFlows:
+    """Test user prompt validation for flows from server.py."""
+
+    @pytest.mark.parametrize(
+        "user_ask,global_instructions,runbooks,conversation_history",
+        [
+            ("Show me the logs", None, None, None),
+            ("What's happening?", DummyInstructions(["Always check CPU"]), None, None),
+            ("Help me debug", None, DummyRunbookCatalog(), None),
+            (
+                "Complex chat",
+                DummyInstructions(["Global rule"]),
+                DummyRunbookCatalog(),
+                None,
+            ),
+            (
+                "Follow up question",
+                None,
+                None,
+                [
+                    {"role": "system", "content": "You are a helpful assistant."},
+                    {"role": "user", "content": "What's the status?"},
+                    {"role": "assistant", "content": "Everything looks good."},
+                ],
+            ),
+            (
+                "Another question",
+                DummyInstructions(["Check logs"]),
+                DummyRunbookCatalog(),
+                [
+                    {"role": "system", "content": "System prompt"},
+                    {"role": "user", "content": "First question"},
+                    {"role": "assistant", "content": "Answer to first"},
+                ],
+            ),
+        ],
+    )
+    def test_chat_api_user_prompt(
+        self,
+        mock_ai,
+        mock_config,
+        user_ask,
+        global_instructions,
+        runbooks,
+        conversation_history,
+    ):
+        """Test user prompt in /api/chat flow with various configurations."""
+        messages = build_chat_messages(
+            ask=user_ask,
+            conversation_history=conversation_history,
+            ai=mock_ai,
+            config=mock_config,
+            global_instructions=global_instructions,
+            additional_system_prompt=None,
+            runbooks=runbooks,
+        )
+
+        user_content = get_user_message_from_messages(
+            messages, get_last=True if conversation_history else False
+        )
+
+        validate_user_prompt(
+            user_content,
+            user_ask,
+            expected_runbooks=runbooks is not None,
+            expected_global_instructions=extract_instructions(global_instructions),
+        )
+
+class TestUserPromptComponents:
+    """Test that user prompts include all expected components via generate_user_prompt."""
+
+    @pytest.mark.parametrize(
+        "user_prompt,runbook_catalog,global_instructions,issue_instructions,resource_instructions",
+        [
+            ("My question", None, None, None, None),
+            ("Help me", DummyRunbookCatalog(), None, None, None),
+            ("Question", None, DummyInstructions(["Global rule 1"]), None, None),
+            ("Investigate", None, None, ["Step 1"], None),
+            (
+                "Complex",
+                DummyRunbookCatalog(),
+                DummyInstructions(["Global"]),
+                ["Issue step"],
+                SimpleNamespace(instructions=["Resource step"], documents=[]),
+            ),
+        ],
+    )
+    def test_generate_user_prompt_components(
+        self,
+        user_prompt,
+        runbook_catalog,
+        global_instructions,
+        issue_instructions,
+        resource_instructions,
+    ):
+        """Test generate_user_prompt includes all components conditionally."""
+        ctx = generate_runbooks_args(
+            runbook_catalog=runbook_catalog,
+            global_instructions=global_instructions,
+            issue_instructions=issue_instructions,
+            resource_instructions=resource_instructions,
+        )
+
+        final_prompt = generate_user_prompt(user_prompt, ctx)
+
+        expected_resource_instructions = (
+            resource_instructions.instructions if resource_instructions else None
+        )
+
+        validate_user_prompt(
+            final_prompt,
+            user_prompt,
+            expected_runbooks=runbook_catalog is not None,
+            expected_global_instructions=extract_instructions(global_instructions),
+            expected_issue_instructions=issue_instructions,
+            expected_resource_instructions=expected_resource_instructions,
+        )
+
+
+def test_append_file_to_user_prompt(tmp_path):
+    """Test appending a single file to user prompt."""
+    test_file = tmp_path / "test.txt"
+    test_file.write_text("Test file content")
+
+    prompt = "Original prompt"
+    result = append_file_to_user_prompt(prompt, test_file)
+
+    assert "Original prompt" in result
+    assert "Test file content" in result
+    # Check for file attachment markers
+    assert "<attached-file" in result
+    assert "test.txt" in result
+    assert "</attached-file>" in result
+
+
+def test_append_all_files_to_user_prompt(tmp_path):
+    """Test appending multiple files to user prompt."""
+    # Create multiple test files
+    file1 = tmp_path / "file1.txt"
+    file1.write_text("Content 1")
+
+    file2 = tmp_path / "file2.txt"
+    file2.write_text("Content 2")
+
+    prompt = "Original prompt"
+    result = append_all_files_to_user_prompt(prompt, [file1, file2])
+
+    assert "Original prompt" in result
+    assert "Content 1" in result
+    assert "Content 2" in result
+    # Check for file attachment markers
+    assert "<attached-file" in result
+    assert "file1.txt" in result
+    assert "file2.txt" in result
+    assert result.count("</attached-file>") == 2
+
+
+def test_append_all_files_to_user_prompt_no_files():
+    """Test appending files when no files are provided."""
+    prompt = "Original prompt"
+    result = append_all_files_to_user_prompt(prompt, None)
+
+    assert result == "Original prompt"
+
+    # Also test with empty list
+    result = append_all_files_to_user_prompt(prompt, [])
+    assert result == "Original prompt"
+
+
+class TestIsComponentEnabled:
+    """Test is_component_enabled function with overrides."""
+
+    def test_no_overrides_returns_env_var_result(self, monkeypatch):
+        """Without overrides, should return is_prompt_allowed_by_env result."""
+        monkeypatch.delenv("ENABLED_PROMPTS", raising=False)
+        assert is_component_enabled(PromptComponent.TODOWRITE_INSTRUCTIONS) is True
+
+    def test_override_can_disable_component(self, monkeypatch):
+        """API override can disable a component that env var allows."""
+        monkeypatch.delenv("ENABLED_PROMPTS", raising=False)
+        overrides = {PromptComponent.TODOWRITE_INSTRUCTIONS: False}
+        assert (
+            is_component_enabled(PromptComponent.TODOWRITE_INSTRUCTIONS, overrides)
+            is False
+        )
+
+    def test_override_cannot_enable_env_disabled_component(self, monkeypatch):
+        """API override cannot enable a component that env var disabled."""
+        monkeypatch.setenv("ENABLED_PROMPTS", "none")
+        overrides = {PromptComponent.TODOWRITE_INSTRUCTIONS: True}
+        assert (
+            is_component_enabled(PromptComponent.TODOWRITE_INSTRUCTIONS, overrides)
+            is False
+        )
+
+    def test_override_true_keeps_enabled(self, monkeypatch):
+        """API override with True keeps component enabled."""
+        monkeypatch.delenv("ENABLED_PROMPTS", raising=False)
+        overrides = {PromptComponent.TODOWRITE_INSTRUCTIONS: True}
+        assert (
+            is_component_enabled(PromptComponent.TODOWRITE_INSTRUCTIONS, overrides)
+            is True
+        )
+
+    def test_env_var_selective_enable_with_override(self, monkeypatch):
+        """When env var selectively enables, override can still disable."""
+        monkeypatch.setenv("ENABLED_PROMPTS", "todowrite_instructions,intro")
+        assert is_component_enabled(PromptComponent.TODOWRITE_INSTRUCTIONS) is True
+
+        overrides = {PromptComponent.TODOWRITE_INSTRUCTIONS: False}
+        assert (
+            is_component_enabled(PromptComponent.TODOWRITE_INSTRUCTIONS, overrides)
+            is False
+        )
+
+        overrides = {PromptComponent.AI_SAFETY: True}
+        assert is_component_enabled(PromptComponent.AI_SAFETY, overrides) is False
+
+    def test_disabled_by_default_component(self, monkeypatch):
+        """Components in DISABLED_BY_DEFAULT are off without explicit override."""
+        monkeypatch.delenv("ENABLED_PROMPTS", raising=False)
+        assert is_component_enabled(PromptComponent.AI_SAFETY) is False
+
+    def test_disabled_by_default_can_be_enabled_via_override(self, monkeypatch):
+        """Components in DISABLED_BY_DEFAULT can be explicitly enabled."""
+        monkeypatch.delenv("ENABLED_PROMPTS", raising=False)
+        overrides = {PromptComponent.AI_SAFETY: True}
+        assert is_component_enabled(PromptComponent.AI_SAFETY, overrides) is True

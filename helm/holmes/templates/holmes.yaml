@@ -1,0 +1,155 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ .Release.Name }}-holmes
+  namespace: {{ .Release.Namespace }}
+  labels:
+    app: holmes
+spec:
+  {{- if (not .Values.autoscaling.enabled) }}
+  replicas: {{ .Values.replicas }}
+  {{- end }}
+  revisionHistoryLimit: {{ .Values.revisionHistoryLimit }}
+  selector:
+    matchLabels:
+      app: holmes
+  template:
+    metadata:
+      labels:
+        app: holmes
+      annotations:
+        # checksum annotation triggering pod reload when .Values.toolsets changes by helm upgrade
+        checksum/toolset-config: {{ list .Values.toolsets .Values.modelList .Values.mcp_servers | toYaml | sha256sum }}
+        {{- with .Values.podAnnotations }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+    spec:
+      serviceAccountName: {{ include "holmes.serviceAccountName" . }}
+      {{- if .Values.imagePullSecrets }}
+      imagePullSecrets:
+      {{- toYaml .Values.imagePullSecrets | nindent 6 }}
+      {{- end }}
+      {{- if .Values.nodeSelector }}
+      nodeSelector: {{ toYaml .Values.nodeSelector | nindent 8 }}
+      {{- end }}
+      {{- if .Values.affinity }}
+      affinity: {{ toYaml .Values.affinity | nindent 8 }}
+      {{- end }}
+      {{- if .Values.priorityClassName }}
+      priorityClassName: {{ .Values.priorityClassName }}
+      {{- end }}
+      {{- if .Values.initContainers }}
+      initContainers:
+      {{- toYaml .Values.initContainers | nindent 6 }}
+      {{- end }}
+      containers:
+      - name: holmes
+        image: "{{ .Values.registry }}/{{ .Values.image }}"
+        imagePullPolicy: {{ .Values.imagePullPolicy }}
+        # Read-only root filesystem for security hardening.
+        # /tmp is mounted as a writable emptyDir for ephemeral tool result files.
+        # Required for OpenShift restricted SCC and other security-hardened
+        # environments that enforce read-only root filesystems.
+        securityContext:
+          readOnlyRootFilesystem: true
+        command: ["python3", "-u", "server.py"]
+        {{- if .Values.args }}
+        args:
+        {{- toYaml .Values.args | nindent 8 }}
+        {{- end }}
+        ports:
+        - containerPort: 5050
+          name: http
+        livenessProbe:
+          httpGet:
+            path: /healthz
+            port: http
+          initialDelaySeconds: 30
+          periodSeconds: 10
+          timeoutSeconds: 5
+          failureThreshold: 10
+        readinessProbe:
+          httpGet:
+            path: /readyz
+            port: http
+          initialDelaySeconds: 15
+          periodSeconds: 5
+          timeoutSeconds: 3
+          failureThreshold: 3
+        env:
+          - name: LOG_LEVEL
+            value: {{ .Values.logLevel }}
+          - name: ENABLE_TELEMETRY
+            value: {{ include "holmes.enableTelemetry" . | quote }}
+          - name: SENTRY_DSN
+            value: {{ .Values.sentryDSN }}
+          {{ if .Values.certificate -}}
+          - name: CERTIFICATE
+            value: {{ .Values.certificate }}
+          {{- end }}
+          {{ if .Values.openshift }}
+          - name: IS_OPENSHIFT
+            value: "True"
+          {{- end }}
+          {{- if .Values.additionalEnvVars -}}
+          {{ toYaml .Values.additionalEnvVars | nindent 10 }}
+          {{- end }}
+          {{- if .Values.additional_env_vars -}}
+          {{ toYaml .Values.additional_env_vars | nindent 10 }}
+          {{- end }}
+        lifecycle:
+          preStop:
+            exec:
+              command: ["bash", "-c", "kill -SIGINT 1"]
+        volumeMounts:
+          - name: tmp-volume
+            mountPath: /tmp
+          - name: playbooks-config-secret
+            mountPath: /etc/robusta/config
+          - name: custom-toolsets-configmap
+            mountPath: /etc/holmes/config
+          {{- if .Values.additionalVolumeMounts -}}
+          {{ toYaml .Values.additionalVolumeMounts | nindent 10 }}
+          {{- end }}
+        resources:
+          requests:
+            cpu: {{ .Values.resources.requests.cpu }}
+            memory: {{ .Values.resources.requests.memory }}
+          limits:
+            memory: {{ .Values.resources.limits.memory }}
+            {{ if .Values.resources.limits.cpu }}cpu: {{ .Values.resources.limits.cpu | quote }}{{ end }}
+      {{- if .Values.tolerations }}
+      tolerations: {{ toYaml .Values.tolerations | nindent 8 }}
+      {{- end }}
+      volumes:
+        - name: tmp-volume
+          emptyDir:
+            sizeLimit: 256Mi
+        - name: playbooks-config-secret
+          secret:
+            secretName: robusta-playbooks-config-secret
+            optional: true
+        - name: custom-toolsets-configmap
+          configMap:
+            name: custom-toolsets-configmap
+            optional: true
+        {{- if .Values.additionalVolumes -}}
+        {{ toYaml .Values.additionalVolumes | nindent 8 }}
+        {{- end }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ .Release.Name }}-holmes
+  namespace: {{ .Release.Namespace }}
+  labels:
+    app: holmes
+spec:
+  selector:
+    app: holmes
+  ports:
+    - name: http
+      protocol: TCP
+      port: 80
+      targetPort: 5050
+      appProtocol: http

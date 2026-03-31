@@ -1,0 +1,261 @@
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: mcp-oauth-server-code
+  namespace: mcp-oauth-test
+data:
+  mcp_oauth_server.py: |
+    """
+    OAuth-protected MCP server using FastMCP with Keycloak token introspection.
+    """
+    import datetime
+    import logging
+    import os
+    from typing import Any
+    from urllib.parse import urljoin
+
+    import httpx
+    from pydantic import AnyHttpUrl
+
+    from mcp.server.auth.provider import AccessToken, TokenVerifier
+    from mcp.server.auth.settings import AuthSettings
+    from mcp.server.fastmcp.server import FastMCP
+    from mcp.shared.auth_utils import check_resource_allowed, resource_url_from_server_url
+
+    logger = logging.getLogger(__name__)
+
+    KEYCLOAK_URL = os.getenv("KEYCLOAK_URL", "http://keycloak:8080")
+    KEYCLOAK_PUBLIC_URL = os.getenv("KEYCLOAK_PUBLIC_URL", KEYCLOAK_URL)
+    KEYCLOAK_REALM = os.getenv("KEYCLOAK_REALM", "mcp-oauth")
+    MCP_CLIENT_ID = os.getenv("MCP_CLIENT_ID", "mcp-server")
+    MCP_CLIENT_SECRET = os.getenv("MCP_CLIENT_SECRET", "mcp-server-secret")
+    MCP_HOST = os.getenv("MCP_HOST", "0.0.0.0")
+    MCP_PORT = int(os.getenv("MCP_PORT", "8000"))
+    MCP_SERVER_URL = os.getenv("MCP_SERVER_URL", f"http://localhost:{MCP_PORT}")
+
+    AUTH_INTERNAL_URL = f"{KEYCLOAK_URL}/realms/{KEYCLOAK_REALM}/"
+    AUTH_PUBLIC_URL = f"{KEYCLOAK_PUBLIC_URL}/realms/{KEYCLOAK_REALM}/"
+    SERVER_URL = MCP_SERVER_URL
+
+
+    def create_oauth_urls() -> dict[str, str]:
+        return {
+            "issuer": AUTH_PUBLIC_URL,
+            "introspection_endpoint": urljoin(AUTH_INTERNAL_URL, "protocol/openid-connect/token/introspect"),
+            "authorization_endpoint": urljoin(AUTH_PUBLIC_URL, "protocol/openid-connect/auth"),
+            "token_endpoint": urljoin(AUTH_PUBLIC_URL, "protocol/openid-connect/token"),
+        }
+
+
+    class KeycloakTokenVerifier(TokenVerifier):
+        def __init__(self, introspection_endpoint, server_url, client_id, client_secret):
+            self.introspection_endpoint = introspection_endpoint
+            self.server_url = server_url
+            self.client_id = client_id
+            self.client_secret = client_secret
+            self.resource_url = resource_url_from_server_url(server_url)
+
+        async def verify_token(self, token: str) -> AccessToken | None:
+            timeout = httpx.Timeout(10.0, connect=5.0)
+            async with httpx.AsyncClient(timeout=timeout) as client:
+                try:
+                    response = await client.post(
+                        self.introspection_endpoint,
+                        data={
+                            "token": token,
+                            "client_id": self.client_id,
+                            "client_secret": self.client_secret,
+                        },
+                        headers={"Content-Type": "application/x-www-form-urlencoded"},
+                    )
+                    if response.status_code != 200:
+                        logger.error("Introspection HTTP %d", response.status_code)
+                        return None
+                    data = response.json()
+                    logger.info("Introspection result: active=%s aud=%s scope=%s resource_url=%s server_url=%s",
+                        data.get("active"), data.get("aud"), data.get("scope"), self.resource_url, self.server_url)
+                    if not data.get("active", False):
+                        logger.error("Token inactive")
+                        return None
+                    aud = data.get("aud")
+                    if aud is None:
+                        logger.error("No aud in token")
+                        return None
+                    audiences = aud if isinstance(aud, list) else [aud]
+                    for a in audiences:
+                        r = check_resource_allowed(self.resource_url, a)
+                        logger.info("check_resource_allowed(%s, %s) = %s", self.resource_url, a, r)
+                    if not any(check_resource_allowed(self.resource_url, a) for a in audiences):
+                        logger.error("Audience mismatch: expected=%s got=%s", self.resource_url, audiences)
+                        return None
+                    access_token = AccessToken(
+                        token=token,
+                        client_id=data.get("client_id", "unknown"),
+                        scopes=data.get("scope", "").split() if data.get("scope") else [],
+                        expires_at=data.get("exp"),
+                        resource=data.get("aud"),
+                    )
+                    logger.info("Token verified OK: client=%s scopes=%s", access_token.client_id, access_token.scopes)
+                    return access_token
+                except Exception:
+                    logger.exception("Token introspection failed")
+                    return None
+
+
+    def create_server() -> FastMCP:
+        oauth_urls = create_oauth_urls()
+        token_verifier = KeycloakTokenVerifier(
+            introspection_endpoint=oauth_urls["introspection_endpoint"],
+            server_url=SERVER_URL,
+            client_id=MCP_CLIENT_ID,
+            client_secret=MCP_CLIENT_SECRET,
+        )
+        app = FastMCP(
+            name="MCP OAuth Demo Server",
+            instructions="OAuth-protected MCP server with Keycloak authorization",
+            host=MCP_HOST,
+            port=MCP_PORT,
+            debug=True,
+            streamable_http_path="/",
+            token_verifier=token_verifier,
+            auth=AuthSettings(
+                issuer_url=AnyHttpUrl(oauth_urls["issuer"]),
+                required_scopes=["mcp:tools"],
+                resource_server_url=AnyHttpUrl(SERVER_URL),
+            ),
+        )
+
+        @app.tool()
+        async def add_numbers(a: float, b: float) -> dict[str, Any]:
+            """Add two numbers together."""
+            return {
+                "operation": "addition",
+                "a": a, "b": b,
+                "result": a + b,
+                "timestamp": datetime.datetime.now(datetime.timezone.utc).isoformat(),
+            }
+
+        @app.tool()
+        async def multiply_numbers(x: float, y: float) -> dict[str, Any]:
+            """Multiply two numbers together."""
+            return {
+                "operation": "multiplication",
+                "x": x, "y": y,
+                "result": x * y,
+                "timestamp": datetime.datetime.now(datetime.timezone.utc).isoformat(),
+            }
+
+        return app
+
+
+    if __name__ == "__main__":
+        logging.basicConfig(level=logging.INFO, format="%(asctime)s %(name)s %(levelname)s %(message)s")
+        logger.info("Starting MCP OAuth Server on %s:%s", MCP_HOST, MCP_PORT)
+        server = create_server()
+        server.run(transport="streamable-http")
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: mcp-oauth-server
+  namespace: mcp-oauth-test
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: mcp-oauth-server
+  template:
+    metadata:
+      labels:
+        app: mcp-oauth-server
+    spec:
+      initContainers:
+        - name: install-deps
+          image: python:3.12-slim
+          command:
+            - sh
+            - -c
+            - pip install --target=/app/deps "mcp[cli]>=1.25.0" httpx uvicorn pydantic
+          volumeMounts:
+            - name: python-deps
+              mountPath: /app/deps
+          resources:
+            requests:
+              memory: "128Mi"
+              cpu: "100m"
+            limits:
+              memory: "512Mi"
+              cpu: "500m"
+      containers:
+        - name: mcp-server
+          image: python:3.12-slim
+          command:
+            - python
+            - /app/server/mcp_oauth_server.py
+          env:
+            - name: PYTHONPATH
+              value: "/app/deps"
+            - name: KEYCLOAK_URL
+              value: "http://keycloak.mcp-oauth-test.svc.cluster.local:8080"
+            - name: KEYCLOAK_PUBLIC_URL
+              value: "http://localhost:18080"
+            - name: KEYCLOAK_REALM
+              value: "mcp-oauth"
+            - name: MCP_CLIENT_ID
+              value: "mcp-server"
+            - name: MCP_CLIENT_SECRET
+              value: "mcp-server-secret"
+            - name: MCP_HOST
+              value: "0.0.0.0"
+            - name: MCP_PORT
+              value: "8000"
+            - name: MCP_SERVER_URL
+              value: "http://localhost:18000"
+          ports:
+            - containerPort: 8000
+              name: http
+          volumeMounts:
+            - name: server-code
+              mountPath: /app/server
+            - name: python-deps
+              mountPath: /app/deps
+          resources:
+            requests:
+              memory: "64Mi"
+              cpu: "50m"
+            limits:
+              memory: "256Mi"
+              cpu: "250m"
+          readinessProbe:
+            tcpSocket:
+              port: http
+            initialDelaySeconds: 5
+            periodSeconds: 5
+            failureThreshold: 12
+          livenessProbe:
+            tcpSocket:
+              port: http
+            initialDelaySeconds: 10
+            periodSeconds: 15
+            failureThreshold: 6
+      volumes:
+        - name: server-code
+          configMap:
+            name: mcp-oauth-server-code
+        - name: python-deps
+          emptyDir: {}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: mcp-oauth-server
+  namespace: mcp-oauth-test
+spec:
+  selector:
+    app: mcp-oauth-server
+  ports:
+    - port: 8000
+      targetPort: http
+      name: http
+  type: ClusterIP
