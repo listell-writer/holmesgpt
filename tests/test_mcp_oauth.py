@@ -90,9 +90,17 @@ class TestOAuthKeyExchange:
         assert pem.startswith("-----BEGIN PUBLIC KEY-----")
         assert pem.strip().endswith("-----END PUBLIC KEY-----")
 
-    def test_different_instances_have_different_keys(self):
-        kx1 = OAuthKeyExchange()
-        kx2 = OAuthKeyExchange()
+    def test_cli_instances_share_persisted_key(self, tmp_path):
+        """CLI mode: two instances with the same store dir produce the same key (persisted)."""
+        key_dir = str(tmp_path / "cli_keys")
+        kx1 = OAuthKeyExchange(key_store_dir=key_dir)
+        kx2 = OAuthKeyExchange(key_store_dir=key_dir)
+        assert kx1.get_public_key_pem() == kx2.get_public_key_pem(), "CLI instances should share persisted key"
+
+    def test_different_store_dirs_have_different_keys(self, tmp_path):
+        """Different store dirs produce different keys (no sharing)."""
+        kx1 = OAuthKeyExchange(key_store_dir=str(tmp_path / "a"))
+        kx2 = OAuthKeyExchange(key_store_dir=str(tmp_path / "b"))
         assert kx1.get_public_key_pem() != kx2.get_public_key_pem()
 
     def test_same_signing_key_produces_same_keypair(self, tmp_path):

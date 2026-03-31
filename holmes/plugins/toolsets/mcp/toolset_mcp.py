@@ -159,11 +159,11 @@ class OAuthKeyExchange:
 
     def __init__(self, signing_key: Optional[str] = None, key_store_dir: Optional[str] = None) -> None:
         if signing_key:
-            # Try to load a persisted keypair encrypted with the signing_key.
-            # If none exists, generate one and persist it.
+            # Server mode: persist encrypted with signing_key
             self._private_key = self._load_or_generate_persistent_key(signing_key, key_store_dir)
         else:
-            self._private_key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
+            # CLI mode: persist unencrypted in ~/.holmes/auth/
+            self._private_key = self._load_or_generate_cli_key(key_store_dir)
 
     @staticmethod
     def _load_or_generate_persistent_key(signing_key: str, key_store_dir: Optional[str] = None) -> Any:
@@ -209,6 +209,64 @@ class OAuthKeyExchange:
             logger.warning("OAuth: generated and persisted new keypair at %s", key_path)
         except Exception:
             logger.warning("OAuth: could not persist keypair (read-only filesystem?), will regenerate on restart", exc_info=True)
+
+        return private_key
+
+    @staticmethod
+    def _load_or_generate_cli_key(key_store_dir: Optional[str] = None) -> Any:
+        """Load or generate a persisted RSA key for CLI mode.
+
+        Encrypted at rest using a passphrase derived from machine identity
+        (hostname + username). File permissions set to 600 (owner-only).
+        Stored in ~/.holmes/auth/ by default.
+        """
+        import getpass
+        import platform
+        import stat
+        from cryptography.hazmat.primitives.kdf.hkdf import HKDF
+        from cryptography.fernet import Fernet
+        from pathlib import Path
+
+        # Derive encryption key from machine identity (not secret, but prevents casual file copying)
+        machine_id = f"{platform.node()}:{getpass.getuser()}:holmesgpt-oauth"
+        fernet_key = base64.urlsafe_b64encode(
+            HKDF(algorithm=hashes.SHA256(), length=32, salt=b"holmesgpt-cli-keypair", info=b"cli-key-encryption")
+            .derive(machine_id.encode())
+        )
+        fernet = Fernet(fernet_key)
+
+        if key_store_dir:
+            key_path = Path(key_store_dir) / "oauth_keypair.enc"
+        else:
+            from holmes.core.config import config_path_dir
+            key_path = Path(config_path_dir) / "auth" / "oauth_keypair.enc"
+
+        # Try to load existing key
+        if key_path.exists():
+            try:
+                encrypted_pem = key_path.read_bytes()
+                pem_bytes = fernet.decrypt(encrypted_pem)
+                logger.warning("OAuth: loaded persisted CLI keypair from %s", key_path)
+                return serialization.load_pem_private_key(pem_bytes, password=None)
+            except Exception:
+                logger.warning("OAuth: failed to load persisted CLI keypair, generating new one")
+
+        # Generate new keypair
+        private_key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
+
+        # Persist encrypted with restricted permissions
+        try:
+            pem_bytes = private_key.private_bytes(
+                serialization.Encoding.PEM,
+                serialization.PrivateFormat.PKCS8,
+                serialization.NoEncryption(),
+            )
+            key_path.parent.mkdir(parents=True, exist_ok=True)
+            key_path.write_bytes(fernet.encrypt(pem_bytes))
+            key_path.chmod(stat.S_IRUSR | stat.S_IWUSR)  # 600 — owner read/write only
+            logger.warning("OAuth: generated and persisted CLI keypair at %s (mode 600)", key_path)
+        except Exception:
+            logger.warning("OAuth: could not persist CLI keypair, will regenerate on restart", exc_info=True)
 
         return private_key
 
