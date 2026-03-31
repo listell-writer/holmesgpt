@@ -18,6 +18,7 @@ from holmes.plugins.toolsets.mcp.toolset_mcp import (
     OAuthTokenCache,
     RemoteMCPTool,
     RemoteMCPToolset,
+    _cli_oauth_flow,
     _generate_pkce,
     _get_conversation_key,
     _get_oauth_cache_key,
@@ -691,3 +692,227 @@ class TestLiveAtlassianOAuthDiscovery:
             print(f"    - {t.name}: {t.description[:80] if t.description else 'no description'}")
 
         assert len(tools_result.tools) > 0, "Expected at least one tool from Atlassian MCP server"
+
+
+class TestCLIOAuthFlow:
+    """Tests for the CLI OAuth browser flow with mocked browser/server/network."""
+
+    def _make_oauth_config(self, **overrides):
+        defaults = dict(
+            enabled=True,
+            authorization_url="http://idp.test/authorize",
+            token_url="http://idp.test/token",
+            client_id="test-client",
+            scopes=["mcp:tools"],
+        )
+        defaults.update(overrides)
+        return MCPOAuthConfig(**defaults)
+
+    def test_cli_flow_full_roundtrip(self):
+        """Mock browser + callback: DCR → auth URL → callback with code → token exchange."""
+        import threading
+        from http.server import HTTPServer, BaseHTTPRequestHandler
+        from urllib.parse import urlparse, parse_qs
+
+        oauth = self._make_oauth_config()
+
+        # Mock httpx.post for the token exchange
+        mock_token_response = MagicMock()
+        mock_token_response.status_code = 200
+        mock_token_response.json.return_value = {
+            "access_token": "cli-test-token-abc",
+            "token_type": "Bearer",
+            "expires_in": 3600,
+            "refresh_token": "cli-refresh-xyz",
+        }
+
+        def mock_post(url, **kwargs):
+            if "token" in url:
+                return mock_token_response
+            # DCR
+            dcr_resp = MagicMock()
+            dcr_resp.status_code = 201
+            dcr_resp.json.return_value = {"client_id": "dcr-client-123"}
+            return dcr_resp
+
+        # Mock webbrowser.open to simulate the callback instead
+        def mock_browser_open(auth_url):
+            """Parse the auth URL, extract state, and POST back to the callback server."""
+            parsed = urlparse(auth_url)
+            params = parse_qs(parsed.query)
+            state = params["state"][0]
+            redirect_uri = params["redirect_uri"][0]
+            redirect_parsed = urlparse(redirect_uri)
+            port = redirect_parsed.port
+
+            # Simulate IdP redirecting back with an auth code
+            def send_callback():
+                import time as _time
+                _time.sleep(0.3)  # Give server time to start
+                import urllib.request
+                callback_url = f"http://127.0.0.1:{port}/callback?code=mock-auth-code-999&state={state}"
+                try:
+                    urllib.request.urlopen(callback_url, timeout=5)
+                except Exception:
+                    pass  # Response doesn't matter
+
+            threading.Thread(target=send_callback, daemon=True).start()
+
+        with patch("holmes.plugins.toolsets.mcp.toolset_mcp.httpx.post", side_effect=mock_post), \
+             patch("webbrowser.open", side_effect=mock_browser_open):
+            result = _cli_oauth_flow(oauth, "test-server")
+
+        assert result is not None, "CLI flow should return token data"
+        assert result["access_token"] == "cli-test-token-abc"
+        assert result["refresh_token"] == "cli-refresh-xyz"
+        assert result["expires_in"] == 3600
+        assert "expires_at" in result, "Should add expires_at for disk storage"
+
+    def test_cli_flow_with_dcr(self):
+        """CLI flow performs DCR when client_id is None."""
+        import threading
+        from urllib.parse import urlparse, parse_qs
+
+        oauth = self._make_oauth_config(client_id=None, registration_endpoint="http://idp.test/register")
+
+        def mock_post(url, **kwargs):
+            if "register" in url:
+                resp = MagicMock()
+                resp.status_code = 201
+                resp.json.return_value = {"client_id": "dcr-new-client"}
+                return resp
+            if "token" in url:
+                resp = MagicMock()
+                resp.status_code = 200
+                resp.json.return_value = {"access_token": "dcr-token", "expires_in": 300}
+                return resp
+            raise ValueError(f"Unexpected URL: {url}")
+
+        def mock_browser_open(auth_url):
+            parsed = urlparse(auth_url)
+            params = parse_qs(parsed.query)
+            state = params["state"][0]
+            redirect_uri = params["redirect_uri"][0]
+            port = urlparse(redirect_uri).port
+
+            def send_callback():
+                import time as _time
+                _time.sleep(0.3)
+                import urllib.request
+                try:
+                    urllib.request.urlopen(f"http://127.0.0.1:{port}/callback?code=dcr-code&state={state}", timeout=5)
+                except Exception:
+                    pass
+
+            threading.Thread(target=send_callback, daemon=True).start()
+
+        with patch("holmes.plugins.toolsets.mcp.toolset_mcp.httpx.post", side_effect=mock_post), \
+             patch("webbrowser.open", side_effect=mock_browser_open):
+            result = _cli_oauth_flow(oauth, "dcr-test")
+
+        assert result is not None
+        assert result["access_token"] == "dcr-token"
+        assert oauth.client_id == "dcr-new-client", "DCR should set client_id on the config"
+
+    def test_cli_flow_dcr_cache_key_consistency(self):
+        """After DCR changes client_id, cache key should use the new client_id."""
+        import threading
+        from urllib.parse import urlparse, parse_qs
+
+        oauth = self._make_oauth_config(client_id=None, registration_endpoint="http://idp.test/register")
+        ctx = {"headers": {"X-Conversation-Id": "cli-conv"}}
+
+        # Cache key before DCR (client_id=None)
+        key_before = _get_oauth_cache_key(oauth, ctx)
+
+        def mock_post(url, **kwargs):
+            if "register" in url:
+                resp = MagicMock()
+                resp.status_code = 201
+                resp.json.return_value = {"client_id": "new-dcr-id"}
+                return resp
+            resp = MagicMock()
+            resp.status_code = 200
+            resp.json.return_value = {"access_token": "tok", "expires_in": 300}
+            return resp
+
+        def mock_browser_open(auth_url):
+            parsed = urlparse(auth_url)
+            params = parse_qs(parsed.query)
+            state = params["state"][0]
+            port = urlparse(params["redirect_uri"][0]).port
+
+            def send_callback():
+                import time as _time
+                _time.sleep(0.3)
+                import urllib.request
+                try:
+                    urllib.request.urlopen(f"http://127.0.0.1:{port}/callback?code=c&state={state}", timeout=5)
+                except Exception:
+                    pass
+
+            threading.Thread(target=send_callback, daemon=True).start()
+
+        with patch("holmes.plugins.toolsets.mcp.toolset_mcp.httpx.post", side_effect=mock_post), \
+             patch("webbrowser.open", side_effect=mock_browser_open):
+            _cli_oauth_flow(oauth, "key-test")
+
+        # Cache key after DCR (client_id="new-dcr-id")
+        key_after = _get_oauth_cache_key(oauth, ctx)
+
+        assert key_before != key_after, "Cache key should change after DCR sets client_id"
+        assert oauth.client_id == "new-dcr-id"
+
+    def test_cli_flow_fails_without_endpoints(self):
+        """CLI flow returns None when authorization_url or token_url is missing."""
+        oauth = MCPOAuthConfig(enabled=True, authorization_url=None, token_url=None, client_id="x")
+        result = _cli_oauth_flow(oauth, "no-endpoints")
+        assert result is None
+
+    def test_cli_flow_fails_without_client_id_and_no_dcr(self):
+        """CLI flow returns None when client_id is None and no registration_endpoint."""
+        oauth = MCPOAuthConfig(
+            enabled=True,
+            authorization_url="http://idp/auth",
+            token_url="http://idp/token",
+            client_id=None,
+            registration_endpoint=None,
+        )
+        result = _cli_oauth_flow(oauth, "no-dcr")
+        assert result is None
+
+    def test_cli_flow_token_exchange_failure(self):
+        """CLI flow returns None when token exchange fails."""
+        import threading
+        from urllib.parse import urlparse, parse_qs
+
+        oauth = self._make_oauth_config()
+
+        def mock_post(url, **kwargs):
+            resp = MagicMock()
+            resp.status_code = 401
+            resp.text = "invalid_grant"
+            return resp
+
+        def mock_browser_open(auth_url):
+            parsed = urlparse(auth_url)
+            params = parse_qs(parsed.query)
+            state = params["state"][0]
+            port = urlparse(params["redirect_uri"][0]).port
+
+            def send_callback():
+                import time as _time
+                _time.sleep(0.3)
+                import urllib.request
+                try:
+                    urllib.request.urlopen(f"http://127.0.0.1:{port}/callback?code=bad&state={state}", timeout=5)
+                except Exception:
+                    pass
+
+            threading.Thread(target=send_callback, daemon=True).start()
+
+        with patch("holmes.plugins.toolsets.mcp.toolset_mcp.httpx.post", side_effect=mock_post), \
+             patch("webbrowser.open", side_effect=mock_browser_open):
+            result = _cli_oauth_flow(oauth, "fail-test")
+
+        assert result is None
