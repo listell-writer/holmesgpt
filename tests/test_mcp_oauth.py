@@ -506,7 +506,8 @@ class TestLiveAtlassianOAuthDiscovery:
         oauth = toolset._mcp_config.oauth
         assert oauth.authorization_url is not None, "authorization_url should be discovered"
         assert oauth.token_url is not None, "token_url should be discovered"
-        assert oauth.client_id is not None, "client_id should be auto-registered via DCR"
+        assert oauth.registration_endpoint is not None, "registration_endpoint should be discovered for deferred DCR"
+        # client_id is None because DCR is deferred to runtime (CLI or frontend handles it)
         assert "atlassian" in oauth.authorization_url.lower() or "mcp" in oauth.authorization_url.lower(), f"Unexpected authorization_url: {oauth.authorization_url}"
 
     def test_full_oauth_flow_with_browser(self):
