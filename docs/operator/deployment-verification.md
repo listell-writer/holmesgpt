@@ -35,7 +35,7 @@ metadata:
   labels:
     app: checkout-api
 spec:
-  query: "Is the checkout-api deployment in 'production' fully rolled out with all replicas ready and not crash-looping? Check that pods are running image v2.4.1 and responding without errors."
+  query: "We just rolled out checkout-api v2.4.1 to production. Compare logs, error rates, latency, and resource usage before and after the deploy. Flag anything that changed or looks off."
   timeout: 120
   mode: alert
   destinations:
@@ -59,13 +59,13 @@ After applying, poll for the result to gate your pipeline:
 ```bash
 # Wait for the check to complete, then read the result
 for i in $(seq 1 30); do
-  RESULT=$(kubectl get hc checkout-api-deploy-v2-4-1 -n production -o jsonpath='{.status.result}' 2>/dev/null)
+  RESULT=$(kubectl get hc checkout-api-deploy-check -n production -o jsonpath='{.status.result}' 2>/dev/null)
   if [ "$RESULT" = "pass" ]; then
     echo "Deploy verified healthy"
     exit 0
   elif [ "$RESULT" = "fail" ] || [ "$RESULT" = "error" ]; then
     echo "Deploy check failed:"
-    kubectl get hc checkout-api-deploy-v2-4-1 -n production -o jsonpath='{.status.message}'
+    kubectl get hc checkout-api-deploy-check -n production -o jsonpath='{.status.message}'
     exit 1
   fi
   sleep 10
@@ -81,7 +81,7 @@ One-time deploy checks catch immediate failures, but some problems only appear l
 ## Tips for Deployment HealthChecks
 
 - **Use a fixed name, update the query.** The operator re-runs the check whenever the spec changes, so you don't need a unique name per deploy. Just reference the new version in the query (e.g., `"...running image v2.4.2..."`) and `kubectl apply` will trigger re-execution automatically.
-- **For audit trails**, you can still use versioned names (e.g., `checkout-api-deploy-v2-4-1`) so each deploy creates a distinct resource. This is optional — use it when you want historical results to persist side by side.
+- **For audit trails**, you can still use versioned names (e.g., `checkout-api-deploy-check`) so each deploy creates a distinct resource. This is optional — use it when you want historical results to persist side by side.
 - **Set a longer timeout** (60–120s) to give the rollout time to complete before Holmes evaluates.
 - **Use labels** like `deploy-version` to query checks for a specific release: `kubectl get hc -l deploy-version=v2.4.1`.
 - **Force re-run without spec changes:** If you need to re-run the exact same check, use `kubectl annotate hc/checkout-api-deploy-check holmesgpt.dev/rerun=true`. The annotation is cleared automatically after execution.
