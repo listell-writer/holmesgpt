@@ -194,7 +194,7 @@ The following example shows how ServiceNow Tables, one toolset that supports hea
 
     ```yaml
     toolsets:
-      servicenow/tables:
+      servicenow:
         config:
           extra_headers:
             X-Correlation-Id: "{{ request_context.headers['X-Correlation-Id'] }}"
@@ -215,7 +215,7 @@ The following example shows how ServiceNow Tables, one toolset that supports hea
             key: api-key
 
     toolsets:
-      servicenow/tables:
+      servicenow:
         config:
           extra_headers:
             X-Correlation-Id: "{{ request_context.headers['X-Correlation-Id'] }}"
@@ -237,7 +237,7 @@ The following example shows how ServiceNow Tables, one toolset that supports hea
               key: api-key
 
       toolsets:
-        servicenow/tables:
+        servicenow:
           config:
             extra_headers:
               X-Correlation-Id: "{{ request_context.headers['X-Correlation-Id'] }}"
@@ -245,7 +245,7 @@ The following example shows how ServiceNow Tables, one toolset that supports hea
             api_url: "https://instance.service-now.com"
     ```
 
-For a reference implementation showing how to add `extra_headers` support to a Python toolset, see [`servicenow_tables.py`](https://github.com/HolmesGPT/holmesgpt/blob/master/holmes/plugins/toolsets/servicenow_tables/servicenow_tables.py).
+For a reference implementation showing how to add `extra_headers` support to a Python toolset, see [`servicenow.py`](https://github.com/HolmesGPT/holmesgpt/blob/master/holmes/plugins/toolsets/servicenow/servicenow.py).
 
 ## Sending Headers to Holmes
 

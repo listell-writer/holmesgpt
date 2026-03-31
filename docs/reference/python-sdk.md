@@ -248,7 +248,7 @@ print(response.result)
 - The health check in `prerequisites_callable()` validates config and checks connectivity
 - Parameters use `Dict[str, ToolParameter]` (not a list)
 
-See the built-in `servicenow_tables` toolset for a complete production example.
+See the built-in `servicenow` toolset for a complete production example.
 
 ## API Reference
 

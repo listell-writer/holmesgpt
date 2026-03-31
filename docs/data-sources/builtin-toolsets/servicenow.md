@@ -79,7 +79,7 @@ You should receive a JSON response. If you get an authentication error, check yo
 
     ```yaml
     toolsets:
-      servicenow/tables:
+      servicenow:
         enabled: true
         config:
           api_url: <your servicenow instance URL>  # e.g. https://dev12345.service-now.com
@@ -106,7 +106,7 @@ You should receive a JSON response. If you get an authentication error, check yo
     ```yaml
     holmes:
       toolsets:
-        servicenow/tables:
+        servicenow:
           enabled: true
           config:
             api_url: <your servicenow instance URL>  # e.g. https://dev12345.service-now.com

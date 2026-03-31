@@ -713,6 +713,10 @@ class Toolset(BaseModel):
 
     enabled: bool = False
     name: str
+    alternative_names: List[str] = Field(
+        default_factory=list,
+        description="Alternative names for backwards compatibility. Users can reference the toolset by any of these names in config.",
+    )
     description: str
     docs_url: Optional[str] = None
     icon_url: Optional[str] = None

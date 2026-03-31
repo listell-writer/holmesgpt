@@ -126,9 +126,11 @@ class ToolsetManager:
             ]
 
         builtin_toolsets = load_builtin_toolsets(dal, additional_search_paths)
-        toolsets_by_name: dict[str, Toolset] = {
-            toolset.name: toolset for toolset in builtin_toolsets
-        }
+        toolsets_by_name: dict[str, Toolset] = {}
+        for toolset in builtin_toolsets:
+            toolsets_by_name[toolset.name] = toolset
+            for alt_name in toolset.alternative_names:
+                toolsets_by_name[alt_name] = toolset
         builtin_toolsets_names = list(toolsets_by_name.keys())
 
         if enable_all_toolsets:

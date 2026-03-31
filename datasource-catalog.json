@@ -281,14 +281,14 @@
       "backendToolsetNames": ["dynatrace", "dynatrace-mcp"]
     },
     {
-      "id": "servicenow/tables",
+      "id": "servicenow",
       "name": "ServiceNow",
       "description": "IT service management and ticketing",
       "categories": ["itsm-knowledgebase"],
       "iconUrl": "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='currentColor' stroke-width='1.5'%3E%3Cpath d='M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z'/%3E%3C/svg%3E",
       "docsUrl": "https://holmesgpt.dev/data-sources/builtin-toolsets/servicenow/?tab=robusta-helm-chart",
       "configType": "native",
-      "backendToolsetNames": ["servicenow/tables"]
+      "backendToolsetNames": ["servicenow", "servicenow/tables"]
     },
     {
       "id": "confluence",

@@ -11,8 +11,8 @@ from holmes.plugins.toolsets.kafka import KafkaClusterConfig, KafkaConfig
 from holmes.plugins.toolsets.newrelic.newrelic import NewrelicConfig
 from holmes.plugins.toolsets.prometheus.prometheus import PrometheusConfig
 from holmes.plugins.toolsets.rabbitmq.api import RabbitMQClusterConfig
-from holmes.plugins.toolsets.servicenow_tables.servicenow_tables import (
-    ServiceNowTablesConfig,
+from holmes.plugins.toolsets.servicenow.servicenow import (
+    ServiceNowConfig,
 )
 from holmes.utils.pydantic_utils import ToolsetConfig
 
@@ -527,12 +527,12 @@ class TestRabbitMQConfigBackwardCompatibility:
 
 
 class TestServiceNowConfigBackwardCompatibility:
-    """Test backward compatibility for ServiceNowTablesConfig deprecated fields."""
+    """Test backward compatibility for ServiceNowConfig deprecated fields."""
 
     @patch(_LOGGER_PATH)
     def test_deprecated_servicenow_fields(self, mock_log):
         """Test that deprecated ServiceNow config fields are migrated."""
-        old_config = ServiceNowTablesConfig(
+        old_config = ServiceNowConfig(
             api_key="now_test123",
             instance_url="https://test.service-now.com",
         )
@@ -544,7 +544,7 @@ class TestServiceNowConfigBackwardCompatibility:
     @patch(_LOGGER_PATH)
     def test_new_servicenow_fields_no_warning(self, mock_log):
         """Test that new ServiceNow field names don't trigger warnings."""
-        new_config = ServiceNowTablesConfig(
+        new_config = ServiceNowConfig(
             api_key="now_test123",
             api_url="https://test.service-now.com",
         )
@@ -556,7 +556,7 @@ class TestServiceNowConfigBackwardCompatibility:
     def test_deprecated_and_new_servicenow_configs_equivalent(self, mock_log):
         """Test that configs created with old and new fields are equivalent."""
         # Create config using deprecated field name
-        old_config = ServiceNowTablesConfig(
+        old_config = ServiceNowConfig(
             api_key="now_test123",
             instance_url="https://test.service-now.com",
             api_key_header="custom-header",
@@ -565,7 +565,7 @@ class TestServiceNowConfigBackwardCompatibility:
         mock_log.warning.reset_mock()
 
         # Create config using new field name
-        new_config = ServiceNowTablesConfig(
+        new_config = ServiceNowConfig(
             api_key="now_test123",
             api_url="https://test.service-now.com",
             api_key_header="custom-header",

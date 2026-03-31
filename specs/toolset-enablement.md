@@ -151,7 +151,7 @@ fields declared as `str = Field(...)` with no default:
 | `confluence` | `ConfluenceConfig.api_url`, `ConfluenceConfig.api_key` |
 | `grafana/dashboards` | `GrafanaCommonConfig.api_url` |
 | `elasticsearch/data`, `elasticsearch/cluster` | `ElasticsearchConfig.api_url` |
-| `servicenow/tables` | `ServiceNowConfig.api_url` |
+| `servicenow` | `ServiceNowConfig.api_url` |
 | `rabbitmq/core` | `RabbitMQConfig.api_url` |
 
 When a user runs the CLI without configuring these toolsets, the auto-enable loop

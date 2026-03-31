@@ -21,7 +21,7 @@ from holmes.utils.header_rendering import render_header_templates
 from holmes.utils.pydantic_utils import ToolsetConfig
 
 
-class ServiceNowTablesConfig(ToolsetConfig):
+class ServiceNowConfig(ToolsetConfig):
     """Configuration for ServiceNow Tables API access.
 
     You may use either api key or username and password.
@@ -86,7 +86,7 @@ class ServiceNowTablesConfig(ToolsetConfig):
     )
 
     @model_validator(mode="after")
-    def validate_auth(self) -> "ServiceNowTablesConfig":
+    def validate_auth(self) -> "ServiceNowConfig":
         """
         Ensure that authentication is either:
           - api_key is provided
@@ -103,12 +103,13 @@ class ServiceNowTablesConfig(ToolsetConfig):
         return self
 
 
-class ServiceNowTablesToolset(Toolset):
-    config_classes: ClassVar[list[Type[ServiceNowTablesConfig]]] = [ServiceNowTablesConfig]
+class ServiceNowToolset(Toolset):
+    config_classes: ClassVar[list[Type[ServiceNowConfig]]] = [ServiceNowConfig]
 
     def __init__(self):
         super().__init__(
-            name="servicenow/tables",
+            name="servicenow",
+            alternative_names=["servicenow/tables"],
             description="Tools for retrieving records from ServiceNow tables",
             icon_url="https://www.servicenow.com/content/dam/servicenow-assets/public/en-us/images/og-images/favicon.ico",
             docs_url="https://holmesgpt.dev/data-sources/builtin-toolsets/servicenow/",
@@ -127,7 +128,7 @@ class ServiceNowTablesToolset(Toolset):
         """Check if the ServiceNow configuration is valid and complete."""
         try:
             # Validate the config using Pydantic - this will raise if required fields are missing
-            self.config = ServiceNowTablesConfig(**config)
+            self.config = ServiceNowConfig(**config)
 
             return self._perform_health_check(table_name=self.config.health_check_table)
 
@@ -172,8 +173,8 @@ class ServiceNowTablesToolset(Toolset):
             return False, f"ServiceNow health check failed: {str(e)}"
 
     @property
-    def servicenow_config(self) -> ServiceNowTablesConfig:
-        return cast(ServiceNowTablesConfig, self.config)
+    def servicenow_config(self) -> ServiceNowConfig:
+        return cast(ServiceNowConfig, self.config)
 
     def _make_api_request(
         self,
@@ -239,7 +240,7 @@ class ServiceNowTablesToolset(Toolset):
 class BaseServiceNowTool(Tool, ABC):
     """Base class for ServiceNow tools with common HTTP request functionality."""
 
-    def __init__(self, toolset: ServiceNowTablesToolset, *args, **kwargs):
+    def __init__(self, toolset: ServiceNowToolset, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self._toolset = toolset
 
@@ -281,7 +282,7 @@ class BaseServiceNowTool(Tool, ABC):
 
 
 class GetRecords(BaseServiceNowTool):
-    def __init__(self, toolset: ServiceNowTablesToolset):
+    def __init__(self, toolset: ServiceNowToolset):
         super().__init__(
             toolset=toolset,
             name="servicenow_get_records",
@@ -438,7 +439,7 @@ class GetRecords(BaseServiceNowTool):
 
 
 class GetRecord(BaseServiceNowTool):
-    def __init__(self, toolset: ServiceNowTablesToolset):
+    def __init__(self, toolset: ServiceNowToolset):
         super().__init__(
             toolset=toolset,
             name="servicenow_get_record",

@@ -91,7 +91,7 @@ poetry run mypy
   - For "no data" responses, specify what was searched and where
 
 **Thin API Wrapper Pattern for Python Toolsets**:
-- Reference implementation: `servicenow_tables/servicenow_tables.py`
+- Reference implementation: `servicenow/servicenow.py`
 - Use `requests` library for HTTP calls (not specialized client libraries like `opensearchpy`)
 - Simple config class with Pydantic validation
 - Health check in `prerequisites_callable()` method
