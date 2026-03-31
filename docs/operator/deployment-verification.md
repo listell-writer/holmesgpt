@@ -61,16 +61,21 @@ kubectl apply -f app-deployment.yaml
 
 ## Helm
 
+Add a HealthCheck template to your application's Helm chart:
+
 ```yaml
 # templates/healthcheck.yaml
 apiVersion: holmesgpt.dev/v1alpha1
 kind: HealthCheck
 metadata:
-  name: {{ .Release.Name }}-deploy-check
+  name: {{ include "mychart.fullname" . }}-deploy-check
+  namespace: {{ .Release.Namespace }}
   annotations:
     holmesgpt.dev/rerun: "true"
+  labels:
+    {{- include "mychart.labels" . | nindent 4 }}
 spec:
-  query: "Is the {{ .Release.Name }} deployment fully rolled out and healthy? Check pod status, logs, and error rates."
+  query: "Is the {{ include "mychart.fullname" . }} deployment in '{{ .Release.Namespace }}' fully rolled out and healthy? Check pod status, logs, and error rates."
   timeout: 120
   mode: alert
   destinations:
@@ -79,21 +84,22 @@ spec:
         channel: "#deploy-alerts"
 ```
 
-Every `helm upgrade` triggers a fresh check — no templating tricks needed.
+Every `helm upgrade` triggers a fresh check.
 
 ## ArgoCD
 
-Add the HealthCheck to your application manifests. Every sync triggers a re-run:
+Add a HealthCheck to the same repo/path as your Application source. Every ArgoCD sync triggers a re-run:
 
 ```yaml
 apiVersion: holmesgpt.dev/v1alpha1
 kind: HealthCheck
 metadata:
   name: checkout-api-deploy-check
+  namespace: production
   annotations:
     holmesgpt.dev/rerun: "true"
 spec:
-  query: "Is the checkout-api deployment fully rolled out and healthy? Check pod status, logs, and error rates."
+  query: "Is the checkout-api deployment in 'production' fully rolled out and healthy? Check pod status, logs, and error rates."
   timeout: 120
   mode: alert
   destinations:
