@@ -991,6 +991,8 @@ class RemoteMCPTool(Tool):
             logger.warning("OAuth MCP %s: CLI mode detected, running browser OAuth flow", self.toolset.name)
             token_data = _cli_oauth_flow(oauth_config, self.toolset.name)
             if token_data:
+                # Recompute cache key — DCR may have changed client_id
+                cache_key = _get_oauth_cache_key(oauth_config, context.request_context)
                 _oauth_token_cache.set(
                     cache_key,
                     token_data["access_token"],
@@ -999,6 +1001,7 @@ class RemoteMCPTool(Tool):
                     refresh_expires_in=token_data.get("refresh_expires_in"),
                 )
                 _disk_token_store.set(disk_key, token_data)
+                logger.warning("OAuth MCP %s: CLI auth successful, token cached (cache_key=%s)", self.toolset.name, cache_key)
                 return None  # Token obtained, no approval needed
             else:
                 logger.warning("OAuth MCP %s: CLI OAuth flow failed", self.toolset.name)
