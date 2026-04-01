@@ -1,12 +1,104 @@
 # Investigating Alerts via the API
 
-If you previously used a dedicated `/api/investigate` endpoint or are coming from the CLI's `holmes investigate` command, this guide shows how to replicate and extend that workflow using the `/api/chat` endpoint.
+The `/api/investigate` and `/api/stream/investigate` endpoints were removed in favor of the more flexible `/api/chat` endpoint. This guide shows how to replicate — and improve upon — the old investigation workflow using `/api/chat`.
 
-The key idea: the `/api/chat` endpoint can do everything a dedicated investigation endpoint could — and more — when you combine `additional_system_prompt`, `response_format`, and conversation history.
+If you're a new user who wants an alert-oriented investigation view (structured sections like "Root Cause", "Key Findings", "Next Steps"), this guide is also for you.
+
+## Migrating from `/api/investigate`
+
+The old `/api/investigate` endpoint accepted an `InvestigateRequest` with these fields:
+
+```json
+{
+  "source": "prometheus",
+  "title": "KubePodCrashLooping",
+  "description": "Pod has been crash-looping for 15 minutes",
+  "subject": {"namespace": "production", "pod": "payment-service-7b4d6f8c9-x2k5m"},
+  "context": {"robusta_issue_id": "..."},
+  "source_instance_id": "ApiRequest",
+  "sections": {
+    "Alert Explanation": "1-2 sentences explaining the alert",
+    "Key Findings": "What you checked and found",
+    "Conclusions and Possible Root causes": "...",
+    "Next Steps": "...",
+    "Related logs": "...",
+    "App or Infra?": "...",
+    "External links": "..."
+  },
+  "model": "fast-model"
+}
+```
+
+The equivalent `/api/chat` call combines three features: `ask` (alert data), `additional_system_prompt` (investigation instructions), and `response_format` (structured sections):
+
+```bash
+curl -X POST http://<HOLMES-URL>/api/chat \
+  -H "Content-Type: application/json" \
+  -d '{
+    "ask": "Investigate this alert:\n\nSource: prometheus\nTitle: KubePodCrashLooping\nDescription: Pod has been crash-looping for 15 minutes\nSubject: {\"namespace\": \"production\", \"pod\": \"payment-service-7b4d6f8c9-x2k5m\"}",
+    "additional_system_prompt": "Provide a terse analysis of the following alert and why it is firing. Focus on root cause, not symptoms.",
+    "response_format": {
+      "type": "json_schema",
+      "json_schema": {
+        "name": "AlertInvestigation",
+        "strict": true,
+        "schema": {
+          "type": "object",
+          "properties": {
+            "alert_explanation": {
+              "type": "string",
+              "description": "1-2 sentences explaining what the alert means in plain language"
+            },
+            "key_findings": {
+              "type": "string",
+              "description": "What you checked and found during investigation"
+            },
+            "root_causes": {
+              "type": "string",
+              "description": "Possible root causes based on the evidence. Distinguish between what is known for certain and what is a possible explanation"
+            },
+            "next_steps": {
+              "type": "string",
+              "description": "What to do next to troubleshoot or fix the issue. Prefer precise bash commands when possible"
+            },
+            "related_logs": {
+              "type": "string",
+              "description": "The most relevant log lines with surrounding context"
+            },
+            "app_or_infra": {
+              "type": "string",
+              "description": "Whether this is an infrastructure or application issue and why"
+            }
+          },
+          "required": ["alert_explanation", "key_findings", "root_causes", "next_steps", "related_logs", "app_or_infra"],
+          "additionalProperties": false
+        }
+      }
+    }
+  }'
+```
+
+**What changed:**
+
+| Old (`/api/investigate`) | New (`/api/chat`) |
+|---|---|
+| `source`, `title`, `description`, `subject`, `context` fields | All passed as text in `ask` |
+| `sections` dict defining output structure | `response_format` with JSON schema |
+| `prompt_template` for investigation prompt | `additional_system_prompt` for custom instructions |
+| Built-in markdown-to-sections parsing | LLM returns structured JSON directly |
+| Separate `/api/stream/investigate` for SSE | Same `/api/chat` with `stream: true` |
+
+**What you gain:**
+
+- Follow-up questions via `conversation_history` (the old endpoint was single-shot)
+- Custom sections — define any schema you want, not just the 7 built-in ones
+- `behavior_controls` to tune speed vs. thoroughness
+- Image analysis support
+- Frontend tools for UI integrations
 
 ## Basic Alert Investigation
 
-Pass the alert payload in your question and tell Holmes to investigate it via `additional_system_prompt`:
+For a quick investigation without structured output:
 
 ```bash
 curl -X POST http://<HOLMES-URL>/api/chat \
@@ -17,56 +109,81 @@ curl -X POST http://<HOLMES-URL>/api/chat \
   }'
 ```
 
-This mirrors exactly what the CLI `holmes investigate alertmanager` does internally — it passes the alert's raw data as the user prompt and adds investigation-specific instructions via the system prompt.
+Holmes will use its available tools (kubectl, Prometheus, logs, etc.) to investigate and return a free-form analysis in the `analysis` field.
 
-## Structured Investigation Output
+## Reproducing the Old Default Sections
 
-Use `response_format` to get results in a consistent, machine-parseable schema — perfect for feeding into dashboards, ticketing systems, or Slack integrations:
+The old `/api/investigate` returned results split into 7 sections by default. Here's the exact `response_format` to replicate that:
+
+```json
+{
+  "type": "json_schema",
+  "json_schema": {
+    "name": "InvestigationResult",
+    "strict": true,
+    "schema": {
+      "type": "object",
+      "properties": {
+        "alert_explanation": {
+          "type": "string",
+          "description": "1-2 sentences explaining the alert itself. Don't say 'The alert indicates a warning event related to...' — just say what happened (e.g., 'The pod XYZ did blah')."
+        },
+        "key_findings": {
+          "type": "string",
+          "description": "What you checked and found during investigation."
+        },
+        "conclusions_and_possible_root_causes": {
+          "type": "string",
+          "description": "What conclusions can you reach based on the data you found? What are possible root causes or what uncertainty remains? Distinguish between what you know for certain and what is a possible explanation."
+        },
+        "next_steps": {
+          "type": "string",
+          "description": "What to do next to troubleshoot this issue, any commands to fix it, or other ways to solve it. Prefer giving precise bash commands when possible."
+        },
+        "related_logs": {
+          "type": "string",
+          "description": "Truncated most relevant logs, especially if they explain the root cause. Include the surrounding +/- 5 log lines."
+        },
+        "app_or_infra": {
+          "type": "string",
+          "description": "Whether the issue is more likely infrastructure or application level and why."
+        },
+        "external_links": {
+          "type": "string",
+          "description": "Links to external sources (runbooks, docs) with a short sentence describing each link. Markdown formatted."
+        }
+      },
+      "required": ["alert_explanation", "key_findings", "conclusions_and_possible_root_causes", "next_steps", "related_logs", "app_or_infra", "external_links"],
+      "additionalProperties": false
+    }
+  }
+}
+```
+
+## Custom Sections
+
+You can define any sections you want. For example, a minimal schema for a Slack notification:
 
 ```bash
 curl -X POST http://<HOLMES-URL>/api/chat \
   -H "Content-Type: application/json" \
   -d '{
-    "ask": "Investigate this alert:\n\nAlert: HighMemoryUsage\nNamespace: default\nPod: inventory-api-5c8b7d6e4f-9m3kq\nValue: 95%\nThreshold: 85%",
-    "additional_system_prompt": "You are investigating an infrastructure alert. Provide a structured root-cause analysis.",
+    "ask": "Investigate this alert:\n\nAlert: HighErrorRate\nService: api-gateway\nNamespace: production\nError rate: 12% (threshold: 5%)",
+    "additional_system_prompt": "Investigate this alert. Be concise.",
     "response_format": {
       "type": "json_schema",
       "json_schema": {
-        "name": "AlertInvestigation",
+        "name": "SlackAlert",
         "strict": true,
         "schema": {
           "type": "object",
           "properties": {
-            "title": {
-              "type": "string",
-              "description": "Short title summarizing the issue"
-            },
-            "root_cause": {
-              "type": "string",
-              "description": "Root cause analysis"
-            },
-            "severity": {
-              "type": "string",
-              "enum": ["critical", "high", "medium", "low"],
-              "description": "Assessed severity"
-            },
-            "affected_resources": {
-              "type": "array",
-              "items": {"type": "string"},
-              "description": "List of affected pods, nodes, or services"
-            },
-            "remediation_steps": {
-              "type": "array",
-              "items": {"type": "string"},
-              "description": "Recommended steps to resolve"
-            },
-            "evidence": {
-              "type": "array",
-              "items": {"type": "string"},
-              "description": "Key evidence gathered during investigation"
-            }
+            "title": {"type": "string", "description": "One-line summary"},
+            "severity": {"type": "string", "enum": ["critical", "high", "medium", "low"]},
+            "root_cause": {"type": "string", "description": "Root cause in 1-2 sentences"},
+            "action_required": {"type": "boolean", "description": "Whether immediate human action is needed"}
           },
-          "required": ["title", "root_cause", "severity", "affected_resources", "remediation_steps", "evidence"],
+          "required": ["title", "severity", "root_cause", "action_required"],
           "additionalProperties": false
         }
       }
@@ -74,27 +191,9 @@ curl -X POST http://<HOLMES-URL>/api/chat \
   }'
 ```
 
-**Response:**
-
-```json
-{
-  "analysis": "{\"title\": \"Memory leak in inventory-api causing OOM risk\", \"root_cause\": \"The inventory-api pod is leaking memory due to unclosed database connections in the connection pool.\", \"severity\": \"high\", \"affected_resources\": [\"inventory-api-5c8b7d6e4f-9m3kq\", \"inventory-db\"], \"remediation_steps\": [\"Restart the pod to recover immediately\", \"Review connection pool settings in application config\", \"Add connection timeout and max-lifetime settings\"], \"evidence\": [\"Memory usage grew linearly from 40% to 95% over 6 hours\", \"Database connection count: 847 (pool max: 100)\", \"No recent deployments or config changes\"]}",
-  "tool_calls": [...],
-  "conversation_history": [...]
-}
-```
-
-!!! note
-    The `analysis` field contains a JSON string. Parse it to access the structured data:
-    ```python
-    import json
-    investigation = json.loads(response["analysis"])
-    print(investigation["root_cause"])
-    ```
-
 ## Batch Investigation (Multiple Alerts)
 
-To investigate multiple alerts (like `holmes investigate alertmanager` does), loop over your alerts and call `/api/chat` for each one:
+To investigate multiple alerts (replacing `holmes investigate alertmanager`), loop over your alerts:
 
 ```python
 import requests
@@ -138,14 +237,13 @@ for alert in alerts:
         "investigation": investigation,
     })
 
-# Write results to a file, post to Slack, update a ticket, etc.
 for r in results:
     print(f"[{r['investigation']['severity'].upper()}] {r['alert_name']}: {r['investigation']['root_cause']}")
 ```
 
-## Follow-Up Questions on an Investigation
+## Follow-Up Questions
 
-Use `conversation_history` to ask follow-up questions without losing context. Holmes remembers the tools it called and the data it found:
+The old `/api/investigate` was single-shot — one request, one response. With `/api/chat`, you can ask follow-up questions using `conversation_history`:
 
 ```bash
 # Step 1: Initial investigation
@@ -156,7 +254,7 @@ RESPONSE=$(curl -s -X POST http://<HOLMES-URL>/api/chat \
     "additional_system_prompt": "Investigate this alert. Focus on root cause."
   }')
 
-# Step 2: Ask a follow-up using the conversation history from step 1
+# Step 2: Follow up using the conversation history from step 1
 HISTORY=$(echo "$RESPONSE" | jq '.conversation_history')
 
 curl -X POST http://<HOLMES-URL>/api/chat \
@@ -167,15 +265,28 @@ curl -X POST http://<HOLMES-URL>/api/chat \
   }"
 ```
 
+## Streaming Investigations
+
+The old `/api/stream/investigate` is now just `/api/chat` with `stream: true`:
+
 ```bash
-# Step 3: Ask for remediation
-curl -X POST http://<HOLMES-URL>/api/chat \
+curl -N -X POST http://<HOLMES-URL>/api/chat \
   -H "Content-Type: application/json" \
-  -d "{
-    \"ask\": \"What are the exact kubectl commands to fix this?\",
-    \"conversation_history\": $HISTORY
-  }"
+  -d '{
+    "ask": "Investigate: HighErrorRate on api-gateway in production, error rate 12% (threshold 5%)",
+    "additional_system_prompt": "Investigate this alert and provide root cause analysis.",
+    "stream": true
+  }'
 ```
+
+SSE events show investigation progress in real-time:
+
+- `start_tool_calling` — Holmes is running a tool (e.g., fetching logs, querying Prometheus)
+- `tool_calling_result` — A tool returned data
+- `ai_message` — Holmes is reasoning about the data
+- `ai_answer_end` — Final investigation result
+
+See the [SSE Reference](http-api.md#server-sent-events-sse-reference) for the full event format.
 
 ## Optimizing for Speed
 
@@ -195,38 +306,17 @@ curl -X POST http://<HOLMES-URL>/api/chat \
   }'
 ```
 
-This skips the TodoWrite planning phase and style guide, reducing token usage and latency — similar to the CLI's `--fast-mode` flag.
-
-## Streaming Investigations
-
-For UIs that want to show investigation progress in real-time:
-
-```bash
-curl -N -X POST http://<HOLMES-URL>/api/chat \
-  -H "Content-Type: application/json" \
-  -d '{
-    "ask": "Investigate: HighErrorRate on api-gateway in production, error rate 12% (threshold 5%)",
-    "additional_system_prompt": "Investigate this alert and provide root cause analysis.",
-    "stream": true
-  }'
-```
-
-SSE events let you show users what Holmes is doing as it investigates:
-
-- `start_tool_calling` — Holmes is running a tool (e.g., fetching logs, querying Prometheus)
-- `tool_calling_result` — A tool returned data
-- `ai_message` — Holmes is reasoning about the data
-- `ai_answer_end` — Final investigation result
-
-See the [SSE Reference](http-api.md#server-sent-events-sse-reference) for the full event format.
+This skips the TodoWrite planning phase and style guide, reducing token usage and latency.
 
 ## Migration Cheat Sheet
 
-| Old CLI / Endpoint | New `/api/chat` Equivalent |
+| Old `/api/investigate` | New `/api/chat` Equivalent |
 |---|---|
-| `holmes investigate alertmanager` | `ask` = alert JSON, `additional_system_prompt` = investigation instructions |
-| Investigation result fields (title, root_cause, etc.) | Use `response_format` with a JSON schema |
-| Batch investigation of all firing alerts | Loop over alerts, one `/api/chat` call per alert |
-| Write-back to source (Slack, Jira) | Parse the structured `analysis` and post via your own integration |
-| `--fast-mode` | `behavior_controls: {"todowrite_instructions": false, "todowrite_reminder": false}` |
-| Follow-up investigation | Pass `conversation_history` from previous response |
+| `source`, `title`, `description`, `subject` | Combine into `ask` as text |
+| `context.robusta_issue_id` | Not needed (Holmes discovers context via tools) |
+| `sections` dict | `response_format` with JSON schema |
+| `prompt_template` | `additional_system_prompt` |
+| `include_tool_calls: true` | Tool calls always returned in `tool_calls` field |
+| `/api/stream/investigate` | `/api/chat` with `stream: true` |
+| `/api/issue_chat` (follow-up) | `/api/chat` with `conversation_history` |
+| Single-shot investigation | Multi-turn with `conversation_history` |
