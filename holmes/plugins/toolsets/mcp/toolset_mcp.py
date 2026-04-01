@@ -1061,7 +1061,11 @@ class RemoteMCPTool(Tool):
         signing_key = _get_signing_key()
         if _oauth_dal and _oauth_dal.enabled and signing_key:
             signing_key_hash = _get_signing_key_hash()
-            db_record = _oauth_dal.get_oauth_token(self.toolset.name)
+            # provider_name in DB is the authorization_url (uniquely identifies the IdP)
+            db_provider = oauth_config.authorization_url or self.toolset.name
+            db_record = _oauth_dal.get_oauth_token(db_provider)
+            if not db_record:
+                logger.warning("OAuth MCP %s: no DB token found for provider=%s", self.toolset.name, db_provider)
             if db_record:
                 if db_record.get("signing_key_hash") == signing_key_hash:
                     db_token_data = _decrypt_token_from_db(db_record["encrypted_token"], signing_key)
