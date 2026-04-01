@@ -702,10 +702,16 @@ class RenderDashboard(BaseGrafanaRenderTool):
             default_width=config.default_render_width,
             default_height=config.default_render_height,
         )
+        # Use fullpage rendering by default so the entire dashboard is captured,
+        # not just the top viewport. Grafana Image Renderer supports height=-1
+        # to scroll and stitch all rows into one image.
+        if "height" not in params or params["height"] is None:
+            query_params["height"] = -1
+
         render_path = f"render/d/{dashboard_uid}/_"
         dashboard_url = _build_grafana_dashboard_url(config, uid=dashboard_uid)
 
-        height_desc = f"{query_params['height']}px"
+        height_desc = "full-page" if query_params["height"] == -1 else f"{query_params['height']}px"
         description = (
             f"Rendered screenshot of full dashboard {dashboard_uid}. "
             f"Time range: {query_params['from']} to {query_params['to']}, "
