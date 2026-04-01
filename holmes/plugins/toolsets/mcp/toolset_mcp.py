@@ -403,10 +403,18 @@ class DiskTokenStore:
         from pathlib import Path
 
         self._path = Path(config_path_dir) / "auth" / "mcp_tokens.json"
-        self._path.parent.mkdir(parents=True, exist_ok=True)
+        self._enabled = True
         self._lock = threading.Lock()
+        try:
+            self._path.parent.mkdir(parents=True, exist_ok=True)
+        except OSError:
+            # Read-only filesystem (e.g. in-cluster container) — disk store disabled
+            self._enabled = False
+            logger.info("OAuth disk token store disabled (read-only filesystem)")
 
     def get(self, key: str) -> Optional[Dict[str, Any]]:
+        if not self._enabled:
+            return None
         with self._lock:
             data = self._load()
             token = data.get(key)
@@ -415,6 +423,8 @@ class DiskTokenStore:
             return None
 
     def set(self, key: str, token_data: Dict[str, Any]) -> None:
+        if not self._enabled:
+            return
         with self._lock:
             data = self._load()
             data[key] = token_data
