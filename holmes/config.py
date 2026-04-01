@@ -311,6 +311,10 @@ class Config(RobustaBaseConfig):
         if self._server_tool_executor:
             return self._server_tool_executor
 
+        # Make DAL available for OAuth cross-cluster token storage
+        from holmes.plugins.toolsets.mcp.toolset_mcp import set_oauth_dal
+        set_oauth_dal(dal)
+
         toolsets = self.toolset_manager.list_server_toolsets(dal=dal)
 
         self._server_tool_executor = ToolExecutor(toolsets)
