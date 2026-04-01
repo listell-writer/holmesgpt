@@ -624,6 +624,81 @@ _oauth_token_cache = OAuthTokenCache()
 _pending_exchanges: Dict[str, _PendingOAuthExchange] = {}
 _exchanges_lock = threading.Lock()
 
+# Module-level DAL reference for OAuth DB operations. Set via set_oauth_dal() during server startup.
+_oauth_dal: Optional[Any] = None
+
+
+def set_oauth_dal(dal: Any) -> None:
+    """Set the DAL instance for OAuth DB operations. Called during server startup."""
+    global _oauth_dal
+    _oauth_dal = dal
+    if dal and dal.enabled:
+        logger.warning("OAuth: DAL initialized for cross-cluster token storage")
+
+
+def _get_signing_key_hash() -> Optional[str]:
+    """Get a SHA-256 hash of the signing_key for DB storage (never store the key itself)."""
+    signing_key = _get_signing_key()
+    if not signing_key:
+        return None
+    return hashlib.sha256(signing_key.encode()).hexdigest()
+
+
+def _encrypt_token_for_db(token_data: Dict[str, Any], signing_key: str) -> str:
+    """Encrypt token data with signing_key-derived Fernet key for DB storage."""
+    from cryptography.fernet import Fernet
+    from cryptography.hazmat.primitives.kdf.hkdf import HKDF
+
+    fernet_key = base64.urlsafe_b64encode(
+        HKDF(algorithm=hashes.SHA256(), length=32, salt=b"holmesgpt-oauth-db-token", info=b"token-encryption")
+        .derive(signing_key.encode())
+    )
+    return Fernet(fernet_key).encrypt(json.dumps(token_data).encode()).decode()
+
+
+def _decrypt_token_from_db(encrypted: str, signing_key: str) -> Optional[Dict[str, Any]]:
+    """Decrypt token data from DB using signing_key-derived Fernet key."""
+    from cryptography.fernet import Fernet
+    from cryptography.hazmat.primitives.kdf.hkdf import HKDF
+
+    try:
+        fernet_key = base64.urlsafe_b64encode(
+            HKDF(algorithm=hashes.SHA256(), length=32, salt=b"holmesgpt-oauth-db-token", info=b"token-encryption")
+            .derive(signing_key.encode())
+        )
+        decrypted = Fernet(fernet_key).decrypt(encrypted.encode())
+        return json.loads(decrypted)
+    except Exception:
+        logger.warning("OAuth: failed to decrypt token from DB (signing_key mismatch?)")
+        return None
+
+
+def _store_token_to_db(oauth_config: MCPOAuthConfig, token_data: Dict[str, Any], context_id: str) -> None:
+    """Store an OAuth token to the DB for cross-cluster reuse, encrypted with signing_key."""
+    signing_key = _get_signing_key()
+    signing_key_hash = _get_signing_key_hash()
+    if not _oauth_dal or not _oauth_dal.enabled or not signing_key or not signing_key_hash:
+        return
+
+    try:
+        # Use authorization_url as provider name since it uniquely identifies the IdP
+        provider_name = oauth_config.authorization_url or "unknown"
+        encrypted = _encrypt_token_for_db(token_data, signing_key)
+        expiry = None
+        if token_data.get("expires_in"):
+            from datetime import datetime, timezone, timedelta
+            expiry = (datetime.now(timezone.utc) + timedelta(seconds=token_data["expires_in"])).isoformat()
+
+        _oauth_dal.upsert_oauth_token(
+            provider_name=provider_name,
+            encrypted_token=encrypted,
+            signing_key_hash=signing_key_hash,
+            token_expiry=expiry,
+        )
+        logger.warning("OAuth: stored token to DB for provider %s", provider_name)
+    except Exception:
+        logger.warning("OAuth: failed to store token to DB", exc_info=True)
+
 
 def _get_conversation_key(request_context: Optional[Dict[str, Any]]) -> str:
     """Extract a conversation key from request context headers."""
@@ -835,6 +910,9 @@ def decrypt_code_and_exchange_for_token(tool_call_id: str, encrypted_payload: st
             "OAuth token cached (cache_key=%s, idp=%s, expires_in=%s, has_refresh=%s)",
             cache_key, pending.oauth_config.token_url, token_data.get("expires_in"), "refresh_token" in token_data,
         )
+
+        # Store to DB for cross-cluster reuse
+        _store_token_to_db(pending.oauth_config, token_data, tool_call_id)
     except json.JSONDecodeError:
         logger.exception("OAuth token exchange: failed to parse JSON response from %s", pending.oauth_config.token_url)
     except httpx.HTTPStatusError:
@@ -967,9 +1045,33 @@ class RemoteMCPTool(Tool):
                 logger.warning("OAuth token reused for MCP %s from shared IdP cache (cache_key=%s)", self.toolset.name, cache_key)
                 return None
 
-        logger.warning("OAuth MCP %s: no cached token (cache_key=%s), requesting user authentication", self.toolset.name, cache_key)
+        logger.warning("OAuth MCP %s: no cached token (cache_key=%s), checking DB and disk", self.toolset.name, cache_key)
 
-        # Also check disk store for CLI-persisted tokens
+        # Check DB for cross-cluster token (server mode with DAL)
+        signing_key = _get_signing_key()
+        if _oauth_dal and _oauth_dal.enabled and signing_key:
+            signing_key_hash = _get_signing_key_hash()
+            db_record = _oauth_dal.get_oauth_token(self.toolset.name)
+            if db_record:
+                if db_record.get("signing_key_hash") == signing_key_hash:
+                    db_token_data = _decrypt_token_from_db(db_record["encrypted_token"], signing_key)
+                    if db_token_data and db_token_data.get("access_token"):
+                        _oauth_token_cache.set(
+                            cache_key,
+                            db_token_data["access_token"],
+                            expires_in=db_token_data.get("expires_in", 300),
+                            refresh_token=db_token_data.get("refresh_token"),
+                        )
+                        logger.warning("OAuth MCP %s: loaded token from DB (cross-cluster)", self.toolset.name)
+                        return None
+                else:
+                    logger.warning(
+                        "OAuth MCP %s: found DB token but signing_key_hash mismatch (stored=%s, current=%s). "
+                        "Token from a different cluster/config — will prompt for re-authentication.",
+                        self.toolset.name, db_record.get("signing_key_hash", "")[:12], (signing_key_hash or "")[:12],
+                    )
+
+        # Check disk store for CLI-persisted tokens
         disk_key = str(self.toolset._mcp_config.url) if isinstance(self.toolset._mcp_config, MCPConfig) else cache_key
         disk_token = _disk_token_store.get(disk_key)
         if disk_token:
@@ -1001,6 +1103,7 @@ class RemoteMCPTool(Tool):
                     refresh_expires_in=token_data.get("refresh_expires_in"),
                 )
                 _disk_token_store.set(disk_key, token_data)
+                _store_token_to_db(oauth_config, token_data, "cli-flow")
                 logger.warning("OAuth MCP %s: CLI auth successful, token cached (cache_key=%s)", self.toolset.name, cache_key)
                 return None  # Token obtained, no approval needed
             else:

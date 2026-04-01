@@ -60,6 +60,7 @@ SCANS_META_TABLE = "ScansMeta"
 SCANS_RESULTS_TABLE = "ScansResults"
 SCHEDULED_PROMPTS_RUNS_TABLE = "ScheduledPromptsRuns"
 HOLMES_RESULTS_TABLE = "HolmesResults"
+OAUTH_TOKENS_TABLE = "OAuthTokens"
 
 ENRICHMENT_BLACKLIST = ["text_file", "graph", "ai_analysis", "holmes"]
 ENRICHMENT_BLACKLIST_SET = set(ENRICHMENT_BLACKLIST)
@@ -944,4 +945,66 @@ class SupabaseDal:
                 "Supabase error while finishing scheduled prompt run",
                 exc_info=True,
             )
+            return False
+
+    # --- OAuth Token Storage ---
+
+    def get_oauth_token(self, provider_name: str) -> Optional[Dict]:
+        """Get the OAuth token for a provider in this account, regardless of cluster."""
+        if not self.enabled:
+            return None
+        try:
+            res = (
+                self.client.table(OAUTH_TOKENS_TABLE)
+                .select("*")
+                .eq("account_id", self.account_id)
+                .eq("provider_name", provider_name)
+                .order("updated_at", desc=True)
+                .limit(1)
+                .execute()
+            )
+            return res.data[0] if res.data else None
+        except Exception:
+            logging.exception("Error fetching OAuth token for provider %s", provider_name)
+            return None
+
+    def upsert_oauth_token(
+        self,
+        provider_name: str,
+        encrypted_token: str,
+        signing_key_hash: str,
+        token_expiry: Optional[str] = None,
+    ) -> bool:
+        """Store or update an OAuth token for a provider in this account."""
+        if not self.enabled:
+            return False
+        try:
+            self.client.table(OAUTH_TOKENS_TABLE).upsert(
+                {
+                    "account_id": self.account_id,
+                    "cluster_name": self.cluster or "unknown",
+                    "provider_name": provider_name,
+                    "encrypted_token": encrypted_token,
+                    "signing_key_hash": signing_key_hash,
+                    "token_expiry": token_expiry,
+                    "updated_at": "now()",
+                },
+                on_conflict="account_id,provider_name,signing_key_hash",
+            ).execute()
+            return True
+        except Exception:
+            logging.exception("Error upserting OAuth token for provider %s", provider_name)
+            return False
+
+    def delete_oauth_token(self, provider_name: str) -> bool:
+        """Delete OAuth tokens for a provider in this account."""
+        if not self.enabled:
+            return False
+        try:
+            self.client.table(OAUTH_TOKENS_TABLE).delete().eq(
+                "account_id", self.account_id
+            ).eq("provider_name", provider_name).execute()
+            return True
+        except Exception:
+            logging.exception("Error deleting OAuth token for provider %s", provider_name)
             return False
