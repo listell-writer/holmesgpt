@@ -5,6 +5,7 @@ nav:
   - Kubernetes Permissions: kubernetes-permissions.md
   - Microsoft Teams Bot Permissions: teams-permissions.md
   - HTTP API: http-api.md
+  - Investigating Alerts via API: investigating-alerts-via-api.md
   - Runbooks: runbooks.md
   - Slash Commands: slash-commands.md
   - Context Management: context-management.md
