@@ -30,9 +30,11 @@ _READONLY_PATTERN = re.compile(
     re.IGNORECASE,
 )
 
-# EXPLAIN statements are always read-only (they show query plans, never execute)
-_EXPLAIN_PATTERN = re.compile(
-    r"^\s*EXPLAIN\b",
+# EXPLAIN without ANALYZE is read-only (shows query plan, never executes).
+# EXPLAIN ANALYZE actually *executes* the statement (PostgreSQL and others),
+# so it must NOT bypass the write-anywhere check.
+_EXPLAIN_NO_ANALYZE_PATTERN = re.compile(
+    r"^\s*EXPLAIN\s+(?!\s*ANALYZE\b)",
     re.IGNORECASE,
 )
 
@@ -267,10 +269,12 @@ class DatabaseToolset(Toolset):
                     f"Received: {sql[:80]}"
                 )
 
-            # EXPLAIN is always read-only (shows query plan, never executes), so
-            # skip the write-anywhere check for EXPLAIN statements.  This allows
-            # e.g. "EXPLAIN INSERT INTO t SELECT ..." on ClickHouse/Postgres.
-            if not _EXPLAIN_PATTERN.match(sql) and _WRITE_ANYWHERE_PATTERN.search(sql):
+            # EXPLAIN (without ANALYZE) is read-only — it shows the query plan
+            # without executing.  Skip the write-anywhere check so that e.g.
+            # "EXPLAIN INSERT INTO t SELECT ..." works on ClickHouse/Postgres.
+            # EXPLAIN ANALYZE actually executes the statement, so it must NOT
+            # bypass this check.
+            if not _EXPLAIN_NO_ANALYZE_PATTERN.match(sql) and _WRITE_ANYWHERE_PATTERN.search(sql):
                 raise ValueError(
                     f"Write operations are not allowed anywhere in the query. "
                     f"Only SELECT, SHOW, DESCRIBE, EXPLAIN, and WITH statements are permitted. "

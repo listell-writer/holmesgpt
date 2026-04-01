@@ -11,7 +11,7 @@ sqlalchemy = pytest.importorskip("sqlalchemy")
 from holmes.plugins.toolsets.database.database import (  # noqa: E402
     DatabaseConfig,
     DatabaseToolset,
-    _EXPLAIN_PATTERN,
+    _EXPLAIN_NO_ANALYZE_PATTERN,
     _READONLY_PATTERN,
     _WRITE_ANYWHERE_PATTERN,
     _WRITE_PATTERN,
@@ -212,7 +212,7 @@ class TestReadOnlyValidation:
         assert not _WRITE_PATTERN.match("EXPLAIN SELECT * FROM users")
 
     def test_explain_on_write_queries_allowed(self):
-        """EXPLAIN on write statements is read-only (shows plan, never executes).
+        """EXPLAIN (without ANALYZE) on write statements is read-only.
 
         This is particularly important for ClickHouse which supports
         EXPLAIN INSERT, EXPLAIN AST, EXPLAIN PIPELINE, etc.
@@ -226,12 +226,29 @@ class TestReadOnlyValidation:
             "  EXPLAIN  INSERT INTO t SELECT * FROM s",
         ]
         for sql in explain_write_queries:
-            assert _EXPLAIN_PATTERN.match(sql), f"Should match EXPLAIN pattern: {sql}"
+            assert _EXPLAIN_NO_ANALYZE_PATTERN.match(sql), f"Should match EXPLAIN-no-analyze pattern: {sql}"
             assert _READONLY_PATTERN.match(sql), f"Should match readonly pattern: {sql}"
             # These contain write keywords but should NOT be blocked because EXPLAIN is read-only
             assert _WRITE_ANYWHERE_PATTERN.search(sql), f"Should contain write keyword: {sql}"
-            # Crucially, the execute_query method should not raise
-            # (we test the regex logic here; full execution requires a real DB)
+
+    def test_explain_analyze_on_write_queries_blocked(self):
+        """EXPLAIN ANALYZE executes the statement, so it must be blocked for writes."""
+        dangerous_queries = [
+            "EXPLAIN ANALYZE INSERT INTO t VALUES (1)",
+            "EXPLAIN ANALYZE DELETE FROM t WHERE id = 1",
+            "EXPLAIN ANALYZE UPDATE t SET x = 1",
+            "explain analyze insert into t values (1)",
+            "  EXPLAIN  ANALYZE  INSERT INTO t VALUES (1)",
+        ]
+        for sql in dangerous_queries:
+            assert not _EXPLAIN_NO_ANALYZE_PATTERN.match(sql), (
+                f"EXPLAIN ANALYZE should NOT bypass write check: {sql}"
+            )
+
+    def test_explain_analyze_select_allowed(self):
+        """EXPLAIN ANALYZE SELECT is safe (executes a read-only query)."""
+        assert _READONLY_PATTERN.match("EXPLAIN ANALYZE SELECT * FROM users")
+        assert not _WRITE_ANYWHERE_PATTERN.search("EXPLAIN ANALYZE SELECT * FROM users")
 
     def test_with_cte_allowed(self):
         assert _READONLY_PATTERN.match("WITH cte AS (SELECT 1) SELECT * FROM cte")
