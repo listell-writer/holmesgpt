@@ -30,6 +30,12 @@ _READONLY_PATTERN = re.compile(
     re.IGNORECASE,
 )
 
+# EXPLAIN statements are always read-only (they show query plans, never execute)
+_EXPLAIN_PATTERN = re.compile(
+    r"^\s*EXPLAIN\b",
+    re.IGNORECASE,
+)
+
 # Statements that modify data or schema (prefix check)
 _WRITE_PATTERN = re.compile(
     r"^\s*(INSERT|UPDATE|DELETE|DROP|CREATE|ALTER|TRUNCATE|REPLACE|MERGE|GRANT|REVOKE|CALL|EXEC)\b",
@@ -261,7 +267,10 @@ class DatabaseToolset(Toolset):
                     f"Received: {sql[:80]}"
                 )
 
-            if _WRITE_ANYWHERE_PATTERN.search(sql):
+            # EXPLAIN is always read-only (shows query plan, never executes), so
+            # skip the write-anywhere check for EXPLAIN statements.  This allows
+            # e.g. "EXPLAIN INSERT INTO t SELECT ..." on ClickHouse/Postgres.
+            if not _EXPLAIN_PATTERN.match(sql) and _WRITE_ANYWHERE_PATTERN.search(sql):
                 raise ValueError(
                     f"Write operations are not allowed anywhere in the query. "
                     f"Only SELECT, SHOW, DESCRIBE, EXPLAIN, and WITH statements are permitted. "

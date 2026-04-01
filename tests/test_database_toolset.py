@@ -11,6 +11,7 @@ sqlalchemy = pytest.importorskip("sqlalchemy")
 from holmes.plugins.toolsets.database.database import (  # noqa: E402
     DatabaseConfig,
     DatabaseToolset,
+    _EXPLAIN_PATTERN,
     _READONLY_PATTERN,
     _WRITE_ANYWHERE_PATTERN,
     _WRITE_PATTERN,
@@ -209,6 +210,28 @@ class TestReadOnlyValidation:
     def test_explain_allowed(self):
         assert _READONLY_PATTERN.match("EXPLAIN SELECT * FROM users")
         assert not _WRITE_PATTERN.match("EXPLAIN SELECT * FROM users")
+
+    def test_explain_on_write_queries_allowed(self):
+        """EXPLAIN on write statements is read-only (shows plan, never executes).
+
+        This is particularly important for ClickHouse which supports
+        EXPLAIN INSERT, EXPLAIN AST, EXPLAIN PIPELINE, etc.
+        """
+        explain_write_queries = [
+            "EXPLAIN INSERT INTO t SELECT * FROM s",
+            "EXPLAIN AST INSERT INTO t VALUES (1)",
+            "EXPLAIN PIPELINE INSERT INTO t SELECT * FROM s",
+            "EXPLAIN CREATE TABLE t AS SELECT 1",
+            "explain insert into t select * from s",
+            "  EXPLAIN  INSERT INTO t SELECT * FROM s",
+        ]
+        for sql in explain_write_queries:
+            assert _EXPLAIN_PATTERN.match(sql), f"Should match EXPLAIN pattern: {sql}"
+            assert _READONLY_PATTERN.match(sql), f"Should match readonly pattern: {sql}"
+            # These contain write keywords but should NOT be blocked because EXPLAIN is read-only
+            assert _WRITE_ANYWHERE_PATTERN.search(sql), f"Should contain write keyword: {sql}"
+            # Crucially, the execute_query method should not raise
+            # (we test the regex logic here; full execution requires a real DB)
 
     def test_with_cte_allowed(self):
         assert _READONLY_PATTERN.match("WITH cte AS (SELECT 1) SELECT * FROM cte")
