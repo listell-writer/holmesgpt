@@ -694,9 +694,13 @@ def _store_token_to_db(oauth_config: MCPOAuthConfig, token_data: Dict[str, Any],
         # Use authorization_url as provider name since it uniquely identifies the IdP
         provider_name = oauth_config.authorization_url or "unknown"
         encrypted = _encrypt_token_for_db(token_data, signing_key)
+        # Store refresh token expiry (what matters for cross-cluster reuse).
+        # Fall back to access token expiry if no refresh_expires_in.
+        from datetime import datetime, timezone, timedelta
         expiry = None
-        if token_data.get("expires_in"):
-            from datetime import datetime, timezone, timedelta
+        if token_data.get("refresh_expires_in"):
+            expiry = (datetime.now(timezone.utc) + timedelta(seconds=token_data["refresh_expires_in"])).isoformat()
+        elif token_data.get("expires_in"):
             expiry = (datetime.now(timezone.utc) + timedelta(seconds=token_data["expires_in"])).isoformat()
 
         _oauth_dal.upsert_oauth_token(
@@ -966,6 +970,8 @@ def _try_refresh_token(cache_key: str, oauth_config: MCPOAuthConfig) -> Optional
             refresh_expires_in=token_data.get("refresh_expires_in"),
         )
         logger.warning("OAuth token refreshed (cache_key=%s, expires_in=%s)", cache_key, token_data.get("expires_in"))
+        # Update DB with refreshed token
+        _store_token_to_db(oauth_config, token_data, "refresh")
         return access_token
     except Exception:
         logger.warning("OAuth refresh failed (cache_key=%s)", cache_key, exc_info=True)
