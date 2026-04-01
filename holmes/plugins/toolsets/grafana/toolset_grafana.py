@@ -683,10 +683,18 @@ class RenderDashboard(BaseGrafanaRenderTool):
             ),
         }
         dashboard_params.update(RENDER_COMMON_PARAMS)
+        # Override height description for dashboard rendering — default is fullpage
+        dashboard_params["height"] = ToolParameter(
+            description="Image height in pixels. Default is -1 (fullpage rendering: scrolls the entire "
+            "dashboard and stitches all rows into one image). Pass a specific pixel value to crop to that height.",
+            type="integer",
+            required=False,
+        )
         super().__init__(
             toolset=toolset,
             name="grafana_render_dashboard",
-            description="Render an entire Grafana dashboard as a PNG screenshot using the Grafana Image Renderer. "
+            description="Render an entire Grafana dashboard as a full-page PNG screenshot using the Grafana Image Renderer. "
+            "By default captures the entire dashboard (all panels/rows) using fullpage rendering. "
             "Returns the full dashboard image for visual overview. Use this to get a bird's-eye view of all panels. "
             "For detailed inspection of individual panels, use grafana_render_panel instead. "
             "Requires the grafana-image-renderer plugin on the Grafana instance.",
