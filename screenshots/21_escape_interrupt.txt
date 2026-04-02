@@ -1,0 +1,50 @@
+Screen cleared and context reset. You can now ask a new question.
+User: List every single tool you have access to, describe each one in detail
+
+Couldn't find model openrouter/anthropic/claude-3.5-haiku in litellm's model list (tried:
+openrouter/anthropic/claude-3.5-haiku, anthropic/claude-3.5-haiku), using default 200000 tokens for max_input_tokens. To
+override, set OVERRIDE_MAX_CONTENT_SIZE environment variable to the correct value for your model.
+Couldn't find model openrouter/anthropic/claude-3.5-haiku in litellm's model list (tried:
+openrouter/anthropic/claude-3.5-haiku, anthropic/claude-3.5-haiku), using default 200000 tokens for max_input_tokens. To
+override, set OVERRIDE_MAX_CONTENT_SIZE environment variable to the correct value for your model.
+Couldn't find model openrouter/anthropic/claude-3.5-haiku in litellm's model list (tried:
+openrouter/anthropic/claude-3.5-haiku, anthropic/claude-3.5-haiku), using 40000 tokens for max_output_tokens. To
+override, set OVERRIDE_MAX_OUTPUT_TOKEN environment variable to the correct value for your model.
+Couldn't find model openrouter/anthropic/claude-3.5-haiku in litellm's model list (tried:
+openrouter/anthropic/claude-3.5-haiku, anthropic/claude-3.5-haiku), using default 200000 tokens for max_input_tokens. To
+override, set OVERRIDE_MAX_CONTENT_SIZE environment variable to the correct value for your model.
+Couldn't find model openrouter/anthropic/claude-3.5-haiku in litellm's model list (tried:
+openrouter/anthropic/claude-3.5-haiku, anthropic/claude-3.5-haiku), using default 200000 tokens for max_input_tokens. To
+override, set OVERRIDE_MAX_CONTENT_SIZE environment variable to the correct value for your model.
+Couldn't find model openrouter/anthropic/claude-3.5-haiku in litellm's model list (tried:
+openrouter/anthropic/claude-3.5-haiku, anthropic/claude-3.5-haiku), using 40000 tokens for max_output_tokens. To
+override, set OVERRIDE_MAX_OUTPUT_TOKEN environment variable to the correct value for your model.
+Interrupted.
+
+User:
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

@@ -1,0 +1,50 @@
+  ✗ cilium/core: `cilium status` returned 127
+  ✗ kubernetes/core: `kubectl version --client` returned 127
+  ✗ hubble/observability: `hubble version` returned 127
+  ✗ kubernetes/krew-extras: `kubectl version --client && kubectl lineage --version` returned 127
+  ✗ inspektor-gadget/tcpdump: Environment variable ENABLE_INSPEKTOR_GADGET was not set
+  ✗ kubernetes/live-metrics: `kubectl top nodes` returned 127
+  ✗ openshift/core: `oc version --client` returned 127
+  ✗ aks/node-health: `az account show` returned 127
+  ✗ slab: Environment variable SLAB_API_KEY was not set
+  ✗ robusta: Integration with Robusta cloud is disabled
+  ✗ notion: Notion toolset is misconfigured. Authorization header is required.
+  ✗ opensearch/query_assist: Environment variable OPENSEARCH_URL was not set
+  ✗ kubernetes/logs: kubectl command not found
+  ✗ openshift/logs: `oc version --client` returned 127
+  ✗ kubevela/core: `vela version` returned 127
+  ✗ openshift/security: `oc version --client` returned 127
+  ✗ aks/core: `az account show` returned 127
+  ✗ docker/core: `docker version` returned 1
+Model: openrouter/anthropic/claude-haiku-4-5-20251001, 200K context, 40K max response (configured via $MODEL)
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+Couldn't find model openrouter/anthropic/claude-haiku-4-5-20251001 in litellm's model list (tried:
+openrouter/anthropic/claude-haiku-4-5-20251001, anthropic/claude-haiku-4-5-20251001), using default 200000 tokens for
+max_input_tokens. To override, set OVERRIDE_MAX_CONTENT_SIZE environment variable to the correct value for your model.
+Type /help for commands, /config to configure, /exit to quit
+User: /help
+Available commands:
+  /config - Open interactive toolset configuration editor
+  /exit - Exit interactive mode
+  /help - Show help message with all commands
+  /clear - Clear screen and reset conversation context
+  /tools - Show available toolsets and their status
+  /auto - Toggle auto-display of tool outputs after responses
+  /last - Show all tool outputs from last response
+  /run - Run a bash command and optionally share with LLM
+  /shell - Drop into interactive shell, then optionally share session with LLM
+  /context - Show conversation context size and token count
+  /show - Show specific tool output in scrollable view
+User:
+
+
+
+
+
+
+
+
+
+
+
+

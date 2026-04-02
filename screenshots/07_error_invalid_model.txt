@@ -1,0 +1,50 @@
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "/home/user/holmesgpt/holmes/interactive.py", line 2757, in run_interactive_loop
+    raise call_error[0]
+  File "/home/user/holmesgpt/holmes/interactive.py", line 2624, in _run_ai_stream
+    for event in stream:
+  File "/home/user/holmesgpt/holmes/core/tool_calling_llm.py", line 962, in call_stream
+    full_response = self.llm.completion(
+                    ^^^^^^^^^^^^^^^^^^^^
+  File "/home/user/holmesgpt/holmes/core/llm.py", line 605, in completion
+    result = litellm_to_use.completion(
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/root/.cache/pypoetry/virtualenvs/holmesgpt-KxduBB6S-py3.11/lib/python3.11/site-packages/litellm/utils.py", line
+1740, in wrapper
+    raise e
+  File "/root/.cache/pypoetry/virtualenvs/holmesgpt-KxduBB6S-py3.11/lib/python3.11/site-packages/litellm/utils.py", line
+1561, in wrapper
+    result = original_function(*args, **kwargs)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/root/.cache/pypoetry/virtualenvs/holmesgpt-KxduBB6S-py3.11/lib/python3.11/site-packages/litellm/main.py", line
+4229, in completion
+    raise exception_type(
+          ^^^^^^^^^^^^^^^
+  File
+"/root/.cache/pypoetry/virtualenvs/holmesgpt-KxduBB6S-py3.11/lib/python3.11/site-packages/litellm/litellm_core_utils/exc
+eption_mapping_utils.py", line 2378, in exception_type
+    raise e
+  File
+"/root/.cache/pypoetry/virtualenvs/holmesgpt-KxduBB6S-py3.11/lib/python3.11/site-packages/litellm/litellm_core_utils/exc
+eption_mapping_utils.py", line 2240, in exception_type
+    raise BadRequestError(
+litellm.exceptions.BadRequestError: litellm.BadRequestError: OpenrouterException -
+{"error":{"message":"anthropic/claude-haiku-4-5-20251001 is not a valid model
+ID","code":400},"user_id":"org_38Tjp6GjZ23hnFdMrD4XMUEVq04"}
+Error: litellm.BadRequestError: OpenrouterException - {"error":{"message":"anthropic/claude-haiku-4-5-20251001 is not a
+valid model ID","code":400},"user_id":"org_38Tjp6GjZ23hnFdMrD4XMUEVq04"}
+User:
+
+
+
+
+
+
+
+
+
+
+
+

@@ -1,0 +1,50 @@
+│  **Task Status**: 0 completed, 0 in progress, 2 pending                                                              │
+│                                                                                                                      │
+│  [ ]  Get current system time                                                                                        │
+│  [ ]  Check connectivity to google.com                                                                               │
+│                                                                                                                      │
+│  **Instructions**: Use TodoWrite tool to update task status as you work. Mark tasks as 'in_progress' when starting,  │
+│  'completed' when finished.                                                                                          │
+│                                                                                                                      │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╯
+User: /context
+Couldn't find model openrouter/anthropic/claude-3.5-haiku in litellm's model list (tried:
+openrouter/anthropic/claude-3.5-haiku, anthropic/claude-3.5-haiku), using default 200000 tokens for max_input_tokens. To
+override, set OVERRIDE_MAX_CONTENT_SIZE environment variable to the correct value for your model.
+Couldn't find model openrouter/anthropic/claude-3.5-haiku in litellm's model list (tried:
+openrouter/anthropic/claude-3.5-haiku, anthropic/claude-3.5-haiku), using default 200000 tokens for max_input_tokens. To
+override, set OVERRIDE_MAX_CONTENT_SIZE environment variable to the correct value for your model.
+Couldn't find model openrouter/anthropic/claude-3.5-haiku in litellm's model list (tried:
+openrouter/anthropic/claude-3.5-haiku, anthropic/claude-3.5-haiku), using 40000 tokens for max_output_tokens. To
+override, set OVERRIDE_MAX_OUTPUT_TOKEN environment variable to the correct value for your model.
+Conversation Context:
+  Context used: 9,715 / 200,000 tokens (4.9%)
+  Space remaining: 150,285 for input (75.1%) + 40,000 reserved for output (20.0%)
+  Token breakdown:
+    system prompt: 9,005 tokens (92.7%)
+    user messages: 244 tokens (2.5%)
+    assistant replies: 233 tokens (2.4%)
+    tool responses: 245 tokens (2.5%)
+      TodoWrite: 245 tokens (100.0%) from 1 tool calls
+User: /invalid_command
+Unknown command: /invalid_command
+User: /show
+Available tool outputs:
+  1. Update investigation tasks
+Usage: /show <number> or /show <tool_name>
+User: /show 1
+User: /auto
+Auto-display of tool outputs enabled.
+User: /run echo hello
+Running: echo hello
+✓ Command succeeded (exit code: 0)
+╭─ Command Output ─────────────────────────────────────────────────────────────────────────────────────────────────────╮
+│                                                                                                                      │
+│  hello                                                                                                               │
+│                                                                                                                      │
+│                                                                                                                      │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╯
+Share ran a command with LLM? (Y/n):
+
+
+
