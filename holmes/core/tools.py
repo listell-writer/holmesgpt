@@ -881,7 +881,15 @@ class Toolset(BaseModel):
 
         return self.config is None
 
-    def check_prerequisites(self, silent: bool = False):
+    def _check_prerequisites_impl(self, silent: bool = False, skip_slow_checks: bool = False) -> bool:
+        """Unified prerequisite checking.
+
+        When *skip_slow_checks* is True, callable and command prerequisites are
+        skipped (deferred for lazy initialization on first tool use).  This
+        avoids slow network/IO operations at startup when using cached status.
+
+        Returns True when all checked prerequisites passed.
+        """
         self.status = ToolsetStatusEnum.ENABLED
 
         # Sort prerequisites by type to fail fast on missing env vars before
@@ -891,9 +899,13 @@ class Toolset(BaseModel):
         # 3. Callable checks (variable speed)
         # 4. Command checks (slowest - may timeout or hang)
         sorted_prereqs = sorted(self.prerequisites, key=_prereq_priority)
+        has_deferred_prereqs = False
 
         for prereq in sorted_prereqs:
             if isinstance(prereq, ToolsetCommandPrerequisite):
+                if skip_slow_checks:
+                    has_deferred_prereqs = True
+                    continue
                 try:
                     command = self.interpolate_command(prereq.command)
                     result = subprocess.run(
@@ -926,6 +938,9 @@ class Toolset(BaseModel):
                     self.error = f"{prereq.disabled_reason}"
 
             elif isinstance(prereq, CallablePrerequisite):
+                if skip_slow_checks:
+                    has_deferred_prereqs = True
+                    continue
                 try:
                     (enabled, error_message) = prereq.callable(self.config or {})
                     if not enabled:
@@ -937,17 +952,23 @@ class Toolset(BaseModel):
                     self.status = ToolsetStatusEnum.FAILED
                     self.error = f"Prerequisite call failed unexpectedly: {str(e)}"
 
-            if (
-                self.status == ToolsetStatusEnum.DISABLED
-                or self.status == ToolsetStatusEnum.FAILED
-            ):
+            if self.status in (ToolsetStatusEnum.DISABLED, ToolsetStatusEnum.FAILED):
                 if not silent:
                     display_logger.info(f"❌ Toolset {self.name}: {self.error}")
-                # no point checking further prerequisites if one failed
-                return
+                return False
 
-        if not silent:
-            display_logger.info(f"✅ Toolset {self.name}")
+        if has_deferred_prereqs:
+            self._lazy_init = True
+            self._initialized = False
+        elif skip_slow_checks:
+            self._initialized = True
+
+        return True
+
+    def check_prerequisites(self, silent: bool = False) -> None:
+        if self._check_prerequisites_impl(silent=silent, skip_slow_checks=False):
+            if not silent:
+                display_logger.info(f"✅ Toolset {self.name}")
 
     def check_config_prerequisites(self, silent: bool = False) -> None:
         """Run only fast config-validity checks (static flags and environment variables).
@@ -956,40 +977,7 @@ class Toolset(BaseModel):
         on first tool use. This avoids slow network/IO operations at startup when
         using cached toolset status.
         """
-        self.status = ToolsetStatusEnum.ENABLED
-
-        sorted_prereqs = sorted(self.prerequisites, key=_prereq_priority)
-        has_deferred_prereqs = False
-
-        for prereq in sorted_prereqs:
-            if isinstance(prereq, StaticPrerequisite):
-                if not prereq.enabled:
-                    self.status = ToolsetStatusEnum.FAILED
-                    self.error = f"{prereq.disabled_reason}"
-
-            elif isinstance(prereq, ToolsetEnvironmentPrerequisite):
-                for env_var in prereq.env:
-                    if env_var not in os.environ:
-                        self.status = ToolsetStatusEnum.FAILED
-                        self.error = f"Environment variable {env_var} was not set"
-
-            elif isinstance(prereq, (CallablePrerequisite, ToolsetCommandPrerequisite)):
-                has_deferred_prereqs = True
-                continue
-
-            if (
-                self.status == ToolsetStatusEnum.DISABLED
-                or self.status == ToolsetStatusEnum.FAILED
-            ):
-                if not silent:
-                    display_logger.info(f"❌ Toolset {self.name}: {self.error}")
-                return
-
-        if has_deferred_prereqs:
-            self._lazy_init = True
-            self._initialized = False
-        else:
-            self._initialized = True
+        self._check_prerequisites_impl(silent=silent, skip_slow_checks=True)
 
     @property
     def needs_initialization(self) -> bool:

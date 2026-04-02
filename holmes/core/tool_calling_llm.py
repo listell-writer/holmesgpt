@@ -1215,8 +1215,8 @@ class ToolCallingLLM:
                     if tool_call.get("id") == tool_call_id:
                         return tool_call
 
-        # Should not happen unless there is a bug.
-        # If we are here
-        raise Exception(
+        # This indicates corrupted message state — every tool_call_id should
+        # have a matching assistant request in the conversation history.
+        raise RuntimeError(
             f"Failed to find assistant request for a tool_call in conversation history. tool_call_id={tool_call_id}"
         )

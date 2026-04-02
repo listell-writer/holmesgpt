@@ -62,7 +62,6 @@ class ToolsetManager:
         config_file_path: Optional[Path] = None,
         additional_toolsets: Optional[List[Toolset]] = None,
     ):
-        self.toolsets = toolsets
         self.toolsets = toolsets or {}
         self.additional_toolsets = additional_toolsets or []
         self.custom_runbook_catalogs = custom_runbook_catalogs
@@ -629,7 +628,7 @@ class ToolsetManager:
         """
 
         for new_toolset in new_toolsets:
-            if new_toolset.name in existing_toolsets_by_name.keys():
+            if new_toolset.name in existing_toolsets_by_name:
                 existing_toolsets_by_name[new_toolset.name].override_with(new_toolset)
             else:
                 existing_toolsets_by_name[new_toolset.name] = new_toolset
