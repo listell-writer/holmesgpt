@@ -36,14 +36,33 @@ _EXPLAIN_PREFIX = re.compile(r"^\s*EXPLAIN\b", re.IGNORECASE)
 # Detects ANALYZE/ANALYSE anywhere after EXPLAIN — covers bare keyword syntax
 # ("EXPLAIN ANALYZE ...") and parenthesized option syntax ("EXPLAIN (ANALYZE) ...",
 # "EXPLAIN (ANALYZE, BUFFERS) ...").  PostgreSQL accepts both ANALYZE and ANALYSE.
+# Uses \s* (not \s+) before '(' because PostgreSQL allows EXPLAIN(ANALYZE) with no space.
 _ANALYZE_AFTER_EXPLAIN = re.compile(
-    r"^\s*EXPLAIN\s+(?:"
-    r"\([^)]*\bANALY[ZS]E\b[^)]*\)"  # parenthesized: EXPLAIN (ANALYZE, …)
+    r"^\s*EXPLAIN\s*(?:"
+    r"\([^)]*\bANALY[ZS]E\b[^)]*\)"  # parenthesized: EXPLAIN(ANALYZE, …)
     r"|"
-    r"\s*ANALY[ZS]E\b"  # bare keyword: EXPLAIN ANALYZE / EXPLAIN ANALYSE
+    r"\s+ANALY[ZS]E\b"  # bare keyword: EXPLAIN ANALYZE / EXPLAIN ANALYSE
     r")",
     re.IGNORECASE,
 )
+
+# Matches SQL single-line comments (-- ...) and block comments (/* ... */)
+_SQL_COMMENT = re.compile(
+    r"--[^\r\n]*"       # single-line: -- to end of line
+    r"|"
+    r"/\*.*?\*/",       # block: /* ... */ (non-greedy)
+    re.DOTALL,
+)
+
+
+def _strip_sql_comments(sql: str) -> str:
+    """Remove SQL comments from a query string.
+
+    Strips both single-line (-- ...) and block (/* ... */) comments so that
+    regex-based validation sees only the actual SQL tokens.  This prevents
+    bypasses like ``EXPLAIN -- sneaky\\nANALYZE INSERT INTO ...``.
+    """
+    return _SQL_COMMENT.sub(" ", sql)
 
 
 def _is_non_executing_explain(sql: str) -> bool:
@@ -52,10 +71,13 @@ def _is_non_executing_explain(sql: str) -> bool:
     EXPLAIN ANALYZE (and the British spelling ANALYSE) actually runs the query,
     so it is *not* safe for read-only mode when combined with write statements.
     Both the bare-keyword form and the parenthesized-options form are detected.
+
+    SQL comments are stripped before checking to prevent injection bypasses.
     """
-    if not _EXPLAIN_PREFIX.match(sql):
+    stripped = _strip_sql_comments(sql)
+    if not _EXPLAIN_PREFIX.match(stripped):
         return False
-    return not _ANALYZE_AFTER_EXPLAIN.match(sql)
+    return not _ANALYZE_AFTER_EXPLAIN.match(stripped)
 
 # Statements that modify data or schema (prefix check)
 _WRITE_PATTERN = re.compile(
@@ -281,7 +303,11 @@ class DatabaseToolset(Toolset):
             Dict with keys: columns, rows, row_count, truncated
         """
         if self.database_config.read_only:
-            if _WRITE_PATTERN.match(sql):
+            # Strip SQL comments before validation so that injections like
+            # "EXPLAIN -- sneaky\nANALYZE INSERT ..." are caught.
+            check = _strip_sql_comments(sql)
+
+            if _WRITE_PATTERN.match(check):
                 raise ValueError(
                     f"Write operations are not allowed. "
                     f"Only SELECT, SHOW, DESCRIBE, EXPLAIN, and WITH statements are permitted. "
@@ -293,14 +319,14 @@ class DatabaseToolset(Toolset):
             # that e.g. "EXPLAIN INSERT INTO t SELECT ..." works on
             # ClickHouse/Postgres.  EXPLAIN ANALYZE actually executes the
             # statement, so it must NOT bypass this check.
-            if not _is_non_executing_explain(sql) and _WRITE_ANYWHERE_PATTERN.search(sql):
+            if not _is_non_executing_explain(check) and _WRITE_ANYWHERE_PATTERN.search(check):
                 raise ValueError(
                     f"Write operations are not allowed anywhere in the query. "
                     f"Only SELECT, SHOW, DESCRIBE, EXPLAIN, and WITH statements are permitted. "
                     f"Received: {sql[:80]}"
                 )
 
-            if not _READONLY_PATTERN.match(sql):
+            if not _READONLY_PATTERN.match(check):
                 raise ValueError(
                     f"Only SELECT, SHOW, DESCRIBE, EXPLAIN, and WITH statements are permitted. "
                     f"Received: {sql[:80]}"
