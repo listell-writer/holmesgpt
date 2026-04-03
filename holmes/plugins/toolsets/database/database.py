@@ -30,13 +30,32 @@ _READONLY_PATTERN = re.compile(
     re.IGNORECASE,
 )
 
-# EXPLAIN without ANALYZE is read-only (shows query plan, never executes).
-# EXPLAIN ANALYZE actually *executes* the statement (PostgreSQL and others),
-# so it must NOT bypass the write-anywhere check.
-_EXPLAIN_NO_ANALYZE_PATTERN = re.compile(
-    r"^\s*EXPLAIN\s+(?!\s*ANALYZE\b)",
+# Detects EXPLAIN at the start of a query.
+_EXPLAIN_PREFIX = re.compile(r"^\s*EXPLAIN\b", re.IGNORECASE)
+
+# Detects ANALYZE/ANALYSE anywhere after EXPLAIN — covers bare keyword syntax
+# ("EXPLAIN ANALYZE ...") and parenthesized option syntax ("EXPLAIN (ANALYZE) ...",
+# "EXPLAIN (ANALYZE, BUFFERS) ...").  PostgreSQL accepts both ANALYZE and ANALYSE.
+_ANALYZE_AFTER_EXPLAIN = re.compile(
+    r"^\s*EXPLAIN\s+(?:"
+    r"\([^)]*\bANALY[ZS]E\b[^)]*\)"  # parenthesized: EXPLAIN (ANALYZE, …)
+    r"|"
+    r"\s*ANALY[ZS]E\b"  # bare keyword: EXPLAIN ANALYZE / EXPLAIN ANALYSE
+    r")",
     re.IGNORECASE,
 )
+
+
+def _is_non_executing_explain(sql: str) -> bool:
+    """Return True if *sql* is an EXPLAIN that does NOT execute the statement.
+
+    EXPLAIN ANALYZE (and the British spelling ANALYSE) actually runs the query,
+    so it is *not* safe for read-only mode when combined with write statements.
+    Both the bare-keyword form and the parenthesized-options form are detected.
+    """
+    if not _EXPLAIN_PREFIX.match(sql):
+        return False
+    return not _ANALYZE_AFTER_EXPLAIN.match(sql)
 
 # Statements that modify data or schema (prefix check)
 _WRITE_PATTERN = re.compile(
@@ -269,12 +288,12 @@ class DatabaseToolset(Toolset):
                     f"Received: {sql[:80]}"
                 )
 
-            # EXPLAIN (without ANALYZE) is read-only — it shows the query plan
-            # without executing.  Skip the write-anywhere check so that e.g.
-            # "EXPLAIN INSERT INTO t SELECT ..." works on ClickHouse/Postgres.
-            # EXPLAIN ANALYZE actually executes the statement, so it must NOT
-            # bypass this check.
-            if not _EXPLAIN_NO_ANALYZE_PATTERN.match(sql) and _WRITE_ANYWHERE_PATTERN.search(sql):
+            # EXPLAIN (without ANALYZE/ANALYSE) is read-only — it shows the
+            # query plan without executing.  Skip the write-anywhere check so
+            # that e.g. "EXPLAIN INSERT INTO t SELECT ..." works on
+            # ClickHouse/Postgres.  EXPLAIN ANALYZE actually executes the
+            # statement, so it must NOT bypass this check.
+            if not _is_non_executing_explain(sql) and _WRITE_ANYWHERE_PATTERN.search(sql):
                 raise ValueError(
                     f"Write operations are not allowed anywhere in the query. "
                     f"Only SELECT, SHOW, DESCRIBE, EXPLAIN, and WITH statements are permitted. "

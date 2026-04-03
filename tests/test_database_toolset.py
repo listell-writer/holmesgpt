@@ -11,7 +11,7 @@ sqlalchemy = pytest.importorskip("sqlalchemy")
 from holmes.plugins.toolsets.database.database import (  # noqa: E402
     DatabaseConfig,
     DatabaseToolset,
-    _EXPLAIN_NO_ANALYZE_PATTERN,
+    _is_non_executing_explain,
     _READONLY_PATTERN,
     _WRITE_ANYWHERE_PATTERN,
     _WRITE_PATTERN,
@@ -226,22 +226,31 @@ class TestReadOnlyValidation:
             "  EXPLAIN  INSERT INTO t SELECT * FROM s",
         ]
         for sql in explain_write_queries:
-            assert _EXPLAIN_NO_ANALYZE_PATTERN.match(sql), f"Should match EXPLAIN-no-analyze pattern: {sql}"
+            assert _is_non_executing_explain(sql), f"Should be non-executing EXPLAIN: {sql}"
             assert _READONLY_PATTERN.match(sql), f"Should match readonly pattern: {sql}"
             # These contain write keywords but should NOT be blocked because EXPLAIN is read-only
             assert _WRITE_ANYWHERE_PATTERN.search(sql), f"Should contain write keyword: {sql}"
 
     def test_explain_analyze_on_write_queries_blocked(self):
-        """EXPLAIN ANALYZE executes the statement, so it must be blocked for writes."""
+        """EXPLAIN ANALYZE/ANALYSE executes the statement, so it must be blocked for writes."""
         dangerous_queries = [
+            # Bare keyword syntax
             "EXPLAIN ANALYZE INSERT INTO t VALUES (1)",
             "EXPLAIN ANALYZE DELETE FROM t WHERE id = 1",
             "EXPLAIN ANALYZE UPDATE t SET x = 1",
             "explain analyze insert into t values (1)",
             "  EXPLAIN  ANALYZE  INSERT INTO t VALUES (1)",
+            # British spelling
+            "EXPLAIN ANALYSE INSERT INTO t VALUES (1)",
+            "EXPLAIN ANALYSE DELETE FROM t WHERE id = 1",
+            # Parenthesized option syntax
+            "EXPLAIN (ANALYZE) INSERT INTO t VALUES (1)",
+            "EXPLAIN (ANALYZE, BUFFERS) UPDATE t SET x = 1",
+            "EXPLAIN (ANALYSE) INSERT INTO t VALUES (1)",
+            "EXPLAIN (ANALYSE, BUFFERS) DELETE FROM t",
         ]
         for sql in dangerous_queries:
-            assert not _EXPLAIN_NO_ANALYZE_PATTERN.match(sql), (
+            assert not _is_non_executing_explain(sql), (
                 f"EXPLAIN ANALYZE should NOT bypass write check: {sql}"
             )
 
