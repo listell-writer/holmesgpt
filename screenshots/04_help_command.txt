@@ -1,0 +1,39 @@
+│  being found.                                                                                                        │
+│                                                                                                                      │
+│  To troubleshoot this, you can:                                                                                      │
+│                                                                                                                      │
+│   1 Check if kubectl is installed: which kubectl                                                                     │
+│   2 Ensure kubectl is in your PATH                                                                                   │
+│   3 Configure the Kubernetes toolset as described here:                                                              │
+│     https://holmesgpt.dev/data-sources/builtin-toolsets/kubernetes/                                                  │
+│                                                                                                                      │
+│  Alternatively, if you have access to the cluster, you can run kubectl get pods -n default directly to see the       │
+│  running pods.                                                                                                       │
+│                                                                                                                      │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╯
+
+User: /help
+Available commands:
+  /config - Open interactive toolset configuration editor
+  /exit - Exit interactive mode
+  /help - Show help message with all commands
+  /clear - Clear screen and reset conversation context
+  /tools - Show available toolsets and their status
+  /auto - Toggle auto-display of tool outputs after responses
+  /last - Show all tool outputs from last response
+  /run - Run a bash command and optionally share with LLM
+  /shell - Drop into interactive shell, then optionally share session with LLM
+  /context - Show conversation context size and token count
+  /show - Show specific tool output in scrollable view
+User:
+
+
+
+
+
+
+
+
+
+
+

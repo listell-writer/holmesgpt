@@ -1,0 +1,39 @@
+│ openshift/core                   │ failed   │ built-in │      │ `oc version --client` returned 127                   │
+│ openshift/logs                   │ failed   │ built-in │      │ `oc version --client` returned 127                   │
+│ openshift/live-metrics           │ failed   │ built-in │      │ `oc adm top nodes` returned 127                      │
+│ openshift/security               │ failed   │ built-in │      │ `oc version --client` returned 127                   │
+│ argocd/core                      │ failed   │ built-in │      │ Environment variable ARGOCD_AUTH_TOKEN was not set   │
+│ aks/core                         │ failed   │ built-in │      │ `az account show` returned 127                       │
+│ inspektor-gadget/node            │ failed   │ built-in │      │ Environment variable ENABLE_INSPEKTOR_GADGET was not │
+│                                  │          │          │      │ set                                                  │
+│ inspektor-gadget/tcpdump         │ failed   │ built-in │      │ Environment variable ENABLE_INSPEKTOR_GADGET was not │
+│                                  │          │          │      │ set                                                  │
+│ kubevela/core                    │ failed   │ built-in │      │ `vela version` returned 127                          │
+│ robusta                          │ failed   │ built-in │      │ Integration with Robusta cloud is disabled           │
+│ notion                           │ failed   │ built-in │      │ Notion toolset is misconfigured. Authorization       │
+│                                  │          │          │      │ header is required.                                  │
+│ opensearch/query_assist          │ failed   │ built-in │      │ Environment variable OPENSEARCH_URL was not set      │
+│ kubernetes/logs                  │ failed   │ built-in │      │ kubectl command not found                            │
+└──────────────────────────────────┴──────────┴──────────┴──────┴──────────────────────────────────────────────────────┘
+User: /context
+Conversation Context:
+  Context used: 9,550 / 200,000 tokens (4.8%)
+  Space remaining: 150,450 for input (75.2%) + 40,000 reserved for output (20.0%)
+  Token breakdown:
+    system prompt: 9,005 tokens (94.3%)
+    user messages: 237 tokens (2.5%)
+    assistant replies: 167 tokens (1.7%)
+    tool responses: 153 tokens (1.6%)
+      bash: 153 tokens (100.0%) from 1 tool calls
+User:
+
+
+
+
+
+
+
+
+
+
+

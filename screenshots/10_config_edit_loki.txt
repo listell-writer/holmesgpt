@@ -1,0 +1,39 @@
+Screen cleared and context reset. You can now ask a new question.
+User: /auto
+Auto-display of tool outputs enabled.
+User: /last
+No tool calls available from the last response.
+User: /config
+  Configure: grafana/loki
+  Schema: GrafanaConfig
+
+  > URL:                           # Grafana URL or direct datasource URL
+    API Key:            <null>     # Grafana API key for authentication
+    Additional Headers: {0 items}  # Enter to add entry
+    Datasource UID:     <null>     # Grafana datasource UID to proxy requests through Grafana
+    External URL:       <null>     # External URL for linking to Grafana UI
+    Verify SSL:         true       # Whether to verify SSL certificates  (Enter to toggle)
+
+   [ Test ]    [ Reset ]    [ Save ]    [ Exit ]
+
+  Up/Down: navigate | Enter: edit/select | Backspace/Del: delete entry or set null | Esc: cancel edit
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

@@ -1,0 +1,39 @@
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+Type /help for commands, /config to configure, /exit to quit
+User: what pods are running in the default namespace?
+
+  I'll check what pods are running in the default namespace.
+╭─ Tools 1 ────────────────────────────────────────────────────────────────────────────────────────────────────────────╮
+│   1. kubectl get pods -n default [bash] 0.0s 18 tokens (error)                                                       │
+│   /show <number> to view full output                                                                                 │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╯
+  Analyzed 18 tokens across 1 queries
+╭─ AI Response ────────────────────────────────────────────────────────────────────────────────────────────────────────╮
+│                                                                                                                      │
+│  I don't have kubectl available in this environment. The Kubernetes toolset failed to initialize due to kubectl not  │
+│  being found.                                                                                                        │
+│                                                                                                                      │
+│  To troubleshoot this, you can:                                                                                      │
+│                                                                                                                      │
+│   1 Check if kubectl is installed: which kubectl                                                                     │
+│   2 Ensure kubectl is in your PATH                                                                                   │
+│   3 Configure the Kubernetes toolset as described here:                                                              │
+│     https://holmesgpt.dev/data-sources/builtin-toolsets/kubernetes/                                                  │
+│                                                                                                                      │
+│  Alternatively, if you have access to the cluster, you can run kubectl get pods -n default directly to see the       │
+│  running pods.                                                                                                       │
+│                                                                                                                      │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╯
+
+User:
+
+
+
+
+
+
+
+
+
+
+

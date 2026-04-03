@@ -1,0 +1,39 @@
+Failed: 1 validation error for GrafanaConfig
+api_url
+  Field required
+    For further information visit https://errors.pydantic.dev/2.12/v/missing
+User:
+User: /unknown_command
+Unknown command: /unknown_command
+User: /feedback
+Unknown command: /feedback
+User: /run echo hello world
+Running: echo hello world
+✓ Command succeeded (exit code: 0)
+╭─ Command Output ─────────────────────────────────────────────────────────────────────────────────────────────────────╮
+│                                                                                                                      │
+│  hello world                                                                                                         │
+│                                                                                                                      │
+│                                                                                                                      │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╯
+Share ran a command with LLM? (Y/n): n
+User: what is 2+2? just answer briefly
+
+╭─ AI Response ────────────────────────────────────────────────────────────────────────────────────────────────────────╮
+│                                                                                                                      │
+│  2 + 2 = 4                                                                                                           │
+│                                                                                                                      │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╯
+
+User:
+
+
+
+
+
+
+
+
+
+
+

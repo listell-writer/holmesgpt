@@ -1,0 +1,39 @@
+│   # Check for unhealthy pods                                                                                         │
+│   kubectl get pods --all-namespaces --field-selector=status.phase!=Running,status.phase!=Succeeded                   │
+│                                                                                                                      │
+│   # Check for pending resources                                                                                      │
+│   kubectl get pods --all-namespaces --field-selector=status.phase=Pending                                            │
+│                                                                                                                      │
+│   # Check for failed deployments                                                                                     │
+│   kubectl get deployments --all-namespaces -o json | jq '.items[] | select(.status.replicas !=                       │
+│   .status.readyReplicas)'                                                                                            │
+│                                                                                                                      │
+│   # Check for nodes not ready                                                                                        │
+│   kubectl get nodes --field-selector=status.conditions[?(@.type=="Ready")].status!=True                              │
+│                                                                                                                      │
+│   # Check for high resource requests                                                                                 │
+│   kubectl get pods --all-namespaces -o json | jq '.items[] | select(.spec.containers[].resources.requests.memory !   │
+│   null or .spec.containers[].resources.requests.cpu != null)'                                                        │
+│                                                                                                                      │
+│   # Check for privileged containers                                                                                  │
+│   kubectl get pods --all-namespaces -o json | jq '.items[] | select(.spec.containers[].securityContext.privileged    │
+│   true)'                                                                                                             │
+│                                                                                                                      │
+│                                                                                                                      │
+│  Would you like me to help you set up the Kubernetes integration, or do you have another way to provide cluster      │
+│  access?                                                                                                             │
+│                                                                                                                      │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╯
+
+User:
+
+
+
+
+
+
+
+
+
+
+

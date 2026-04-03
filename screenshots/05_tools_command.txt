@@ -1,0 +1,39 @@
+│ kubernetes/core                  │ failed   │ built-in │      │ `kubectl version --client` returned 127              │
+│ kubernetes/live-metrics          │ failed   │ built-in │      │ `kubectl top nodes` returned 127                     │
+│ kubernetes/krew-extras           │ failed   │ built-in │      │ `kubectl version --client && kubectl lineage         │
+│                                  │          │          │      │ --version` returned 127                              │
+│ docker/core                      │ failed   │ built-in │      │ `docker version` returned 1                          │
+│ slab                             │ failed   │ built-in │      │ Environment variable SLAB_API_KEY was not set        │
+│ cilium/core                      │ failed   │ built-in │      │ `cilium status` returned 127                         │
+│ hubble/observability             │ failed   │ built-in │      │ `hubble version` returned 127                        │
+│ aks/node-health                  │ failed   │ built-in │      │ `az account show` returned 127                       │
+│ helm/core                        │ failed   │ built-in │      │ `helm version` returned 127                          │
+│ openshift/core                   │ failed   │ built-in │      │ `oc version --client` returned 127                   │
+│ openshift/logs                   │ failed   │ built-in │      │ `oc version --client` returned 127                   │
+│ openshift/live-metrics           │ failed   │ built-in │      │ `oc adm top nodes` returned 127                      │
+│ openshift/security               │ failed   │ built-in │      │ `oc version --client` returned 127                   │
+│ argocd/core                      │ failed   │ built-in │      │ Environment variable ARGOCD_AUTH_TOKEN was not set   │
+│ aks/core                         │ failed   │ built-in │      │ `az account show` returned 127                       │
+│ inspektor-gadget/node            │ failed   │ built-in │      │ Environment variable ENABLE_INSPEKTOR_GADGET was not │
+│                                  │          │          │      │ set                                                  │
+│ inspektor-gadget/tcpdump         │ failed   │ built-in │      │ Environment variable ENABLE_INSPEKTOR_GADGET was not │
+│                                  │          │          │      │ set                                                  │
+│ kubevela/core                    │ failed   │ built-in │      │ `vela version` returned 127                          │
+│ robusta                          │ failed   │ built-in │      │ Integration with Robusta cloud is disabled           │
+│ notion                           │ failed   │ built-in │      │ Notion toolset is misconfigured. Authorization       │
+│                                  │          │          │      │ header is required.                                  │
+│ opensearch/query_assist          │ failed   │ built-in │      │ Environment variable OPENSEARCH_URL was not set      │
+│ kubernetes/logs                  │ failed   │ built-in │      │ kubectl command not found                            │
+└──────────────────────────────────┴──────────┴──────────┴──────┴──────────────────────────────────────────────────────┘
+User:
+
+
+
+
+
+
+
+
+
+
+

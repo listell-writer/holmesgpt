@@ -1,0 +1,40 @@
+kubectl get pods -n default (exit: q, nav: ↑↓/j/k/g/G/d/u/f/b/space, wrap: w [off])
+kubectl get pods -n default                                                                                            ^
+/bin/bash: line 1: kubectl: command not found
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+                                                                                                                       v

@@ -1,0 +1,39 @@
+  ⠦ Loading datasources  0 ready  (0.5s)
+  Model: openrouter/anthropic/claude-haiku-4.5, 200K context, 40K max response (default, change with --model, for all
+7 datasources loaded | 0.7s
+Model: openrouter/anthropic/claude-haiku-4.5, 200K context, 40K max response (default, change with --model, for all
+options see https://holmesgpt.dev/ai-providers)
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+Type /help for commands, /config to configure, /exit to quit
+╭──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╮
+│ Try one of these questions to get started:                                                                           │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╯
+  > 1. Find surprising or unusual things in my Kubernetes cluster
+    2. Are any of my pods unhealthy? If so, why?
+    3. Check my cluster for security misconfigurations
+    4. Scan my cluster for resource issues (high CPU, memory, disk pressure)
+    5. What's running in my cluster and is anything misconfigured?
+    6. Ask my own question...
+
+  Esc to cancel
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

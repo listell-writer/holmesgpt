@@ -1,0 +1,39 @@
+User: /last
+No tool calls available from the last response.
+User: /config
+Failed to set up grafana toolset grafana/loki
+Traceback (most recent call last):
+  File "/home/user/holmesgpt/holmes/plugins/toolsets/grafana/base_grafana_toolset.py", line 41, in
+prerequisites_callable
+    self._grafana_config = config_class(**config)
+                           ^^^^^^^^^^^^^^^^^^^^^^
+  File "/root/.cache/pypoetry/virtualenvs/holmesgpt-KxduBB6S-py3.11/lib/python3.11/site-packages/pydantic/main.py", line
+250, in __init__
+    validated_self = self.__pydantic_validator__.validate_python(data, self_instance=self)
+                     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+pydantic_core._pydantic_core.ValidationError: 1 validation error for GrafanaConfig
+api_url
+  Field required
+    For further information visit https://errors.pydantic.dev/2.12/v/missing
+Failed: 1 validation error for GrafanaConfig
+api_url
+  Field required
+    For further information visit https://errors.pydantic.dev/2.12/v/missing
+  Configure: grafana/loki
+  Schema: GrafanaConfig
+
+    URL:                           # Grafana URL or direct datasource URL
+    API Key:            <null>     # Grafana API key for authentication
+    Additional Headers: {0 items}  # Enter to add entry
+    Datasource UID:     <null>     # Grafana datasource UID to proxy requests through Grafana
+    External URL:       <null>     # External URL for linking to Grafana UI
+    Verify SSL:         false      # Whether to verify SSL certificates  (Enter to toggle)
+
+   [ Test ]    [ Reset ]    [ Save ]    [ Exit ]
+
+  Failed: 1 validation error for GrafanaConfig
+  api_url
+    Field required [type=missing, input_value={'additional_headers': {}, 'verify_ssl': False}, input_type=dict]
+      For further information visit https://errors.pydantic.dev/2.12/v/missing
+
+  Up/Down: navigate | Enter: edit/select | Backspace/Del: delete entry or set null | Esc: cancel edit
