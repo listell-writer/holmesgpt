@@ -46,23 +46,53 @@ _ANALYZE_AFTER_EXPLAIN = re.compile(
     re.IGNORECASE,
 )
 
-# Matches SQL single-line comments (-- ...) and block comments (/* ... */)
-_SQL_COMMENT = re.compile(
-    r"--[^\r\n]*"       # single-line: -- to end of line
-    r"|"
-    r"/\*.*?\*/",       # block: /* ... */ (non-greedy)
-    re.DOTALL,
-)
+# Matches SQL single-line comments (-- ...)
+_SQL_LINE_COMMENT = re.compile(r"--[^\r\n]*")
+
+# Detects semicolons (statement separators) — used to reject multi-statement queries
+_SEMICOLON = re.compile(r";")
 
 
 def _strip_sql_comments(sql: str) -> str:
     """Remove SQL comments from a query string.
 
-    Strips both single-line (-- ...) and block (/* ... */) comments so that
-    regex-based validation sees only the actual SQL tokens.  This prevents
-    bypasses like ``EXPLAIN -- sneaky\\nANALYZE INSERT INTO ...``.
+    Handles single-line (-- ...) and block comments (/* ... */), including
+    nested block comments as supported by PostgreSQL.  This prevents bypasses
+    like ``EXPLAIN -- sneaky\\nANALYZE INSERT INTO ...`` and nested variants
+    like ``EXPLAIN /* outer /* inner */ ANALYZE */ SELECT 1``.
     """
-    return _SQL_COMMENT.sub(" ", sql)
+    # First strip single-line comments
+    result = _SQL_LINE_COMMENT.sub(" ", sql)
+    # Then strip block comments with nesting support
+    result = _strip_block_comments(result)
+    return result
+
+
+def _strip_block_comments(sql: str) -> str:
+    """Remove block comments (/* ... */) with support for nesting.
+
+    PostgreSQL supports nested block comments, so ``/* outer /* inner */ still comment */``
+    is a single comment.  A simple non-greedy regex would stop at the first ``*/``
+    and leave ``still comment */`` as executable SQL.
+    """
+    out: list[str] = []
+    depth = 0
+    i = 0
+    while i < len(sql):
+        if sql[i:i + 2] == "/*":
+            depth += 1
+            i += 2
+        elif sql[i:i + 2] == "*/" and depth > 0:
+            depth -= 1
+            i += 2
+            if depth == 0:
+                out.append(" ")  # Replace comment with space to preserve token separation
+        elif depth == 0:
+            out.append(sql[i])
+            i += 1
+        else:
+            i += 1  # Inside comment, skip character
+    return "".join(out)
 
 
 def _is_non_executing_explain(sql: str) -> bool:
@@ -319,7 +349,10 @@ class DatabaseToolset(Toolset):
             # that e.g. "EXPLAIN INSERT INTO t SELECT ..." works on
             # ClickHouse/Postgres.  EXPLAIN ANALYZE actually executes the
             # statement, so it must NOT bypass this check.
-            if not _is_non_executing_explain(check) and _WRITE_ANYWHERE_PATTERN.search(check):
+            # The bypass only applies to single-statement queries — semicolons
+            # could hide a write statement after the EXPLAIN.
+            is_safe_explain = _is_non_executing_explain(check) and not _SEMICOLON.search(check)
+            if not is_safe_explain and _WRITE_ANYWHERE_PATTERN.search(check):
                 raise ValueError(
                     f"Write operations are not allowed anywhere in the query. "
                     f"Only SELECT, SHOW, DESCRIBE, EXPLAIN, and WITH statements are permitted. "

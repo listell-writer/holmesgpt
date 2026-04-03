@@ -290,7 +290,7 @@ class TestReadOnlyValidation:
                 self.toolset.execute_query(sql)
             except ValueError:
                 pytest.fail(f"execute_query() incorrectly blocked read-only EXPLAIN: {sql}")
-            except Exception:
+            except (sqlalchemy.exc.OperationalError, sqlalchemy.exc.SQLAlchemyError):
                 pass  # Expected: connection/execution error (no real DB)
 
     def test_explain_analyze_write_via_execute_query_blocked(self):
@@ -305,6 +305,59 @@ class TestReadOnlyValidation:
         for sql in dangerous_queries:
             with pytest.raises(ValueError, match="Write operations are not allowed"):
                 self.toolset.execute_query(sql)
+
+    def test_multi_statement_explain_blocked(self):
+        """EXPLAIN followed by semicolon + write statement must be blocked."""
+        dangerous_queries = [
+            "EXPLAIN SELECT 1; DELETE FROM users",
+            "EXPLAIN SELECT 1; INSERT INTO users VALUES (1)",
+            "EXPLAIN SELECT 1 ; DROP TABLE users",
+        ]
+        for sql in dangerous_queries:
+            with pytest.raises(ValueError, match="Write operations are not allowed"):
+                self.toolset.execute_query(sql)
+
+    def test_nested_comment_stripping(self):
+        """Nested block comments must be fully stripped."""
+        # The entire nested comment should be removed as one unit
+        stripped = _strip_sql_comments("EXPLAIN /* a /* b */ c */ SELECT 1")
+        assert "a" not in stripped
+        assert "b" not in stripped
+        assert "c" not in stripped
+        assert "SELECT" in stripped
+
+        # ANALYZE inside a nested comment is stripped — the resulting query
+        # is a plain EXPLAIN (non-executing)
+        stripped = _strip_sql_comments(
+            "EXPLAIN /* outer /* inner */ ANALYZE */ SELECT 1"
+        )
+        assert "ANALYZE" not in stripped
+        assert "EXPLAIN" in stripped
+        assert "SELECT" in stripped
+
+    def test_nested_comment_with_semicolon_blocked(self):
+        """Nested comment hiding ANALYZE + semicolon write must be blocked by execute_query."""
+        # After stripping nested comments this becomes "EXPLAIN  SELECT 1; DELETE FROM users"
+        # which is blocked by the semicolon check
+        with pytest.raises(ValueError, match="Write operations are not allowed"):
+            self.toolset.execute_query(
+                "EXPLAIN /* outer /* inner */ ANALYZE */ SELECT 1; DELETE FROM users"
+            )
+
+    def test_nested_comment_explain_write_allowed(self):
+        """Nested comment that results in plain EXPLAIN + write is safe (single statement)."""
+        # After stripping: "EXPLAIN  INSERT INTO t VALUES (1)" — legitimate single-statement EXPLAIN
+        explain_queries = [
+            "EXPLAIN /* a /* b */ ANALYSE */ INSERT INTO t VALUES (1)",
+            "EXPLAIN /* comment */ CREATE TABLE t AS SELECT 1",
+        ]
+        for sql in explain_queries:
+            try:
+                self.toolset.execute_query(sql)
+            except ValueError:
+                pytest.fail(f"execute_query() incorrectly blocked: {sql}")
+            except (sqlalchemy.exc.OperationalError, sqlalchemy.exc.SQLAlchemyError):
+                pass  # Expected: connection/execution error (no real DB)
 
     def test_with_cte_allowed(self):
         assert _READONLY_PATTERN.match("WITH cte AS (SELECT 1) SELECT * FROM cte")
