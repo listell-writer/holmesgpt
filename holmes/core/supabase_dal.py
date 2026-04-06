@@ -949,20 +949,20 @@ class SupabaseDal:
 
     # --- OAuth Token Storage ---
 
-    def get_oauth_token(self, provider_name: str) -> Optional[Dict]:
-        """Get the OAuth token for a provider in this account, regardless of cluster."""
+    def get_oauth_token(self, provider_name: str, user_id: Optional[str] = None) -> Optional[Dict]:
+        """Get the OAuth token for a provider in this account, optionally scoped to a user."""
         if not self.enabled:
             return None
         try:
-            res = (
+            query = (
                 self.client.table(OAUTH_TOKENS_TABLE)
                 .select("*")
                 .eq("account_id", self.account_id)
                 .eq("provider_name", provider_name)
-                .order("updated_at", desc=True)
-                .limit(1)
-                .execute()
             )
+            if user_id:
+                query = query.eq("user_id", user_id)
+            res = query.order("updated_at", desc=True).limit(1).execute()
             return res.data[0] if res.data else None
         except Exception:
             logging.exception("Error fetching OAuth token for provider %s", provider_name)
@@ -974,36 +974,42 @@ class SupabaseDal:
         encrypted_token: str,
         signing_key_hash: str,
         token_expiry: Optional[str] = None,
+        user_id: Optional[str] = None,
     ) -> bool:
-        """Store or update an OAuth token for a provider in this account."""
+        """Store or update an OAuth token for a provider in this account, optionally scoped to a user."""
         if not self.enabled:
             return False
         try:
+            row = {
+                "account_id": self.account_id,
+                "cluster_name": self.cluster or "unknown",
+                "provider_name": provider_name,
+                "encrypted_token": encrypted_token,
+                "signing_key_hash": signing_key_hash,
+                "token_expiry": token_expiry,
+                "updated_at": "now()",
+                "user_id": user_id or "",
+            }
             self.client.table(OAUTH_TOKENS_TABLE).upsert(
-                {
-                    "account_id": self.account_id,
-                    "cluster_name": self.cluster or "unknown",
-                    "provider_name": provider_name,
-                    "encrypted_token": encrypted_token,
-                    "signing_key_hash": signing_key_hash,
-                    "token_expiry": token_expiry,
-                    "updated_at": "now()",
-                },
-                on_conflict="account_id,provider_name,signing_key_hash",
+                row,
+                on_conflict="account_id,provider_name,signing_key_hash,user_id",
             ).execute()
             return True
         except Exception:
             logging.exception("Error upserting OAuth token for provider %s", provider_name)
             return False
 
-    def delete_oauth_token(self, provider_name: str) -> bool:
-        """Delete OAuth tokens for a provider in this account."""
+    def delete_oauth_token(self, provider_name: str, user_id: Optional[str] = None) -> bool:
+        """Delete OAuth tokens for a provider in this account, optionally scoped to a user."""
         if not self.enabled:
             return False
         try:
-            self.client.table(OAUTH_TOKENS_TABLE).delete().eq(
+            query = self.client.table(OAUTH_TOKENS_TABLE).delete().eq(
                 "account_id", self.account_id
-            ).eq("provider_name", provider_name).execute()
+            ).eq("provider_name", provider_name)
+            if user_id:
+                query = query.eq("user_id", user_id)
+            query.execute()
             return True
         except Exception:
             logging.exception("Error deleting OAuth token for provider %s", provider_name)

@@ -137,6 +137,7 @@ class ChatRequestBaseModel(BaseModel):
     trace_span: Optional[Any] = (
         None  # Optional span for tracing and heartbeat callbacks
     )
+    user_id: Optional[str] = None  # User ID from relay session token validation
 
     # In our setup with litellm, the first message in conversation_history
     # should follow the structure [{"role": "system", "content": ...}],
