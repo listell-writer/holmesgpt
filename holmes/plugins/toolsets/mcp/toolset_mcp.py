@@ -683,7 +683,7 @@ def _decrypt_token_from_db(encrypted: str, signing_key: str) -> Optional[Dict[st
         return None
 
 
-def _store_token_to_db(oauth_config: MCPOAuthConfig, token_data: Dict[str, Any], context_id: str) -> None:
+def _store_token_to_db(oauth_config: MCPOAuthConfig, token_data: Dict[str, Any], context_id: str, user_id: Optional[str] = None) -> None:
     """Store an OAuth token to the DB for cross-cluster reuse, encrypted with signing_key."""
     signing_key = _get_signing_key()
     signing_key_hash = _get_signing_key_hash()
@@ -708,8 +708,9 @@ def _store_token_to_db(oauth_config: MCPOAuthConfig, token_data: Dict[str, Any],
             encrypted_token=encrypted,
             signing_key_hash=signing_key_hash,
             token_expiry=expiry,
+            user_id=user_id,
         )
-        logger.warning("OAuth: stored token to DB for provider %s", provider_name)
+        logger.warning("OAuth: stored token to DB for provider %s (user_id=%s)", provider_name, user_id)
     except Exception:
         logger.warning("OAuth: failed to store token to DB", exc_info=True)
 
@@ -724,11 +725,19 @@ def _get_conversation_key(request_context: Optional[Dict[str, Any]]) -> str:
     return "__default__"
 
 
+def _get_user_id(request_context: Optional[Dict[str, Any]]) -> Optional[str]:
+    """Extract user_id from request context (injected by relay from session token validation)."""
+    if request_context:
+        return request_context.get("user_id")
+    return None
+
+
 def _get_oauth_cache_key(oauth_config: MCPOAuthConfig, request_context: Optional[Dict[str, Any]]) -> str:
-    """Build a cache key from IdP identity + conversation. All MCP servers sharing the same IdP share the same token."""
+    """Build a cache key from IdP identity + user + conversation. All MCP servers sharing the same IdP share the same token."""
     conv_key = _get_conversation_key(request_context)
+    user_id = _get_user_id(request_context) or "__no_user__"
     idp_key = hashlib.sha256(f"{oauth_config.authorization_url}:{oauth_config.client_id}".encode()).hexdigest()[:12]
-    return f"{conv_key}:{idp_key}"
+    return f"{user_id}:{conv_key}:{idp_key}"
 
 
 class MCPConfig(ToolsetConfig):
@@ -842,7 +851,8 @@ def _inject_oauth_token(
     cached_token = _oauth_token_cache.get(cache_key)
     if not cached_token:
         # Access token expired or missing — try refresh before giving up
-        cached_token = _try_refresh_token(cache_key, oauth_config)
+        user_id = _get_user_id(request_context)
+        cached_token = _try_refresh_token(cache_key, oauth_config, user_id=user_id)
         if cached_token:
             logger.warning("OAuth token refreshed for MCP server %s (idp=%s)", toolset.name, oauth_config.authorization_url)
     if cached_token:
@@ -926,7 +936,8 @@ def decrypt_code_and_exchange_for_token(tool_call_id: str, encrypted_payload: st
         )
 
         # Store to DB for cross-cluster reuse
-        _store_token_to_db(pending.oauth_config, token_data, tool_call_id)
+        user_id = _get_user_id(request_context)
+        _store_token_to_db(pending.oauth_config, token_data, tool_call_id, user_id=user_id)
     except json.JSONDecodeError:
         logger.exception("OAuth token exchange: failed to parse JSON response from %s", pending.oauth_config.token_url)
     except httpx.HTTPStatusError:
@@ -935,7 +946,7 @@ def decrypt_code_and_exchange_for_token(tool_call_id: str, encrypted_payload: st
         logger.exception("OAuth token exchange failed (tool_call_id=%s, token_url=%s)", tool_call_id, pending.oauth_config.token_url)
 
 
-def _try_refresh_token(cache_key: str, oauth_config: MCPOAuthConfig) -> Optional[str]:
+def _try_refresh_token(cache_key: str, oauth_config: MCPOAuthConfig, user_id: Optional[str] = None) -> Optional[str]:
     """Attempt to refresh an expired access token using the cached refresh token. Returns new access token or None."""
     refresh_token = _oauth_token_cache.get_refresh_token(cache_key)
     if not refresh_token:
@@ -971,7 +982,7 @@ def _try_refresh_token(cache_key: str, oauth_config: MCPOAuthConfig) -> Optional
         )
         logger.warning("OAuth token refreshed (cache_key=%s, expires_in=%s)", cache_key, token_data.get("expires_in"))
         # Update DB with refreshed token
-        _store_token_to_db(oauth_config, token_data, "refresh")
+        _store_token_to_db(oauth_config, token_data, "refresh", user_id=user_id)
         return access_token
     except Exception:
         logger.warning("OAuth refresh failed (cache_key=%s)", cache_key, exc_info=True)
@@ -1050,10 +1061,12 @@ class RemoteMCPTool(Tool):
         oauth_config = self.toolset._mcp_config.oauth
         cache_key = _get_oauth_cache_key(oauth_config, context.request_context)
 
+        user_id = _get_user_id(context.request_context)
+
         if _oauth_token_cache.has(cache_key):
             # Try refresh if access token expired but refresh token is still valid
             if _oauth_token_cache.get(cache_key) is None:
-                refreshed = _try_refresh_token(cache_key, oauth_config)
+                refreshed = _try_refresh_token(cache_key, oauth_config, user_id=user_id)
                 if refreshed:
                     logger.warning("OAuth token refreshed for MCP %s, skipping approval (cache_key=%s)", self.toolset.name, cache_key)
                     return None
@@ -1069,7 +1082,7 @@ class RemoteMCPTool(Tool):
             signing_key_hash = _get_signing_key_hash()
             # provider_name in DB is the authorization_url (uniquely identifies the IdP)
             db_provider = oauth_config.authorization_url or self.toolset.name
-            db_record = _oauth_dal.get_oauth_token(db_provider)
+            db_record = _oauth_dal.get_oauth_token(db_provider, user_id=user_id)
             if not db_record:
                 logger.warning("OAuth MCP %s: no DB token found for provider=%s", self.toolset.name, db_provider)
             if db_record:
@@ -1123,7 +1136,7 @@ class RemoteMCPTool(Tool):
                     refresh_expires_in=token_data.get("refresh_expires_in"),
                 )
                 _disk_token_store.set(disk_key, token_data)
-                _store_token_to_db(oauth_config, token_data, "cli-flow")
+                _store_token_to_db(oauth_config, token_data, "cli-flow", user_id=user_id)
                 logger.warning("OAuth MCP %s: CLI auth successful, token cached (cache_key=%s)", self.toolset.name, cache_key)
                 return None  # Token obtained, no approval needed
             else:

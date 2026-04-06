@@ -362,6 +362,9 @@ def chat(chat_request: ChatRequest, http_request: Request):
             ]
 
         request_context = extract_passthrough_headers(http_request)
+        if chat_request.user_id:
+            request_context.setdefault("headers", {})
+            request_context["user_id"] = chat_request.user_id
 
         storage = tool_result_storage()
         tool_results_dir = storage.__enter__()
