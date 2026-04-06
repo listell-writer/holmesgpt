@@ -2,15 +2,19 @@
 
 import base64
 import json
+import threading
 import time
+from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import httpx
 import pytest
 from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.primitives.asymmetric import padding
+from pydantic import ConfigDict
 
 from holmes.plugins.toolsets.mcp.toolset_mcp import (
+    DiskTokenStore,
     MCPConfig,
     MCPMode,
     MCPOAuthConfig,
@@ -18,14 +22,20 @@ from holmes.plugins.toolsets.mcp.toolset_mcp import (
     OAuthTokenCache,
     RemoteMCPTool,
     RemoteMCPToolset,
+    _CachedToken,
     _cli_oauth_flow,
+    _encrypt_token_for_db,
+    _decrypt_token_from_db,
     _generate_pkce,
     _get_conversation_key,
     _get_oauth_cache_key,
+    _get_user_id,
+    _inject_oauth_token,
     _oauth_token_cache,
     _pending_exchanges,
     _exchanges_lock,
     _PendingOAuthExchange,
+    _try_refresh_token,
     decrypt_code_and_exchange_for_token,
 )
 
@@ -916,3 +926,609 @@ class TestCLIOAuthFlow:
             result = _cli_oauth_flow(oauth, "fail-test")
 
         assert result is None
+
+
+# ---------------------------------------------------------------------------
+# MCPOAuthConfig auto_enable validator
+# ---------------------------------------------------------------------------
+class TestMCPOAuthConfigAutoEnable:
+    def test_auto_enables_when_authorization_url_set(self):
+        oauth = MCPOAuthConfig(authorization_url="http://auth/authorize")
+        assert oauth.enabled is True
+
+    def test_auto_enables_when_token_url_set(self):
+        oauth = MCPOAuthConfig(token_url="http://auth/token")
+        assert oauth.enabled is True
+
+    def test_auto_enables_when_client_id_set(self):
+        oauth = MCPOAuthConfig(client_id="my-client")
+        assert oauth.enabled is True
+
+    def test_stays_disabled_when_nothing_set(self):
+        oauth = MCPOAuthConfig()
+        assert oauth.enabled is False
+
+    def test_explicit_enabled_false_overridden_by_fields(self):
+        oauth = MCPOAuthConfig(enabled=False, client_id="cid")
+        assert oauth.enabled is True
+
+
+# ---------------------------------------------------------------------------
+# _get_user_id
+# ---------------------------------------------------------------------------
+class TestGetUserId:
+    def test_returns_user_id(self):
+        ctx = {"user_id": "user-42"}
+        assert _get_user_id(ctx) == "user-42"
+
+    def test_returns_none_when_missing(self):
+        assert _get_user_id({}) is None
+
+    def test_returns_none_when_context_is_none(self):
+        assert _get_user_id(None) is None
+
+
+# ---------------------------------------------------------------------------
+# OAuthTokenCache — refresh token support
+# ---------------------------------------------------------------------------
+class TestOAuthTokenCacheRefresh:
+    def test_get_refresh_token_valid(self):
+        cache = OAuthTokenCache()
+        cache.set("k", "access", expires_in=60, refresh_token="refresh-tok", refresh_expires_in=3600)
+        assert cache.get_refresh_token("k") == "refresh-tok"
+
+    def test_get_refresh_token_expired(self):
+        cache = OAuthTokenCache()
+        cache.set("k", "access", expires_in=60, refresh_token="r", refresh_expires_in=3600)
+        cache._cache["k"].refresh_expires_at = time.monotonic() - 1
+        assert cache.get_refresh_token("k") is None
+
+    def test_get_refresh_token_missing(self):
+        cache = OAuthTokenCache()
+        assert cache.get_refresh_token("nonexistent") is None
+
+    def test_has_true_when_access_expired_but_refresh_valid(self):
+        cache = OAuthTokenCache()
+        cache.set("k", "access", expires_in=60, refresh_token="r", refresh_expires_in=3600)
+        cache._cache["k"].expires_at = time.monotonic() - 1
+        assert cache.has("k") is True
+
+    def test_get_returns_none_when_access_expired_refresh_valid(self):
+        """get() should return None when access is expired, even if refresh is valid — caller must refresh."""
+        cache = OAuthTokenCache()
+        cache.set("k", "access", expires_in=60, refresh_token="r", refresh_expires_in=3600)
+        cache._cache["k"].expires_at = time.monotonic() - 1
+        assert cache.get("k") is None
+
+    def test_both_expired_evicts_entry(self):
+        cache = OAuthTokenCache()
+        cache.set("k", "access", expires_in=60, refresh_token="r", refresh_expires_in=3600)
+        cache._cache["k"].expires_at = time.monotonic() - 1
+        cache._cache["k"].refresh_expires_at = time.monotonic() - 1
+        assert cache.has("k") is False
+        assert "k" not in cache._cache
+
+    def test_set_without_refresh_token(self):
+        cache = OAuthTokenCache()
+        cache.set("k", "access", expires_in=60)
+        entry = cache._cache["k"]
+        assert entry.refresh_token is None
+        assert entry.refresh_expires_at is None
+        assert entry.refresh_expired is True
+
+
+# ---------------------------------------------------------------------------
+# _CachedToken
+# ---------------------------------------------------------------------------
+class TestCachedToken:
+    def test_access_not_expired(self):
+        t = _CachedToken("tok", time.monotonic() + 100)
+        assert not t.access_expired
+
+    def test_access_expired(self):
+        t = _CachedToken("tok", time.monotonic() - 1)
+        assert t.access_expired
+
+    def test_refresh_expired_when_no_refresh(self):
+        t = _CachedToken("tok", time.monotonic() + 100)
+        assert t.refresh_expired
+
+    def test_refresh_not_expired(self):
+        t = _CachedToken("tok", time.monotonic() + 100, "rtok", time.monotonic() + 1000)
+        assert not t.refresh_expired
+
+
+# ---------------------------------------------------------------------------
+# DiskTokenStore
+# ---------------------------------------------------------------------------
+class TestDiskTokenStore:
+    def test_set_and_get(self, tmp_path):
+        store = DiskTokenStore.__new__(DiskTokenStore)
+        store._path = tmp_path / "auth" / "mcp_tokens.json"
+        store._enabled = True
+        store._lock = threading.Lock()
+        store._path.parent.mkdir(parents=True, exist_ok=True)
+
+        token_data = {"access_token": "abc", "expires_at": time.time() + 3600}
+        store.set("server-1", token_data)
+
+        result = store.get("server-1")
+        assert result is not None
+        assert result["access_token"] == "abc"
+
+    def test_get_returns_none_when_expired(self, tmp_path):
+        store = DiskTokenStore.__new__(DiskTokenStore)
+        store._path = tmp_path / "auth" / "mcp_tokens.json"
+        store._enabled = True
+        store._lock = threading.Lock()
+        store._path.parent.mkdir(parents=True, exist_ok=True)
+
+        token_data = {"access_token": "old", "expires_at": time.time() - 10}
+        store.set("expired", token_data)
+        assert store.get("expired") is None
+
+    def test_has(self, tmp_path):
+        store = DiskTokenStore.__new__(DiskTokenStore)
+        store._path = tmp_path / "auth" / "mcp_tokens.json"
+        store._enabled = True
+        store._lock = threading.Lock()
+        store._path.parent.mkdir(parents=True, exist_ok=True)
+
+        assert store.has("missing") is False
+        store.set("present", {"access_token": "t", "expires_at": time.time() + 3600})
+        assert store.has("present") is True
+
+    def test_disabled_store(self, tmp_path):
+        store = DiskTokenStore.__new__(DiskTokenStore)
+        store._path = tmp_path / "auth" / "mcp_tokens.json"
+        store._enabled = False
+        store._lock = threading.Lock()
+
+        store.set("k", {"access_token": "t"})
+        assert store.get("k") is None
+
+    def test_corrupted_file(self, tmp_path):
+        store = DiskTokenStore.__new__(DiskTokenStore)
+        store._path = tmp_path / "auth" / "mcp_tokens.json"
+        store._enabled = True
+        store._lock = threading.Lock()
+        store._path.parent.mkdir(parents=True, exist_ok=True)
+        store._path.write_text("not valid json{{{")
+
+        assert store.get("k") is None
+
+
+# ---------------------------------------------------------------------------
+# DB token encryption / decryption
+# ---------------------------------------------------------------------------
+class TestDBTokenEncryption:
+    def test_roundtrip(self):
+        signing_key = "test-signing-key-for-encryption"
+        token_data = {"access_token": "abc123", "refresh_token": "ref456", "expires_in": 300}
+        encrypted = _encrypt_token_for_db(token_data, signing_key)
+        assert encrypted != json.dumps(token_data)
+
+        decrypted = _decrypt_token_from_db(encrypted, signing_key)
+        assert decrypted == token_data
+
+    def test_wrong_signing_key_returns_none(self):
+        token_data = {"access_token": "secret"}
+        encrypted = _encrypt_token_for_db(token_data, "correct-key")
+        result = _decrypt_token_from_db(encrypted, "wrong-key")
+        assert result is None
+
+    def test_garbage_input_returns_none(self):
+        result = _decrypt_token_from_db("not-valid-fernet-ciphertext", "some-key")
+        assert result is None
+
+
+# ---------------------------------------------------------------------------
+# _try_refresh_token
+# ---------------------------------------------------------------------------
+class TestTryRefreshToken:
+    def _setup_cache_with_refresh(self, cache_key: str, refresh_token: str = "refresh-123"):
+        _oauth_token_cache.set(
+            cache_key, "old-access", expires_in=60,
+            refresh_token=refresh_token, refresh_expires_in=3600,
+        )
+        _oauth_token_cache._cache[cache_key].expires_at = time.monotonic() - 1
+
+    def test_successful_refresh(self):
+        cache_key = "refresh-test-success"
+        self._setup_cache_with_refresh(cache_key)
+
+        oauth = MCPOAuthConfig(
+            enabled=True,
+            authorization_url="http://idp/auth",
+            token_url="http://idp/token",
+            client_id="cid",
+        )
+
+        mock_resp = MagicMock()
+        mock_resp.status_code = 200
+        mock_resp.json.return_value = {
+            "access_token": "new-access-tok",
+            "expires_in": 600,
+            "refresh_token": "new-refresh-tok",
+        }
+
+        with patch("holmes.plugins.toolsets.mcp.toolset_mcp.httpx.post", return_value=mock_resp) as mock_post, \
+             patch("holmes.plugins.toolsets.mcp.toolset_mcp._store_token_to_db"):
+            result = _try_refresh_token(cache_key, oauth)
+
+        assert result == "new-access-tok"
+        assert _oauth_token_cache.get(cache_key) == "new-access-tok"
+        mock_post.assert_called_once()
+        call_data = mock_post.call_args[1]["data"]
+        assert call_data["grant_type"] == "refresh_token"
+        assert call_data["refresh_token"] == "refresh-123"
+
+    def test_refresh_http_failure(self):
+        cache_key = "refresh-test-fail"
+        self._setup_cache_with_refresh(cache_key)
+
+        oauth = MCPOAuthConfig(
+            enabled=True,
+            authorization_url="http://idp/auth",
+            token_url="http://idp/token",
+            client_id="cid",
+        )
+
+        mock_resp = MagicMock()
+        mock_resp.status_code = 401
+        mock_resp.json.return_value = {}
+
+        with patch("holmes.plugins.toolsets.mcp.toolset_mcp.httpx.post", return_value=mock_resp):
+            result = _try_refresh_token(cache_key, oauth)
+
+        assert result is None
+
+    def test_no_refresh_token_in_cache(self):
+        oauth = MCPOAuthConfig(
+            enabled=True,
+            authorization_url="http://idp/auth",
+            token_url="http://idp/token",
+            client_id="cid",
+        )
+        result = _try_refresh_token("no-refresh-entry", oauth)
+        assert result is None
+
+
+# ---------------------------------------------------------------------------
+# _inject_oauth_token
+# ---------------------------------------------------------------------------
+class TestInjectOAuthToken:
+    def _make_toolset(self, oauth_config=None):
+        ts = RemoteMCPToolset(name="inject-test", enabled=True)
+        ts._mcp_config = MCPConfig(
+            url="http://mcp:8000",
+            mode=MCPMode.STREAMABLE_HTTP,
+            oauth=oauth_config,
+        )
+        return ts
+
+    def test_injects_bearer_when_cached(self):
+        oauth = MCPOAuthConfig(
+            enabled=True,
+            authorization_url="http://idp/auth",
+            token_url="http://idp/token",
+            client_id="inject-cid",
+        )
+        ts = self._make_toolset(oauth)
+        ctx = {"headers": {"X-Conversation-Id": "inject-conv"}}
+        cache_key = _get_oauth_cache_key(oauth, ctx)
+        _oauth_token_cache.set(cache_key, "my-bearer-token", expires_in=300)
+
+        result = _inject_oauth_token(ts, ctx, {})
+        assert result["Authorization"] == "Bearer my-bearer-token"
+
+    def test_preserves_existing_headers(self):
+        oauth = MCPOAuthConfig(
+            enabled=True,
+            authorization_url="http://idp/auth",
+            token_url="http://idp/token",
+            client_id="inject-cid-2",
+        )
+        ts = self._make_toolset(oauth)
+        ctx = {"headers": {"X-Conversation-Id": "inject-conv-2"}}
+        cache_key = _get_oauth_cache_key(oauth, ctx)
+        _oauth_token_cache.set(cache_key, "tok", expires_in=300)
+
+        result = _inject_oauth_token(ts, ctx, {"X-Custom": "val"})
+        assert result["Authorization"] == "Bearer tok"
+        assert result["X-Custom"] == "val"
+
+    def test_no_injection_without_oauth(self):
+        ts = self._make_toolset(oauth_config=None)
+        result = _inject_oauth_token(ts, None, {"X-Existing": "v"})
+        assert result == {"X-Existing": "v"}
+        assert "Authorization" not in result
+
+    def test_no_injection_when_no_cached_token(self):
+        oauth = MCPOAuthConfig(
+            enabled=True,
+            authorization_url="http://idp-no-cache/auth",
+            token_url="http://idp-no-cache/token",
+            client_id="no-cache-cid",
+        )
+        ts = self._make_toolset(oauth)
+        ctx = {"headers": {"X-Conversation-Id": "no-cache-conv"}}
+
+        with patch("holmes.plugins.toolsets.mcp.toolset_mcp._try_refresh_token", return_value=None):
+            result = _inject_oauth_token(ts, ctx, None)
+
+        assert result is None or "Authorization" not in (result or {})
+
+    def test_triggers_refresh_on_expired_access(self):
+        oauth = MCPOAuthConfig(
+            enabled=True,
+            authorization_url="http://idp-refresh/auth",
+            token_url="http://idp-refresh/token",
+            client_id="refresh-inject-cid",
+        )
+        ts = self._make_toolset(oauth)
+        ctx = {"headers": {"X-Conversation-Id": "refresh-inject-conv"}}
+        cache_key = _get_oauth_cache_key(oauth, ctx)
+
+        _oauth_token_cache.set(cache_key, "old", expires_in=60, refresh_token="r", refresh_expires_in=3600)
+        _oauth_token_cache._cache[cache_key].expires_at = time.monotonic() - 1
+
+        with patch("holmes.plugins.toolsets.mcp.toolset_mcp._try_refresh_token", return_value="refreshed-tok") as mock_refresh:
+            result = _inject_oauth_token(ts, ctx, None)
+
+        mock_refresh.assert_called_once()
+        assert result is not None
+        assert result["Authorization"] == "Bearer refreshed-tok"
+
+
+# ---------------------------------------------------------------------------
+# _discover_oauth_endpoints (mocked HTTP)
+# ---------------------------------------------------------------------------
+class TestDiscoverOAuthEndpoints:
+    def _make_toolset_for_discovery(self):
+        ts = RemoteMCPToolset(name="discover-test", enabled=True)
+        ts._mcp_config = MCPConfig(
+            url="http://mcp-server:8000/v1/mcp",
+            mode=MCPMode.STREAMABLE_HTTP,
+            oauth=MCPOAuthConfig(enabled=True),
+        )
+        return ts
+
+    def _mock_401_response(self, www_authenticate=""):
+        resp = MagicMock(spec=httpx.Response)
+        resp.status_code = 401
+        resp.headers = {"www-authenticate": www_authenticate}
+        return resp
+
+    def test_discovery_via_legacy_fallback(self):
+        """When PRM returns 404, falls back to /.well-known/oauth-authorization-server."""
+        ts = self._make_toolset_for_discovery()
+        initial_resp = self._mock_401_response()
+
+        def mock_get(url, **kwargs):
+            resp = MagicMock()
+            if "oauth-protected-resource" in url:
+                resp.status_code = 404
+                return resp
+            if "oauth-authorization-server" in url:
+                resp.status_code = 200
+                resp.json.return_value = {
+                    "authorization_endpoint": "http://idp/authorize",
+                    "token_endpoint": "http://idp/token",
+                    "registration_endpoint": "http://idp/register",
+                }
+                return resp
+            resp.status_code = 404
+            return resp
+
+        with patch("holmes.plugins.toolsets.mcp.toolset_mcp.httpx.get", side_effect=mock_get):
+            result = ts._discover_oauth_endpoints("http://mcp-server:8000/v1/mcp", initial_resp)
+
+        assert result is True
+        assert ts._mcp_config.oauth.authorization_url == "http://idp/authorize"
+        assert ts._mcp_config.oauth.token_url == "http://idp/token"
+        assert ts._mcp_config.oauth.registration_endpoint == "http://idp/register"
+
+    def test_discovery_via_prm(self):
+        """PRM returns auth server, then fetches OIDC metadata from that server."""
+        ts = self._make_toolset_for_discovery()
+        initial_resp = self._mock_401_response()
+
+        def mock_get(url, **kwargs):
+            resp = MagicMock()
+            if "oauth-protected-resource" in url:
+                resp.status_code = 200
+                resp.json.return_value = {
+                    "authorization_servers": ["http://auth-server.example.com/realm"],
+                    "scopes_supported": ["mcp:tools"],
+                }
+                return resp
+            if "auth-server.example.com" in url and "oauth-authorization-server" in url:
+                resp.status_code = 200
+                resp.json.return_value = {
+                    "authorization_endpoint": "http://auth-server.example.com/realm/authorize",
+                    "token_endpoint": "http://auth-server.example.com/realm/token",
+                }
+                return resp
+            resp.status_code = 404
+            return resp
+
+        with patch("holmes.plugins.toolsets.mcp.toolset_mcp.httpx.get", side_effect=mock_get):
+            result = ts._discover_oauth_endpoints("http://mcp-server:8000/v1/mcp", initial_resp)
+
+        assert result is True
+        assert ts._mcp_config.oauth.authorization_url == "http://auth-server.example.com/realm/authorize"
+        assert ts._mcp_config.oauth.token_url == "http://auth-server.example.com/realm/token"
+        assert ts._mcp_config.oauth.scopes == ["mcp:tools"]
+
+    def test_discovery_via_www_authenticate_header(self):
+        """resource_metadata URL from WWW-Authenticate header is tried first."""
+        ts = self._make_toolset_for_discovery()
+        initial_resp = self._mock_401_response(
+            www_authenticate='Bearer resource_metadata="http://custom-prm/metadata"'
+        )
+
+        call_urls = []
+
+        def mock_get(url, **kwargs):
+            call_urls.append(url)
+            resp = MagicMock()
+            if url == "http://custom-prm/metadata":
+                resp.status_code = 200
+                resp.json.return_value = {
+                    "authorization_servers": ["http://custom-auth"],
+                }
+                return resp
+            if "custom-auth" in url and "oauth-authorization-server" in url:
+                resp.status_code = 200
+                resp.json.return_value = {
+                    "authorization_endpoint": "http://custom-auth/authorize",
+                    "token_endpoint": "http://custom-auth/token",
+                }
+                return resp
+            resp.status_code = 404
+            return resp
+
+        with patch("holmes.plugins.toolsets.mcp.toolset_mcp.httpx.get", side_effect=mock_get):
+            result = ts._discover_oauth_endpoints("http://mcp-server:8000/v1/mcp", initial_resp)
+
+        assert result is True
+        assert call_urls[0] == "http://custom-prm/metadata"
+
+    def test_discovery_fails_when_no_metadata(self):
+        """Returns False when all discovery attempts fail."""
+        ts = self._make_toolset_for_discovery()
+        initial_resp = self._mock_401_response()
+
+        def mock_get(url, **kwargs):
+            resp = MagicMock()
+            resp.status_code = 404
+            return resp
+
+        with patch("holmes.plugins.toolsets.mcp.toolset_mcp.httpx.get", side_effect=mock_get):
+            result = ts._discover_oauth_endpoints("http://mcp-server:8000/v1/mcp", initial_resp)
+
+        assert result is False
+
+    def test_discovery_preserves_existing_config(self):
+        """If authorization_url is already set, discovery doesn't overwrite it."""
+        ts = self._make_toolset_for_discovery()
+        ts._mcp_config.oauth.authorization_url = "http://manual/authorize"
+        initial_resp = self._mock_401_response()
+
+        def mock_get(url, **kwargs):
+            resp = MagicMock()
+            if "oauth-authorization-server" in url:
+                resp.status_code = 200
+                resp.json.return_value = {
+                    "authorization_endpoint": "http://discovered/authorize",
+                    "token_endpoint": "http://discovered/token",
+                }
+                return resp
+            resp.status_code = 404
+            return resp
+
+        with patch("holmes.plugins.toolsets.mcp.toolset_mcp.httpx.get", side_effect=mock_get):
+            result = ts._discover_oauth_endpoints("http://mcp-server:8000/v1/mcp", initial_resp)
+
+        assert result is True
+        assert ts._mcp_config.oauth.authorization_url == "http://manual/authorize"
+        assert ts._mcp_config.oauth.token_url == "http://discovered/token"
+
+
+# ---------------------------------------------------------------------------
+# ToolExecutor — dynamic tools and prefix stripping
+# ---------------------------------------------------------------------------
+class TestToolExecutorDynamicTools:
+    """Tests for ToolExecutor._sync_dynamic_tools and prefix-stripping lookup."""
+
+    def _make_tool(self, name: str, description: str = "test tool"):
+        from holmes.core.tools import Tool, ToolInvokeContext, StructuredToolResult
+
+        class FakeTool(Tool):
+            def _invoke(self, params: dict, context: ToolInvokeContext) -> StructuredToolResult:
+                return StructuredToolResult(status="success", data="ok", params=params, invocation=self.name)
+
+            def get_parameterized_one_liner(self, params: dict) -> str:
+                return f"{self.name}({params})"
+
+        return FakeTool(name=name, description=description, parameters={})
+
+    def _make_toolset(self, name: str, tools: list):
+        from holmes.core.tools import Toolset, ToolsetStatusEnum, ToolsetTag
+
+        class FakeToolset(Toolset):
+            model_config = ConfigDict(extra="forbid")
+
+        ts = FakeToolset(name=name, description="test", enabled=True, tools=tools, tags=[ToolsetTag.CORE])
+        ts.status = ToolsetStatusEnum.ENABLED
+        return ts
+
+    def test_prefix_stripping(self):
+        from holmes.core.tools_utils.tool_executor import ToolExecutor
+
+        tool = self._make_tool("add_numbers")
+        ts = self._make_toolset("my-mcp", [tool])
+        executor = ToolExecutor([ts])
+
+        assert executor.get_tool_by_name("add_numbers") is tool
+        found = executor.get_tool_by_name("my-mcp_add_numbers")
+        assert found is tool
+
+    def test_unknown_tool_returns_none(self):
+        from holmes.core.tools_utils.tool_executor import ToolExecutor
+
+        tool = self._make_tool("some_tool")
+        ts = self._make_toolset("ts", [tool])
+        executor = ToolExecutor([ts])
+
+        assert executor.get_tool_by_name("nonexistent") is None
+
+    def test_dynamic_tool_registration(self):
+        from holmes.core.tools_utils.tool_executor import ToolExecutor
+
+        tool1 = self._make_tool("initial_tool")
+        ts = self._make_toolset("dynamic-ts", [tool1])
+        executor = ToolExecutor([ts])
+
+        assert executor.get_tool_by_name("initial_tool") is tool1
+        assert executor.get_tool_by_name("new_tool") is None
+
+        tool2 = self._make_tool("new_tool")
+        ts.tools.append(tool2)
+
+        found = executor.get_tool_by_name("new_tool")
+        assert found is tool2
+
+
+# ---------------------------------------------------------------------------
+# OAuthKeyExchange — edge cases
+# ---------------------------------------------------------------------------
+class TestOAuthKeyExchangeEdgeCases:
+    def test_server_mode_persists_encrypted(self, tmp_path):
+        """Server mode with signing_key creates encrypted key file."""
+        key_dir = str(tmp_path / "server_keys")
+        kx = OAuthKeyExchange(signing_key="my-signing-key-uuid", key_store_dir=key_dir)
+        key_file = Path(key_dir) / "oauth_keypair.enc"
+        assert key_file.exists()
+        content = key_file.read_bytes()
+        assert b"BEGIN" not in content
+
+    def test_cli_mode_persists_encrypted(self, tmp_path):
+        """CLI mode creates encrypted key file."""
+        key_dir = str(tmp_path / "cli_keys")
+        kx = OAuthKeyExchange(key_store_dir=key_dir)
+        key_file = Path(key_dir) / "oauth_keypair.enc"
+        assert key_file.exists()
+        content = key_file.read_bytes()
+        assert b"BEGIN" not in content
+
+    def test_corrupted_key_file_regenerates(self, tmp_path):
+        """If the persisted key file is corrupted, a new key is generated."""
+        key_dir = str(tmp_path / "corrupt_keys")
+        Path(key_dir).mkdir(parents=True)
+        (Path(key_dir) / "oauth_keypair.enc").write_bytes(b"garbage data")
+
+        kx = OAuthKeyExchange(key_store_dir=key_dir)
+        pem = kx.get_public_key_pem()
+        assert pem.startswith("-----BEGIN PUBLIC KEY-----")
