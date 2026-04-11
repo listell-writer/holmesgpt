@@ -46,6 +46,7 @@ from holmes.core.models import (
     ChatRequest,
     ChatResponse,
     FollowUpAction,
+    StoreOAuthTokenRequest,
 )
 from holmes.core.prompt import PromptComponent
 from holmes.core.tools import ToolsetStatusEnum, ToolsetType
@@ -368,8 +369,28 @@ def chat(chat_request: ChatRequest, http_request: Request):
 
         storage = tool_result_storage()
         tool_results_dir = storage.__enter__()
+
+        # Preload real MCP tools for users with existing OAuth tokens,
+        # creating a per-request executor copy (shared executor is untouched).
+        # Skipped entirely when there are no OAuth MCP toolsets or no user_id.
+        tool_executor = None
+        if chat_request.user_id:
+            from holmes.plugins.toolsets.mcp.toolset_mcp import has_oauth_mcp_toolsets, preload_oauth_mcp_tools
+
+            base_executor = config.create_tool_executor(dal)
+            if has_oauth_mcp_toolsets(base_executor.toolsets):
+                logging.info("Preloading OAuth MCP tools for user %s", chat_request.user_id)
+                oauth_tools = preload_oauth_mcp_tools(base_executor.toolsets, request_context)
+                if oauth_tools:
+                    tool_executor = base_executor.with_replaced_tools(oauth_tools)
+                    logging.info(
+                        "Augmented tool executor with OAuth tools for user %s: %s",
+                        chat_request.user_id, list(oauth_tools.keys()),
+                    )
+
         ai = config.create_toolcalling_llm(
-            dal=dal, model=chat_request.model, tool_results_dir=tool_results_dir
+            dal=dal, model=chat_request.model, tool_results_dir=tool_results_dir,
+            tool_executor=tool_executor,
         )
         global_instructions = dal.get_global_instructions_for_account()
         messages = build_chat_messages(
@@ -430,6 +451,44 @@ def chat(chat_request: ChatRequest, http_request: Request):
 scheduled_prompts_executor = ScheduledPromptsExecutor(
     dal=dal, config=config, chat_function=chat
 )
+
+
+@app.post("/api/oauth")
+def store_oauth_token(request: StoreOAuthTokenRequest):
+    """Store an OAuth token from the frontend OAuth flow. Holmes encrypts and persists it."""
+    from holmes.plugins.toolsets.mcp.toolset_mcp import _token_manager
+
+    try:
+        # Find the MCP toolset to get its OAuth config
+        tool_executor = config.create_tool_executor(dal=dal)
+        toolset = None
+        for ts in tool_executor.toolsets:
+            if ts.name == request.toolset_name:
+                toolset = ts
+                break
+
+        if not toolset:
+            raise HTTPException(status_code=404, detail=f"Toolset '{request.toolset_name}' not found")
+
+        mcp_config = getattr(toolset, '_mcp_config', None)
+        if not mcp_config or not hasattr(mcp_config, 'oauth') or not mcp_config.oauth or not mcp_config.oauth.enabled:
+            raise HTTPException(status_code=400, detail=f"Toolset '{request.toolset_name}' does not have OAuth enabled")
+
+        # Build a minimal request_context with user_id for token scoping
+        request_context = {"user_id": request.user_id}
+
+        _token_manager.store_token(
+            oauth_config=mcp_config.oauth,
+            token_data=request.token_data,
+            request_context=request_context,
+        )
+
+        return {"success": True, "toolset_name": request.toolset_name}
+    except HTTPException:
+        raise
+    except Exception as e:
+        logging.error(f"Error storing OAuth token: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 @app.get("/api/model")

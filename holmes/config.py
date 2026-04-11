@@ -388,8 +388,10 @@ class Config(RobustaBaseConfig):
         model: Optional[str] = None,
         tracer=None,
         tool_results_dir: Optional[Path] = None,
+        tool_executor: Optional["ToolExecutor"] = None,
     ) -> "ToolCallingLLM":
-        tool_executor = self.create_tool_executor(dal)
+        if tool_executor is None:
+            tool_executor = self.create_tool_executor(dal)
         from holmes.core.tool_calling_llm import ToolCallingLLM
 
         return ToolCallingLLM(

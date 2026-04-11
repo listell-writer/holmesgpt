@@ -1,5 +1,5 @@
 import logging
-from typing import List, Optional
+from typing import Dict, List, Optional
 
 import sentry_sdk
 
@@ -131,3 +131,50 @@ class ToolExecutor:
                 continue
             tools.append(tool.get_openai_format())
         return tools
+
+    def with_replaced_tools(
+        self,
+        replacements: Dict[str, List[Tool]],
+    ) -> "ToolExecutor":
+        """Create a shallow copy with placeholder tools replaced by real tools.
+
+        For each toolset_name in replacements, removes all existing tools belonging
+        to that toolset and adds the replacement tools instead.
+
+        The original ToolExecutor is NOT modified.
+        """
+        new = object.__new__(ToolExecutor)
+        new.toolsets = list(self.toolsets)
+        new.enabled_toolsets = list(self.enabled_toolsets)
+        new._toolset_names = set(self._toolset_names)
+        new.tools_by_name = dict(self.tools_by_name)
+        new._tool_to_toolset = dict(self._tool_to_toolset)
+
+        for toolset_name, new_tools in replacements.items():
+            # Find the toolset object
+            toolset = None
+            for ts in new.enabled_toolsets:
+                if ts.name == toolset_name:
+                    toolset = ts
+                    break
+            if toolset is None:
+                continue
+
+            # Remove existing tools for this toolset (the placeholders)
+            to_remove = [
+                tool_name
+                for tool_name, ts in new._tool_to_toolset.items()
+                if ts.name == toolset_name
+            ]
+            for tool_name in to_remove:
+                new.tools_by_name.pop(tool_name, None)
+                new._tool_to_toolset.pop(tool_name, None)
+
+            # Add replacement tools
+            for tool in new_tools:
+                if tool.icon_url is None and toolset.icon_url is not None:
+                    tool.icon_url = toolset.icon_url
+                new.tools_by_name[tool.name] = tool
+                new._tool_to_toolset[tool.name] = toolset
+
+        return new
