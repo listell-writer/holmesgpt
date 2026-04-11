@@ -7,12 +7,11 @@ import os
 import threading
 import time
 from contextlib import asynccontextmanager
+from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any, ClassVar, Dict, List, Optional, TextIO, Tuple, Type, Union
 
 import httpx
-from cryptography.hazmat.primitives import hashes, serialization
-from cryptography.hazmat.primitives.asymmetric import padding, rsa
 from mcp.client.session import ClientSession
 from mcp.client.sse import sse_client
 from mcp.client.stdio import StdioServerParameters, stdio_client
@@ -31,6 +30,12 @@ from holmes.core.tools import (
     ToolInvokeContext,
     ToolParameter,
     Toolset,
+)
+from holmes.plugins.toolsets.mcp.oauth_token_manager import OAuthTokenManager
+from holmes.plugins.toolsets.mcp.oauth_token_store import (
+    DiskTokenStore,
+    OAuthTokenCache,
+    _CachedToken,
 )
 from holmes.utils.header_rendering import render_header_templates
 from holmes.utils.pydantic_utils import ToolsetConfig
@@ -141,167 +146,6 @@ def _get_signing_key() -> Optional[str]:
         return None
 
 
-# Cached singleton — derived once from signing_key, reused for all OAuth flows
-_deterministic_keypair: Optional["OAuthKeyExchange"] = None
-
-
-class OAuthKeyExchange:
-    """RSA keypair for secure auth code transit from frontend to Holmes.
-
-    When a signing_key is available (in-cluster), derives a deterministic keypair
-    from it — same key every time, survives Holmes restarts. In CLI mode (no
-    signing_key), generates a random keypair per instance.
-
-    The frontend encrypts the OAuth authorization code with the public key.
-    Holmes decrypts with the private key, then exchanges the code for
-    a token server-side (so the access token never leaves the cluster).
-    """
-
-    def __init__(self, signing_key: Optional[str] = None, key_store_dir: Optional[str] = None) -> None:
-        if signing_key:
-            # Server mode: persist encrypted with signing_key
-            self._private_key = self._load_or_generate_persistent_key(signing_key, key_store_dir)
-        else:
-            # CLI mode: persist unencrypted in ~/.holmes/auth/
-            self._private_key = self._load_or_generate_cli_key(key_store_dir)
-
-    @staticmethod
-    def _load_or_generate_persistent_key(signing_key: str, key_store_dir: Optional[str] = None) -> Any:
-        """Load persisted RSA key or generate + persist a new one, encrypted with signing_key."""
-        from cryptography.fernet import Fernet
-        from cryptography.hazmat.primitives.kdf.hkdf import HKDF
-        from pathlib import Path
-
-        # Derive a Fernet key from signing_key for encrypting the RSA private key at rest
-        fernet_key = base64.urlsafe_b64encode(
-            HKDF(algorithm=hashes.SHA256(), length=32, salt=b"holmesgpt-oauth-fernet", info=b"key-encryption")
-            .derive(signing_key.encode())
-        )
-        fernet = Fernet(fernet_key)
-
-        if key_store_dir:
-            key_path = Path(key_store_dir) / "oauth_keypair.enc"
-        else:
-            key_path = Path(os.environ.get("RUNNER_CONFIG_PATH", "/etc/robusta/config")).parent / "oauth_keypair.enc"
-
-        # Try to load existing key
-        if key_path.exists():
-            try:
-                encrypted_pem = key_path.read_bytes()
-                pem_bytes = fernet.decrypt(encrypted_pem)
-                logger.warning("OAuth: loaded persisted keypair from %s", key_path)
-                return serialization.load_pem_private_key(pem_bytes, password=None)
-            except Exception:
-                logger.warning("OAuth: failed to load persisted keypair, generating new one")
-
-        # Generate new keypair
-        private_key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
-
-        # Persist encrypted
-        try:
-            pem_bytes = private_key.private_bytes(
-                serialization.Encoding.PEM,
-                serialization.PrivateFormat.PKCS8,
-                serialization.NoEncryption(),
-            )
-            key_path.parent.mkdir(parents=True, exist_ok=True)
-            key_path.write_bytes(fernet.encrypt(pem_bytes))
-            logger.warning("OAuth: generated and persisted new keypair at %s", key_path)
-        except Exception:
-            logger.warning("OAuth: could not persist keypair (read-only filesystem?), will regenerate on restart", exc_info=True)
-
-        return private_key
-
-    @staticmethod
-    def _load_or_generate_cli_key(key_store_dir: Optional[str] = None) -> Any:
-        """Load or generate a persisted RSA key for CLI mode.
-
-        Encrypted at rest using a passphrase derived from machine identity
-        (hostname + username). File permissions set to 600 (owner-only).
-        Stored in ~/.holmes/auth/ by default.
-        """
-        import getpass
-        import platform
-        import stat
-        from cryptography.hazmat.primitives.kdf.hkdf import HKDF
-        from cryptography.fernet import Fernet
-        from pathlib import Path
-
-        # Derive encryption key from machine identity (not secret, but prevents casual file copying)
-        machine_id = f"{platform.node()}:{getpass.getuser()}:holmesgpt-oauth"
-        fernet_key = base64.urlsafe_b64encode(
-            HKDF(algorithm=hashes.SHA256(), length=32, salt=b"holmesgpt-cli-keypair", info=b"cli-key-encryption")
-            .derive(machine_id.encode())
-        )
-        fernet = Fernet(fernet_key)
-
-        if key_store_dir:
-            key_path = Path(key_store_dir) / "oauth_keypair.enc"
-        else:
-            from holmes.core.config import config_path_dir
-            key_path = Path(config_path_dir) / "auth" / "oauth_keypair.enc"
-
-        # Try to load existing key
-        if key_path.exists():
-            try:
-                encrypted_pem = key_path.read_bytes()
-                pem_bytes = fernet.decrypt(encrypted_pem)
-                logger.warning("OAuth: loaded persisted CLI keypair from %s", key_path)
-                return serialization.load_pem_private_key(pem_bytes, password=None)
-            except Exception:
-                logger.warning("OAuth: failed to load persisted CLI keypair, generating new one")
-
-        # Generate new keypair
-        private_key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
-
-        # Persist encrypted with restricted permissions
-        try:
-            pem_bytes = private_key.private_bytes(
-                serialization.Encoding.PEM,
-                serialization.PrivateFormat.PKCS8,
-                serialization.NoEncryption(),
-            )
-            key_path.parent.mkdir(parents=True, exist_ok=True)
-            key_path.write_bytes(fernet.encrypt(pem_bytes))
-            key_path.chmod(stat.S_IRUSR | stat.S_IWUSR)  # 600 — owner read/write only
-            logger.warning("OAuth: generated and persisted CLI keypair at %s (mode 600)", key_path)
-        except Exception:
-            logger.warning("OAuth: could not persist CLI keypair, will regenerate on restart", exc_info=True)
-
-        return private_key
-
-    def get_public_key_pem(self) -> str:
-        return self._private_key.public_key().public_bytes(
-            serialization.Encoding.PEM,
-            serialization.PublicFormat.SubjectPublicKeyInfo,
-        ).decode()
-
-    def decrypt(self, encrypted_b64: str) -> str:
-        """Decrypt a base64-encoded RSA-OAEP ciphertext."""
-        ciphertext = base64.b64decode(encrypted_b64)
-        plaintext = self._private_key.decrypt(
-            ciphertext,
-            padding.OAEP(
-                mgf=padding.MGF1(algorithm=hashes.SHA256()),
-                algorithm=hashes.SHA256(),
-                label=None,
-            ),
-        )
-        return plaintext.decode()
-
-
-def get_oauth_key_exchange() -> OAuthKeyExchange:
-    """Get the singleton OAuthKeyExchange. Uses signing_key if available for persistence."""
-    global _deterministic_keypair
-    if _deterministic_keypair is None:
-        signing_key = _get_signing_key()
-        _deterministic_keypair = OAuthKeyExchange(signing_key=signing_key)
-        if signing_key:
-            logger.warning("OAuth: initialized deterministic keypair from signing_key (persistent across restarts)")
-        else:
-            logger.warning("OAuth: initialized random keypair (CLI mode, not persistent)")
-    return _deterministic_keypair
-
 
 def _generate_pkce() -> Tuple[str, str]:
     """Generate PKCE code_verifier and code_challenge (S256).
@@ -317,134 +161,123 @@ def _generate_pkce() -> Tuple[str, str]:
     return code_verifier, code_challenge
 
 
-class _CachedToken:
-    """Holds an access token, its expiry, and an optional refresh token."""
+# _CachedToken, OAuthTokenCache, DiskTokenStore are now in oauth_token_store.py
+# _encrypt_token_for_db, _decrypt_token_from_db are now in oauth_token_store.py
 
-    def __init__(self, access_token: str, expires_at: float, refresh_token: Optional[str] = None, refresh_expires_at: Optional[float] = None) -> None:
-        self.access_token = access_token
-        self.expires_at = expires_at
-        self.refresh_token = refresh_token
-        self.refresh_expires_at = refresh_expires_at
+# Singleton token manager — the main interface for all token operations
+_token_manager = OAuthTokenManager()
+_token_manager.set_signing_key_getter(_get_signing_key)
 
-    @property
-    def access_expired(self) -> bool:
-        return time.monotonic() >= self.expires_at
+# Backwards-compat aliases used by existing code and tests
+_oauth_token_cache = _token_manager.cache
+_disk_token_store = _token_manager.disk_store
 
-    @property
-    def refresh_expired(self) -> bool:
-        if self.refresh_token is None or self.refresh_expires_at is None:
+# ── Per-user MCP tool cache (TTL-based, never mutates the shared executor) ──
+
+_MCP_TOOLS_CACHE_TTL = 300  # 5 minutes
+
+
+@dataclass
+class _LoadedToolsEntry:
+    """Cached MCP tools loaded after OAuth authentication."""
+
+    tools: List[Any]  # List[RemoteMCPTool] — forward ref
+    toolset: Any  # RemoteMCPToolset — forward ref
+    loaded_at: float = field(default_factory=time.monotonic)
+
+
+_mcp_tools_cache: Dict[str, _LoadedToolsEntry] = {}
+_mcp_tools_cache_lock = threading.Lock()
+
+
+def has_oauth_mcp_toolsets(toolsets: List[Any]) -> bool:
+    """Quick check: are there any OAuth-enabled MCP toolsets?
+
+    Use this to skip the preload path entirely when no OAuth MCP servers are configured.
+    """
+    for ts in toolsets:
+        if (
+            isinstance(ts, RemoteMCPToolset)
+            and isinstance(ts._mcp_config, MCPConfig)
+            and ts._mcp_config.oauth
+            and ts._mcp_config.oauth.enabled
+        ):
             return True
-        return time.monotonic() >= self.refresh_expires_at
+    return False
 
 
-class OAuthTokenCache:
-    """TTL cache for OAuth tokens keyed by conversation ID, with refresh token support."""
+def preload_oauth_mcp_tools(
+    toolsets: List[Any],
+    request_context: Optional[Dict[str, Any]],
+) -> Dict[str, List[Any]]:
+    """Load real MCP tools for OAuth toolsets that have cached tokens.
 
-    def __init__(self) -> None:
-        self._cache: Dict[str, _CachedToken] = {}
-        self._lock = threading.Lock()
+    Checks the token manager for existing tokens (cache → refresh → DB → disk).
+    Loaded tools are cached per (user_id, toolset_name) with a 5-minute TTL.
 
-    def get(self, key: str) -> Optional[str]:
-        """Return a valid access token, or None if expired and not refreshable."""
-        with self._lock:
-            entry = self._cache.get(key)
-            if entry is None:
-                return None
-            if not entry.access_expired:
-                return entry.access_token
-            # Access token expired — caller must try refresh
-            if not entry.refresh_expired:
-                return None  # Has refresh token but access expired — caller should refresh
-            # Both expired
-            del self._cache[key]
-            return None
+    Returns a dict of toolset_name -> list of RemoteMCPTool to replace placeholders.
+    The shared tool executor is NOT modified.
+    """
+    result: Dict[str, List[Any]] = {}
+    now = time.monotonic()
 
-    def get_refresh_token(self, key: str) -> Optional[str]:
-        """Return the refresh token if it hasn't expired, even if the access token has."""
-        with self._lock:
-            entry = self._cache.get(key)
-            if entry is None:
-                return None
-            if not entry.refresh_expired:
-                return entry.refresh_token
-            return None
+    for ts in toolsets:
+        if not isinstance(ts, RemoteMCPToolset):
+            continue
+        if not isinstance(ts._mcp_config, MCPConfig):
+            continue
+        if not ts._mcp_config.oauth or not ts._mcp_config.oauth.enabled:
+            continue
 
-    def set(self, key: str, access_token: str, expires_in: int = 300, refresh_token: Optional[str] = None, refresh_expires_in: Optional[int] = None) -> None:
-        now = time.monotonic()
-        # Subtract a small buffer so we refresh before actual expiry
-        access_expires_at = now + max(expires_in - 30, 10)
-        refresh_expires_at = None
-        if refresh_token:
-            # Default to 24 hours if IdP doesn't return refresh_expires_in (not all do)
-            refresh_ttl = refresh_expires_in if refresh_expires_in else 86400
-            refresh_expires_at = now + max(refresh_ttl - 30, 10)
-        with self._lock:
-            self._cache[key] = _CachedToken(access_token, access_expires_at, refresh_token, refresh_expires_at)
+        oauth_config = ts._mcp_config.oauth
+        user_id = (request_context or {}).get("user_id", "__no_user__")
 
-    def has(self, key: str) -> bool:
-        """True if there is a valid access token OR a valid refresh token."""
-        with self._lock:
-            entry = self._cache.get(key)
-            if entry is None:
-                return False
-            if not entry.access_expired:
-                return True
-            if not entry.refresh_expired:
-                return True
-            del self._cache[key]
-            return False
+        # Check if user has a token (has_token checks in-memory only, get_access_token also checks DB/disk)
+        if not _token_manager.has_token(oauth_config, request_context):
+            token = _token_manager.get_access_token(oauth_config, request_context)
+            if not token:
+                logger.info(
+                    "OAuth MCP %s: no token found for user %s (authorization_url=%s, client_id=%s)",
+                    ts.name, user_id, oauth_config.authorization_url, oauth_config.client_id,
+                )
+                continue
+        cache_key = f"{user_id}:{ts.name}"
 
+        # Check tool cache for a fresh entry
+        with _mcp_tools_cache_lock:
+            entry = _mcp_tools_cache.get(cache_key)
+            if entry and (now - entry.loaded_at) < _MCP_TOOLS_CACHE_TTL:
+                result[ts.name] = entry.tools
+                logger.info("OAuth MCP %s: using cached tools for user %s", ts.name, user_id)
+                continue
 
-class DiskTokenStore:
-    """Persists OAuth tokens to ~/.holmes/auth/mcp_tokens.json for CLI usage."""
-
-    def __init__(self) -> None:
-        from holmes.core.config import config_path_dir
-        from pathlib import Path
-
-        self._path = Path(config_path_dir) / "auth" / "mcp_tokens.json"
-        self._enabled = True
-        self._lock = threading.Lock()
+        # Cache miss — load tools from MCP server
         try:
-            self._path.parent.mkdir(parents=True, exist_ok=True)
-        except OSError:
-            # Read-only filesystem (e.g. in-cluster container) — disk store disabled
-            self._enabled = False
-            logger.info("OAuth disk token store disabled (read-only filesystem)")
+            lock = get_server_lock(str(ts._mcp_config.get_lock_string()))
+            with lock:
+                tools_result = asyncio.run(ts._get_server_tools_with_context(request_context))
 
-    def get(self, key: str) -> Optional[Dict[str, Any]]:
-        if not self._enabled:
-            return None
-        with self._lock:
-            data = self._load()
-            token = data.get(key)
-            if token and token.get("expires_at", float("inf")) > time.time():
-                return token
-            return None
+            real_tools = [RemoteMCPTool.create(tool, ts) for tool in tools_result.tools]
+            if real_tools:
+                with _mcp_tools_cache_lock:
+                    _mcp_tools_cache[cache_key] = _LoadedToolsEntry(
+                        tools=real_tools,
+                        toolset=ts,
+                        loaded_at=now,
+                    )
+                result[ts.name] = real_tools
+                logger.warning(
+                    "OAuth MCP %s: preloaded %d tools for user %s",
+                    ts.name, len(real_tools), user_id,
+                )
+        except Exception as e:
+            logger.warning(
+                "OAuth MCP %s: failed to preload tools: %s",
+                ts.name, _extract_root_error_message(e),
+            )
+            # Graceful fallback — user will see the placeholder connect tool
 
-    def set(self, key: str, token_data: Dict[str, Any]) -> None:
-        if not self._enabled:
-            return
-        with self._lock:
-            data = self._load()
-            data[key] = token_data
-            with open(self._path, "w") as f:
-                json.dump(data, f, indent=2)
-
-    def has(self, key: str) -> bool:
-        return self.get(key) is not None
-
-    def _load(self) -> Dict[str, Any]:
-        if not self._path.exists():
-            return {}
-        try:
-            with open(self._path) as f:
-                return json.load(f)
-        except Exception:
-            return {}
-
-
-_disk_token_store = DiskTokenStore()
+    return result
 
 
 def _cli_oauth_flow(oauth_config: MCPOAuthConfig, server_name: str) -> Optional[Dict[str, Any]]:
@@ -620,17 +453,15 @@ def _cli_oauth_flow(oauth_config: MCPOAuthConfig, server_name: str) -> Optional[
 
 
 class _PendingOAuthExchange:
-    """State for a pending OAuth approval: key exchange, PKCE verifier, and config."""
+    """State for a pending OAuth approval: PKCE verifier and config."""
 
-    def __init__(self, key_exchange: OAuthKeyExchange, code_verifier: str, oauth_config: MCPOAuthConfig, redirect_uri: str) -> None:
-        self.key_exchange = key_exchange
+    def __init__(self, code_verifier: str, oauth_config: MCPOAuthConfig, redirect_uri: str) -> None:
         self.code_verifier = code_verifier
         self.oauth_config = oauth_config
         self.redirect_uri = redirect_uri
 
 
-# Global caches
-_oauth_token_cache = OAuthTokenCache()
+# Pending OAuth exchanges and lock
 _pending_exchanges: Dict[str, _PendingOAuthExchange] = {}
 _exchanges_lock = threading.Lock()
 
@@ -642,6 +473,7 @@ def set_oauth_dal(dal: Any) -> None:
     """Set the DAL instance for OAuth DB operations. Called during server startup."""
     global _oauth_dal
     _oauth_dal = dal
+    _token_manager.set_dal(dal)
     if dal and dal.enabled:
         logger.warning("OAuth: DAL initialized for cross-cluster token storage")
 
@@ -655,89 +487,30 @@ def _get_signing_key_hash() -> Optional[str]:
 
 
 def _encrypt_token_for_db(token_data: Dict[str, Any], signing_key: str) -> str:
-    """Encrypt token data with signing_key-derived Fernet key for DB storage."""
-    from cryptography.fernet import Fernet
-    from cryptography.hazmat.primitives.kdf.hkdf import HKDF
-
-    fernet_key = base64.urlsafe_b64encode(
-        HKDF(algorithm=hashes.SHA256(), length=32, salt=b"holmesgpt-oauth-db-token", info=b"token-encryption")
-        .derive(signing_key.encode())
-    )
-    return Fernet(fernet_key).encrypt(json.dumps(token_data).encode()).decode()
+    """Encrypt token data — delegates to OAuthTokenManager."""
+    result = _token_manager._encrypt_token(token_data)
+    if result is None:
+        raise ValueError("Cannot encrypt token: no signing key available")
+    return result
 
 
 def _decrypt_token_from_db(encrypted: str, signing_key: str) -> Optional[Dict[str, Any]]:
-    """Decrypt token data from DB using signing_key-derived Fernet key."""
-    from cryptography.fernet import Fernet
-    from cryptography.hazmat.primitives.kdf.hkdf import HKDF
-
-    try:
-        fernet_key = base64.urlsafe_b64encode(
-            HKDF(algorithm=hashes.SHA256(), length=32, salt=b"holmesgpt-oauth-db-token", info=b"token-encryption")
-            .derive(signing_key.encode())
-        )
-        decrypted = Fernet(fernet_key).decrypt(encrypted.encode())
-        return json.loads(decrypted)
-    except Exception:
-        logger.warning("OAuth: failed to decrypt token from DB (signing_key mismatch?)")
-        return None
+    """Decrypt token data — delegates to OAuthTokenManager."""
+    return _token_manager._decrypt_token(encrypted)
 
 
 def _store_token_to_db(oauth_config: MCPOAuthConfig, token_data: Dict[str, Any], context_id: str, user_id: Optional[str] = None) -> None:
-    """Store an OAuth token to the DB for cross-cluster reuse, encrypted with signing_key."""
-    signing_key = _get_signing_key()
-    signing_key_hash = _get_signing_key_hash()
-    if not _oauth_dal or not _oauth_dal.enabled or not signing_key or not signing_key_hash:
-        return
-
-    try:
-        # Use authorization_url as provider name since it uniquely identifies the IdP
-        provider_name = oauth_config.authorization_url or "unknown"
-        encrypted = _encrypt_token_for_db(token_data, signing_key)
-        # Store refresh token expiry (what matters for cross-cluster reuse).
-        # Fall back to access token expiry if no refresh_expires_in.
-        from datetime import datetime, timezone, timedelta
-        expiry = None
-        if token_data.get("refresh_expires_in"):
-            expiry = (datetime.now(timezone.utc) + timedelta(seconds=token_data["refresh_expires_in"])).isoformat()
-        elif token_data.get("expires_in"):
-            expiry = (datetime.now(timezone.utc) + timedelta(seconds=token_data["expires_in"])).isoformat()
-
-        _oauth_dal.upsert_oauth_token(
-            provider_name=provider_name,
-            encrypted_token=encrypted,
-            signing_key_hash=signing_key_hash,
-            token_expiry=expiry,
-            user_id=user_id,
-        )
-        logger.warning("OAuth: stored token to DB for provider %s (user_id=%s)", provider_name, user_id)
-    except Exception:
-        logger.warning("OAuth: failed to store token to DB", exc_info=True)
+    """Store an OAuth token to the DB — delegates to OAuthTokenManager."""
+    _token_manager._store_to_db(oauth_config, token_data, user_id)
 
 
-def _get_conversation_key(request_context: Optional[Dict[str, Any]]) -> str:
-    """Extract a conversation key from request context headers."""
-    if request_context:
-        headers = request_context.get("headers", {})
-        for key in ("X-Conversation-Id", "x-conversation-id", "X-Session-Id", "x-session-id"):
-            if key in headers:
-                return str(headers[key])
-    return "__default__"
-
-
-def _get_user_id(request_context: Optional[Dict[str, Any]]) -> Optional[str]:
-    """Extract user_id from request context (injected by relay from session token validation)."""
-    if request_context:
-        return request_context.get("user_id")
-    return None
+# Import helpers from oauth_token_manager (canonical implementations)
+from holmes.plugins.toolsets.mcp.oauth_token_manager import _get_conversation_key, _get_user_id  # noqa: E402
 
 
 def _get_oauth_cache_key(oauth_config: MCPOAuthConfig, request_context: Optional[Dict[str, Any]]) -> str:
-    """Build a cache key from IdP identity + user + conversation. All MCP servers sharing the same IdP share the same token."""
-    conv_key = _get_conversation_key(request_context)
-    user_id = _get_user_id(request_context) or "__no_user__"
-    idp_key = hashlib.sha256(f"{oauth_config.authorization_url}:{oauth_config.client_id}".encode()).hexdigest()[:12]
-    return f"{user_id}:{conv_key}:{idp_key}"
+    """Build a cache key — delegates to OAuthTokenManager."""
+    return _token_manager.get_cache_key(oauth_config, request_context)
 
 
 class MCPConfig(ToolsetConfig):
@@ -847,46 +620,35 @@ def _inject_oauth_token(
         return headers
 
     oauth_config = toolset._mcp_config.oauth
-    cache_key = _get_oauth_cache_key(oauth_config, request_context)
-    cached_token = _oauth_token_cache.get(cache_key)
-    if not cached_token:
-        # Access token expired or missing — try refresh before giving up
-        user_id = _get_user_id(request_context)
-        cached_token = _try_refresh_token(cache_key, oauth_config, user_id=user_id)
-        if cached_token:
-            logger.warning("OAuth token refreshed for MCP server %s (idp=%s)", toolset.name, oauth_config.authorization_url)
+    cached_token = _token_manager.get_access_token(oauth_config, request_context)
     if cached_token:
         headers = headers or {}
         headers["Authorization"] = f"Bearer {cached_token}"
-        logger.warning("OAuth token injected for MCP server %s (cache_key=%s)", toolset.name, cache_key)
+        logger.warning("OAuth token injected for MCP server %s", toolset.name)
     else:
-        logger.warning("OAuth MCP server %s: no cached token (cache_key=%s) — request will likely 401", toolset.name, cache_key)
+        logger.warning("OAuth MCP server %s: no cached token — request will likely 401", toolset.name)
     return headers
 
 
-def decrypt_code_and_exchange_for_token(tool_call_id: str, encrypted_payload: str, request_context: Optional[Dict[str, Any]]) -> None:
-    """Decrypt an OAuth authorization code and exchange it for an access token.
+def exchange_code_for_token(tool_call_id: str, payload_json: str, request_context: Optional[Dict[str, Any]]) -> None:
+    """Exchange an OAuth authorization code for an access token.
 
-    The frontend encrypts a JSON payload: {"code": "...", "redirect_uri": "..."}.
-    Holmes decrypts it, then exchanges the code at the IdP's token_url using the
-    PKCE code_verifier (generated during requires_approval). The access token
-    stays server-side and never transits through the frontend.
+    The frontend sends a JSON payload: {"code": "...", "redirect_uri": "...", "client_id": "..."}.
+    Holmes exchanges the code at the IdP's token_url using the PKCE code_verifier
+    (generated during requires_approval). The access token stays server-side.
 
     Called from tool_calling_llm._execute_tool_decisions() when a decision
-    includes an encrypted_token from the frontend OAuth flow.
+    includes an oauth_payload from the frontend OAuth flow.
     """
     with _exchanges_lock:
         pending = _pending_exchanges.pop(tool_call_id, None)
 
     if pending is None:
-        logger.error("OAuth exchange failed: no pending key exchange for tool_call_id=%s (possible timeout or duplicate)", tool_call_id)
+        logger.error("OAuth exchange failed: no pending exchange for tool_call_id=%s (possible timeout or duplicate)", tool_call_id)
         return
 
     try:
-        # Decrypt the payload from frontend
-        logger.warning("OAuth: decrypting auth code payload for tool_call_id=%s", tool_call_id)
-        decrypted = pending.key_exchange.decrypt(encrypted_payload)
-        payload = json.loads(decrypted)
+        payload = json.loads(payload_json)
         auth_code = payload["code"]
         redirect_uri = payload.get("redirect_uri", "")
         # Frontend may include client_id from DCR (when Holmes didn't have one at discovery time)
@@ -894,7 +656,7 @@ def decrypt_code_and_exchange_for_token(tool_call_id: str, encrypted_payload: st
         if client_id and not pending.oauth_config.client_id:
             pending.oauth_config.client_id = client_id
             logger.warning("OAuth: using client_id from frontend DCR: %s", client_id)
-        logger.warning("OAuth: auth code decrypted, exchanging at token endpoint %s (client_id=%s)", pending.oauth_config.token_url, client_id)
+        logger.warning("OAuth: exchanging code at token endpoint %s (client_id=%s)", pending.oauth_config.token_url, client_id)
 
         # Exchange auth code for access token at the IdP's token endpoint (server-side)
         token_response = httpx.post(
@@ -922,22 +684,12 @@ def decrypt_code_and_exchange_for_token(tool_call_id: str, encrypted_payload: st
             logger.error("OAuth token exchange: response missing 'access_token' field. Keys: %s", list(token_data.keys()))
             return
 
-        cache_key = _get_oauth_cache_key(pending.oauth_config, request_context)
-        _oauth_token_cache.set(
-            cache_key,
-            access_token,
-            expires_in=token_data.get("expires_in", 300),
-            refresh_token=token_data.get("refresh_token"),
-            refresh_expires_in=token_data.get("refresh_expires_in"),
-        )
+        # Store token via manager (cache + DB + schedule background refresh)
+        _token_manager.store_token(pending.oauth_config, token_data, request_context)
         logger.warning(
-            "OAuth token cached (cache_key=%s, idp=%s, expires_in=%s, has_refresh=%s)",
-            cache_key, pending.oauth_config.token_url, token_data.get("expires_in"), "refresh_token" in token_data,
+            "OAuth token stored via manager (idp=%s, expires_in=%s, has_refresh=%s)",
+            pending.oauth_config.token_url, token_data.get("expires_in"), "refresh_token" in token_data,
         )
-
-        # Store to DB for cross-cluster reuse
-        user_id = _get_user_id(request_context)
-        _store_token_to_db(pending.oauth_config, token_data, tool_call_id, user_id=user_id)
     except json.JSONDecodeError:
         logger.exception("OAuth token exchange: failed to parse JSON response from %s", pending.oauth_config.token_url)
     except httpx.HTTPStatusError:
@@ -946,47 +698,13 @@ def decrypt_code_and_exchange_for_token(tool_call_id: str, encrypted_payload: st
         logger.exception("OAuth token exchange failed (tool_call_id=%s, token_url=%s)", tool_call_id, pending.oauth_config.token_url)
 
 
+# Backwards-compat alias for callers still using the old name
+decrypt_code_and_exchange_for_token = exchange_code_for_token
+
+
 def _try_refresh_token(cache_key: str, oauth_config: MCPOAuthConfig, user_id: Optional[str] = None) -> Optional[str]:
-    """Attempt to refresh an expired access token using the cached refresh token. Returns new access token or None."""
-    refresh_token = _oauth_token_cache.get_refresh_token(cache_key)
-    if not refresh_token:
-        return None
-
-    try:
-        logger.warning("OAuth: attempting token refresh at %s (cache_key=%s)", oauth_config.token_url, cache_key)
-        response = httpx.post(
-            oauth_config.token_url,
-            data={
-                "grant_type": "refresh_token",
-                "refresh_token": refresh_token,
-                "client_id": oauth_config.client_id,
-            },
-            headers={"Content-Type": "application/x-www-form-urlencoded"},
-            timeout=30,
-        )
-        if response.status_code != 200:
-            logger.warning("OAuth refresh failed: HTTP %d from %s (cache_key=%s)", response.status_code, oauth_config.token_url, cache_key)
-            return None
-
-        token_data = response.json()
-        access_token = token_data.get("access_token")
-        if not access_token:
-            return None
-
-        _oauth_token_cache.set(
-            cache_key,
-            access_token,
-            expires_in=token_data.get("expires_in", 300),
-            refresh_token=token_data.get("refresh_token", refresh_token),
-            refresh_expires_in=token_data.get("refresh_expires_in"),
-        )
-        logger.warning("OAuth token refreshed (cache_key=%s, expires_in=%s)", cache_key, token_data.get("expires_in"))
-        # Update DB with refreshed token
-        _store_token_to_db(oauth_config, token_data, "refresh", user_id=user_id)
-        return access_token
-    except Exception:
-        logger.warning("OAuth refresh failed (cache_key=%s)", cache_key, exc_info=True)
-        return None
+    """Attempt to refresh an expired access token — delegates to OAuthTokenManager."""
+    return _token_manager._refresh_token(cache_key, oauth_config, user_id=user_id)
 
 
 @asynccontextmanager
@@ -1059,63 +777,16 @@ class RemoteMCPTool(Tool):
             return None
 
         oauth_config = self.toolset._mcp_config.oauth
-        cache_key = _get_oauth_cache_key(oauth_config, context.request_context)
+        disk_key = str(self.toolset._mcp_config.url) if isinstance(self.toolset._mcp_config, MCPConfig) else None
 
-        user_id = _get_user_id(context.request_context)
-
-        if _oauth_token_cache.has(cache_key):
-            # Try refresh if access token expired but refresh token is still valid
-            if _oauth_token_cache.get(cache_key) is None:
-                refreshed = _try_refresh_token(cache_key, oauth_config, user_id=user_id)
-                if refreshed:
-                    logger.warning("OAuth token refreshed for MCP %s, skipping approval (cache_key=%s)", self.toolset.name, cache_key)
-                    return None
-            else:
-                logger.warning("OAuth token reused for MCP %s from shared IdP cache (cache_key=%s)", self.toolset.name, cache_key)
-                return None
-
-        logger.warning("OAuth MCP %s: no cached token (cache_key=%s), checking DB and disk", self.toolset.name, cache_key)
-
-        # Check DB for cross-cluster token (server mode with DAL)
-        signing_key = _get_signing_key()
-        if _oauth_dal and _oauth_dal.enabled and signing_key:
-            signing_key_hash = _get_signing_key_hash()
-            # provider_name in DB is the authorization_url (uniquely identifies the IdP)
-            db_provider = oauth_config.authorization_url or self.toolset.name
-            db_record = _oauth_dal.get_oauth_token(db_provider, user_id=user_id)
-            if not db_record:
-                logger.warning("OAuth MCP %s: no DB token found for provider=%s", self.toolset.name, db_provider)
-            if db_record:
-                if db_record.get("signing_key_hash") == signing_key_hash:
-                    db_token_data = _decrypt_token_from_db(db_record["encrypted_token"], signing_key)
-                    if db_token_data and db_token_data.get("access_token"):
-                        _oauth_token_cache.set(
-                            cache_key,
-                            db_token_data["access_token"],
-                            expires_in=db_token_data.get("expires_in", 300),
-                            refresh_token=db_token_data.get("refresh_token"),
-                        )
-                        logger.warning("OAuth MCP %s: loaded token from DB (cross-cluster)", self.toolset.name)
-                        return None
-                else:
-                    logger.warning(
-                        "OAuth MCP %s: found DB token but signing_key_hash mismatch (stored=%s, current=%s). "
-                        "Token from a different cluster/config — will prompt for re-authentication.",
-                        self.toolset.name, db_record.get("signing_key_hash", "")[:12], (signing_key_hash or "")[:12],
-                    )
-
-        # Check disk store for CLI-persisted tokens
-        disk_key = str(self.toolset._mcp_config.url) if isinstance(self.toolset._mcp_config, MCPConfig) else cache_key
-        disk_token = _disk_token_store.get(disk_key)
-        if disk_token:
-            _oauth_token_cache.set(
-                cache_key,
-                disk_token["access_token"],
-                expires_in=int(disk_token.get("expires_at", time.time() + 300) - time.time()),
-                refresh_token=disk_token.get("refresh_token"),
-            )
-            logger.warning("OAuth MCP %s: loaded token from disk store", self.toolset.name)
+        # Try to get a token from cache → refresh → DB → disk
+        token = _token_manager.get_access_token(oauth_config, context.request_context, disk_key=disk_key)
+        if token:
+            logger.warning("OAuth MCP %s: token available via manager", self.toolset.name)
             return None
+
+        # No token found anywhere — need to authenticate
+        user_id = _get_user_id(context.request_context)
 
         # Detect CLI vs frontend mode: if request_context exists, the request came
         # through the API server (frontend). CLI calls have request_context=None.
@@ -1126,33 +797,24 @@ class RemoteMCPTool(Tool):
             logger.warning("OAuth MCP %s: CLI mode detected, running browser OAuth flow", self.toolset.name)
             token_data = _cli_oauth_flow(oauth_config, self.toolset.name)
             if token_data:
-                # Recompute cache key — DCR may have changed client_id
-                cache_key = _get_oauth_cache_key(oauth_config, context.request_context)
-                _oauth_token_cache.set(
-                    cache_key,
-                    token_data["access_token"],
-                    expires_in=token_data.get("expires_in", 300),
-                    refresh_token=token_data.get("refresh_token"),
-                    refresh_expires_in=token_data.get("refresh_expires_in"),
+                _token_manager.store_token(
+                    oauth_config, token_data, context.request_context,
+                    disk_key=disk_key, store_to_disk=True,
                 )
-                _disk_token_store.set(disk_key, token_data)
-                _store_token_to_db(oauth_config, token_data, "cli-flow", user_id=user_id)
-                logger.warning("OAuth MCP %s: CLI auth successful, token cached (cache_key=%s)", self.toolset.name, cache_key)
+                logger.warning("OAuth MCP %s: CLI auth successful", self.toolset.name)
                 return None  # Token obtained, no approval needed
             else:
                 logger.warning("OAuth MCP %s: CLI OAuth flow failed", self.toolset.name)
                 # Fall through to frontend flow as fallback
 
-        # Frontend mode: use RSA key exchange + approval mechanism
-        key_exchange = get_oauth_key_exchange()
+        # Frontend mode: use PKCE + approval mechanism
         code_verifier, code_challenge = _generate_pkce()
 
         with _exchanges_lock:
             _pending_exchanges[context.tool_call_id] = _PendingOAuthExchange(
-                key_exchange=key_exchange,
                 code_verifier=code_verifier,
                 oauth_config=oauth_config,
-                redirect_uri="",  # Set by frontend in the encrypted payload
+                redirect_uri="",  # Set by frontend in the payload
             )
 
         metadata: Dict[str, Any] = {
@@ -1160,7 +822,6 @@ class RemoteMCPTool(Tool):
             "client_id": oauth_config.client_id,
             "code_challenge": code_challenge,
             "code_challenge_method": "S256",
-            "encryption_public_key": key_exchange.get_public_key_pem(),
         }
         if oauth_config.scopes:
             metadata["scopes"] = oauth_config.scopes

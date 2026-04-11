@@ -122,7 +122,15 @@ class ToolApprovalDecision(BaseModel):
     approved: bool
     save_prefixes: Optional[List[str]] = None  # Prefixes to remember for session
     feedback: Optional[str] = None  # User feedback when denying a tool call
-    encrypted_token: Optional[str] = None  # RSA-encrypted OAuth token from frontend (base64)
+    encrypted_token: Optional[str] = None  # OAuth auth code payload from frontend (JSON string)
+
+
+class StoreOAuthTokenRequest(BaseModel):
+    """Request to store an OAuth token for a user+toolset via the frontend OAuth flow."""
+
+    toolset_name: str
+    user_id: str
+    token_data: dict  # { access_token, refresh_token, expires_in, ... }
 
 
 class ChatRequestBaseModel(BaseModel):

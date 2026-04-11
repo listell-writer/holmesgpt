@@ -1,6 +1,5 @@
 """Tests for MCP OAuth authorization_code support."""
 
-import base64
 import json
 import threading
 import time
@@ -9,8 +8,6 @@ from unittest.mock import MagicMock, patch
 
 import httpx
 import pytest
-from cryptography.hazmat.primitives import hashes, serialization
-from cryptography.hazmat.primitives.asymmetric import padding
 from pydantic import ConfigDict
 
 from holmes.plugins.toolsets.mcp.toolset_mcp import (
@@ -18,7 +15,6 @@ from holmes.plugins.toolsets.mcp.toolset_mcp import (
     MCPConfig,
     MCPMode,
     MCPOAuthConfig,
-    OAuthKeyExchange,
     OAuthTokenCache,
     RemoteMCPTool,
     RemoteMCPToolset,
@@ -35,9 +31,13 @@ from holmes.plugins.toolsets.mcp.toolset_mcp import (
     _pending_exchanges,
     _exchanges_lock,
     _PendingOAuthExchange,
+    _token_manager,
     _try_refresh_token,
-    decrypt_code_and_exchange_for_token,
+    exchange_code_for_token,
 )
+
+# Backwards-compat alias used by some test references
+decrypt_code_and_exchange_for_token = exchange_code_for_token
 
 
 class TestMCPOAuthConfig:
@@ -73,71 +73,6 @@ class TestMCPOAuthConfig:
         assert oauth.scopes is None
 
 
-class TestOAuthKeyExchange:
-    def test_encrypt_decrypt_roundtrip(self):
-        kx = OAuthKeyExchange()
-        public_key_pem = kx.get_public_key_pem()
-
-        # Simulate frontend: encrypt with public key
-        public_key = serialization.load_pem_public_key(public_key_pem.encode())
-        plaintext = '{"code": "auth-code-123", "redirect_uri": "http://localhost/callback"}'
-        ciphertext = public_key.encrypt(
-            plaintext.encode(),
-            padding.OAEP(
-                mgf=padding.MGF1(algorithm=hashes.SHA256()),
-                algorithm=hashes.SHA256(),
-                label=None,
-            ),
-        )
-        encrypted_b64 = base64.b64encode(ciphertext).decode()
-
-        # Holmes side: decrypt
-        decrypted = kx.decrypt(encrypted_b64)
-        assert decrypted == plaintext
-
-    def test_public_key_is_valid_pem(self):
-        kx = OAuthKeyExchange()
-        pem = kx.get_public_key_pem()
-        assert pem.startswith("-----BEGIN PUBLIC KEY-----")
-        assert pem.strip().endswith("-----END PUBLIC KEY-----")
-
-    def test_cli_instances_share_persisted_key(self, tmp_path):
-        """CLI mode: two instances with the same store dir produce the same key (persisted)."""
-        key_dir = str(tmp_path / "cli_keys")
-        kx1 = OAuthKeyExchange(key_store_dir=key_dir)
-        kx2 = OAuthKeyExchange(key_store_dir=key_dir)
-        assert kx1.get_public_key_pem() == kx2.get_public_key_pem(), "CLI instances should share persisted key"
-
-    def test_different_store_dirs_have_different_keys(self, tmp_path):
-        """Different store dirs produce different keys (no sharing)."""
-        kx1 = OAuthKeyExchange(key_store_dir=str(tmp_path / "a"))
-        kx2 = OAuthKeyExchange(key_store_dir=str(tmp_path / "b"))
-        assert kx1.get_public_key_pem() != kx2.get_public_key_pem()
-
-    def test_same_signing_key_produces_same_keypair(self, tmp_path):
-        """Same signing_key generates identical public+private keys across 5 instances."""
-        signing_key = "a1b2c3d4-e5f6-7890-abcd-ef1234567890"
-        key_dir = str(tmp_path / "keys")
-        keys = []
-        for _ in range(5):
-            kx = OAuthKeyExchange(signing_key=signing_key, key_store_dir=key_dir)
-            keys.append(kx.get_public_key_pem())
-            # Verify private key works too (decrypt roundtrip)
-            pub = serialization.load_pem_public_key(kx.get_public_key_pem().encode())
-            ct = pub.encrypt(
-                b"test-payload",
-                padding.OAEP(mgf=padding.MGF1(algorithm=hashes.SHA256()), algorithm=hashes.SHA256(), label=None),
-            )
-            assert kx.decrypt(base64.b64encode(ct).decode()) == "test-payload"
-
-        # All 5 should be identical (loaded from persisted file after first generation)
-        assert all(k == keys[0] for k in keys), "Same signing_key must produce identical keys every time"
-
-    def test_different_signing_keys_produce_different_keypairs(self, tmp_path):
-        """Different signing_keys generate different keypairs."""
-        kx1 = OAuthKeyExchange(signing_key="uuid-aaaa-1111-bbbb-2222", key_store_dir=str(tmp_path / "a"))
-        kx2 = OAuthKeyExchange(signing_key="uuid-cccc-3333-dddd-4444", key_store_dir=str(tmp_path / "b"))
-        assert kx1.get_public_key_pem() != kx2.get_public_key_pem(), "Different signing_keys must produce different keys"
 
 
 class TestPKCE:
@@ -250,7 +185,8 @@ class TestRequiresApproval:
         assert meta["scopes"] == ["mcp:tools"]
         assert meta["code_challenge_method"] == "S256"
         assert len(meta["code_challenge"]) > 0
-        assert "BEGIN PUBLIC KEY" in meta["encryption_public_key"]
+        # encryption_public_key removed — frontend sends auth code as plaintext JSON
+        assert "encryption_public_key" not in meta
         # token_url should NOT be sent to frontend
         assert "token_url" not in meta
 
@@ -277,10 +213,9 @@ class TestRequiresApproval:
         assert result is None
 
 
-class TestDecryptCodeAndExchangeForToken:
+class TestExchangeCodeForToken:
     def test_full_flow(self):
-        """Simulate: Holmes generates keypair+PKCE → frontend encrypts auth code → Holmes exchanges for token."""
-        kx = OAuthKeyExchange()
+        """Simulate: Holmes generates PKCE → frontend sends auth code as JSON → Holmes exchanges for token."""
         code_verifier = "test-verifier-12345"
         tool_call_id = "tc-full-flow"
         conv_id = "conv-full-flow"
@@ -295,24 +230,13 @@ class TestDecryptCodeAndExchangeForToken:
         # Register the pending exchange
         with _exchanges_lock:
             _pending_exchanges[tool_call_id] = _PendingOAuthExchange(
-                key_exchange=kx,
                 code_verifier=code_verifier,
                 oauth_config=oauth_config,
                 redirect_uri="",
             )
 
-        # Simulate frontend encrypting the auth code payload
-        public_key = serialization.load_pem_public_key(kx.get_public_key_pem().encode())
-        payload = json.dumps({"code": "auth-code-xyz", "redirect_uri": "http://frontend/callback"})
-        ciphertext = public_key.encrypt(
-            payload.encode(),
-            padding.OAEP(
-                mgf=padding.MGF1(algorithm=hashes.SHA256()),
-                algorithm=hashes.SHA256(),
-                label=None,
-            ),
-        )
-        encrypted_b64 = base64.b64encode(ciphertext).decode()
+        # Frontend sends auth code as plaintext JSON
+        payload_json = json.dumps({"code": "auth-code-xyz", "redirect_uri": "http://frontend/callback"})
 
         # Mock the token endpoint response
         mock_response = MagicMock()
@@ -327,7 +251,7 @@ class TestDecryptCodeAndExchangeForToken:
         request_context = {"headers": {"X-Conversation-Id": conv_id}}
 
         with patch("holmes.plugins.toolsets.mcp.toolset_mcp.httpx.post", return_value=mock_response) as mock_post:
-            decrypt_code_and_exchange_for_token(tool_call_id, encrypted_b64, request_context)
+            exchange_code_for_token(tool_call_id, payload_json, request_context)
 
             # Verify token endpoint was called correctly
             mock_post.assert_called_once()
@@ -349,7 +273,7 @@ class TestDecryptCodeAndExchangeForToken:
 
     def test_missing_exchange_does_not_crash(self):
         """Gracefully handle missing pending exchange."""
-        decrypt_code_and_exchange_for_token("nonexistent-id", "garbage", None)
+        exchange_code_for_token("nonexistent-id", "garbage", None)
         # Should log error but not raise
 
 
@@ -1103,23 +1027,40 @@ class TestDiskTokenStore:
 # ---------------------------------------------------------------------------
 class TestDBTokenEncryption:
     def test_roundtrip(self):
-        signing_key = "test-signing-key-for-encryption"
+        from holmes.plugins.toolsets.mcp.oauth_token_manager import OAuthTokenManager
+        manager = OAuthTokenManager()
+        manager.set_signing_key_getter(lambda: "test-signing-key-for-encryption")
+
         token_data = {"access_token": "abc123", "refresh_token": "ref456", "expires_in": 300}
-        encrypted = _encrypt_token_for_db(token_data, signing_key)
+        encrypted = manager._encrypt_token(token_data)
+        assert encrypted is not None
         assert encrypted != json.dumps(token_data)
 
-        decrypted = _decrypt_token_from_db(encrypted, signing_key)
+        decrypted = manager._decrypt_token(encrypted)
         assert decrypted == token_data
+        manager.shutdown()
 
     def test_wrong_signing_key_returns_none(self):
+        from holmes.plugins.toolsets.mcp.oauth_token_manager import OAuthTokenManager
+        manager1 = OAuthTokenManager()
+        manager1.set_signing_key_getter(lambda: "correct-key")
         token_data = {"access_token": "secret"}
-        encrypted = _encrypt_token_for_db(token_data, "correct-key")
-        result = _decrypt_token_from_db(encrypted, "wrong-key")
+        encrypted = manager1._encrypt_token(token_data)
+        manager1.shutdown()
+
+        manager2 = OAuthTokenManager()
+        manager2.set_signing_key_getter(lambda: "wrong-key")
+        result = manager2._decrypt_token(encrypted)
         assert result is None
+        manager2.shutdown()
 
     def test_garbage_input_returns_none(self):
-        result = _decrypt_token_from_db("not-valid-fernet-ciphertext", "some-key")
+        from holmes.plugins.toolsets.mcp.oauth_token_manager import OAuthTokenManager
+        manager = OAuthTokenManager()
+        manager.set_signing_key_getter(lambda: "some-key")
+        result = manager._decrypt_token("not-valid-fernet-ciphertext")
         assert result is None
+        manager.shutdown()
 
 
 # ---------------------------------------------------------------------------
@@ -1273,7 +1214,10 @@ class TestInjectOAuthToken:
         _oauth_token_cache.set(cache_key, "old", expires_in=60, refresh_token="r", refresh_expires_in=3600)
         _oauth_token_cache._cache[cache_key].expires_at = time.monotonic() - 1
 
-        with patch("holmes.plugins.toolsets.mcp.toolset_mcp._try_refresh_token", return_value="refreshed-tok") as mock_refresh:
+        with patch.object(
+            type(_token_manager), "_refresh_token",
+            return_value="refreshed-tok",
+        ) as mock_refresh:
             result = _inject_oauth_token(ts, ctx, None)
 
         mock_refresh.assert_called_once()
@@ -1500,35 +1444,191 @@ class TestToolExecutorDynamicTools:
         found = executor.get_tool_by_name("new_tool")
         assert found is tool2
 
+    def test_with_replaced_tools_replaces_placeholder(self):
+        from holmes.core.tools_utils.tool_executor import ToolExecutor
+
+        placeholder = self._make_tool("my_mcp_connect")
+        ts = self._make_toolset("my-mcp", [placeholder])
+        executor = ToolExecutor([ts])
+
+        assert "my_mcp_connect" in executor.tools_by_name
+
+        real_tool_a = self._make_tool("real_tool_a")
+        real_tool_b = self._make_tool("real_tool_b")
+        augmented = executor.with_replaced_tools({"my-mcp": [real_tool_a, real_tool_b]})
+
+        # Augmented has real tools, no placeholder
+        assert "my_mcp_connect" not in augmented.tools_by_name
+        assert "real_tool_a" in augmented.tools_by_name
+        assert "real_tool_b" in augmented.tools_by_name
+
+        # Original is untouched
+        assert "my_mcp_connect" in executor.tools_by_name
+        assert "real_tool_a" not in executor.tools_by_name
+
+    def test_with_replaced_tools_preserves_other_toolsets(self):
+        from holmes.core.tools_utils.tool_executor import ToolExecutor
+
+        placeholder = self._make_tool("mcp_connect")
+        mcp_ts = self._make_toolset("my-mcp", [placeholder])
+        other_tool = self._make_tool("kubectl_get")
+        other_ts = self._make_toolset("kubernetes", [other_tool])
+        executor = ToolExecutor([mcp_ts, other_ts])
+
+        real_tool = self._make_tool("real_tool")
+        augmented = executor.with_replaced_tools({"my-mcp": [real_tool]})
+
+        # Other toolset tools are preserved
+        assert "kubectl_get" in augmented.tools_by_name
+        assert augmented.tools_by_name["kubectl_get"] is other_tool
+
+    def test_with_replaced_tools_unknown_toolset_is_noop(self):
+        from holmes.core.tools_utils.tool_executor import ToolExecutor
+
+        tool = self._make_tool("some_tool")
+        ts = self._make_toolset("my-ts", [tool])
+        executor = ToolExecutor([ts])
+
+        augmented = executor.with_replaced_tools({"nonexistent": [self._make_tool("x")]})
+
+        # Nothing changed
+        assert "some_tool" in augmented.tools_by_name
+        assert "x" not in augmented.tools_by_name
+
 
 # ---------------------------------------------------------------------------
-# OAuthKeyExchange — edge cases
+# preload_oauth_mcp_tools — tool preloading for OAuth MCP servers
 # ---------------------------------------------------------------------------
-class TestOAuthKeyExchangeEdgeCases:
-    def test_server_mode_persists_encrypted(self, tmp_path):
-        """Server mode with signing_key creates encrypted key file."""
-        key_dir = str(tmp_path / "server_keys")
-        kx = OAuthKeyExchange(signing_key="my-signing-key-uuid", key_store_dir=key_dir)
-        key_file = Path(key_dir) / "oauth_keypair.enc"
-        assert key_file.exists()
-        content = key_file.read_bytes()
-        assert b"BEGIN" not in content
+class TestPreloadOAuthMCPTools:
+    """Tests for preload_oauth_mcp_tools()."""
 
-    def test_cli_mode_persists_encrypted(self, tmp_path):
-        """CLI mode creates encrypted key file."""
-        key_dir = str(tmp_path / "cli_keys")
-        kx = OAuthKeyExchange(key_store_dir=key_dir)
-        key_file = Path(key_dir) / "oauth_keypair.enc"
-        assert key_file.exists()
-        content = key_file.read_bytes()
-        assert b"BEGIN" not in content
+    def _make_oauth_toolset(self, name: str = "test-mcp"):
+        """Create a minimal RemoteMCPToolset with OAuth enabled."""
+        ts = MagicMock(spec=RemoteMCPToolset)
+        ts.name = name
+        ts._mcp_config = MagicMock(spec=MCPConfig)
+        ts._mcp_config.oauth = MCPOAuthConfig(
+            enabled=True,
+            authorization_url="http://auth.example.com/authorize",
+            token_url="http://auth.example.com/token",
+            client_id="test-client",
+        )
+        ts._mcp_config.get_lock_string.return_value = f"http://example.com/{name}"
+        return ts
 
-    def test_corrupted_key_file_regenerates(self, tmp_path):
-        """If the persisted key file is corrupted, a new key is generated."""
-        key_dir = str(tmp_path / "corrupt_keys")
-        Path(key_dir).mkdir(parents=True)
-        (Path(key_dir) / "oauth_keypair.enc").write_bytes(b"garbage data")
+    def _make_mock_mcp_tool(self, name: str):
+        """Create a mock MCP tool result."""
+        tool = MagicMock()
+        tool.name = name
+        tool.description = f"Mock tool {name}"
+        tool.inputSchema = {"type": "object", "properties": {}}
+        return tool
 
-        kx = OAuthKeyExchange(key_store_dir=key_dir)
-        pem = kx.get_public_key_pem()
-        assert pem.startswith("-----BEGIN PUBLIC KEY-----")
+    @patch("holmes.plugins.toolsets.mcp.toolset_mcp._token_manager")
+    def test_preload_with_cached_token(self, mock_manager):
+        from holmes.plugins.toolsets.mcp.toolset_mcp import (
+            _mcp_tools_cache,
+            _mcp_tools_cache_lock,
+            preload_oauth_mcp_tools,
+        )
+
+        mock_manager.has_token.return_value = True
+
+        ts = self._make_oauth_toolset()
+        mock_tools_result = MagicMock()
+        mock_tools_result.tools = [self._make_mock_mcp_tool("tool_a"), self._make_mock_mcp_tool("tool_b")]
+
+        async def fake_get_tools(ctx):
+            return mock_tools_result
+        ts._get_server_tools_with_context = lambda ctx: fake_get_tools(ctx)
+        # Make asyncio.run work with our mock
+        ts._get_server_tools_with_context = MagicMock(return_value=mock_tools_result)
+
+        # Patch asyncio.run to just call the coroutine result
+        with patch("holmes.plugins.toolsets.mcp.toolset_mcp.asyncio") as mock_asyncio:
+            mock_asyncio.run.return_value = mock_tools_result
+            request_context = {"user_id": "user-1", "headers": {}}
+            result = preload_oauth_mcp_tools([ts], request_context)
+
+        assert "test-mcp" in result
+        assert len(result["test-mcp"]) == 2
+
+        # Clean up cache
+        with _mcp_tools_cache_lock:
+            _mcp_tools_cache.pop("user-1:test-mcp", None)
+
+    @patch("holmes.plugins.toolsets.mcp.toolset_mcp._token_manager")
+    def test_preload_no_token(self, mock_manager):
+        from holmes.plugins.toolsets.mcp.toolset_mcp import preload_oauth_mcp_tools
+
+        mock_manager.has_token.return_value = False
+        mock_manager.get_access_token.return_value = None
+
+        ts = self._make_oauth_toolset()
+        request_context = {"user_id": "user-2", "headers": {}}
+        result = preload_oauth_mcp_tools([ts], request_context)
+
+        assert result == {}
+
+    @patch("holmes.plugins.toolsets.mcp.toolset_mcp._token_manager")
+    def test_preload_server_error_graceful_fallback(self, mock_manager):
+        from holmes.plugins.toolsets.mcp.toolset_mcp import preload_oauth_mcp_tools
+
+        mock_manager.has_token.return_value = True
+
+        ts = self._make_oauth_toolset()
+
+        with patch("holmes.plugins.toolsets.mcp.toolset_mcp.asyncio") as mock_asyncio:
+            mock_asyncio.run.side_effect = ConnectionError("MCP server unreachable")
+            request_context = {"user_id": "user-3", "headers": {}}
+            result = preload_oauth_mcp_tools([ts], request_context)
+
+        # Should return empty, not raise
+        assert result == {}
+
+    @patch("holmes.plugins.toolsets.mcp.toolset_mcp._token_manager")
+    def test_preload_uses_ttl_cache(self, mock_manager):
+        from holmes.plugins.toolsets.mcp.toolset_mcp import (
+            _LoadedToolsEntry,
+            _mcp_tools_cache,
+            _mcp_tools_cache_lock,
+            preload_oauth_mcp_tools,
+        )
+
+        mock_manager.has_token.return_value = True
+
+        ts = self._make_oauth_toolset()
+        fake_tools = [MagicMock(), MagicMock()]
+
+        # Pre-populate the cache
+        with _mcp_tools_cache_lock:
+            _mcp_tools_cache["user-4:test-mcp"] = _LoadedToolsEntry(
+                tools=fake_tools,
+                toolset=ts,
+                loaded_at=time.monotonic(),
+            )
+
+        try:
+            request_context = {"user_id": "user-4", "headers": {}}
+            result = preload_oauth_mcp_tools([ts], request_context)
+
+            # Should return cached tools without calling the MCP server
+            assert "test-mcp" in result
+            assert result["test-mcp"] is fake_tools
+        finally:
+            with _mcp_tools_cache_lock:
+                _mcp_tools_cache.pop("user-4:test-mcp", None)
+
+    def test_preload_skips_non_oauth_toolsets(self):
+        from holmes.plugins.toolsets.mcp.toolset_mcp import preload_oauth_mcp_tools
+
+        ts = MagicMock(spec=RemoteMCPToolset)
+        ts.name = "plain-mcp"
+        ts._mcp_config = MagicMock(spec=MCPConfig)
+        ts._mcp_config.oauth = None
+
+        result = preload_oauth_mcp_tools([ts], {"user_id": "user-5"})
+        assert result == {}
+
+
+# ---------------------------------------------------------------------------

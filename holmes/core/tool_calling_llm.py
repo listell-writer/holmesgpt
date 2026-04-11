@@ -265,24 +265,24 @@ class ToolCallingLLM:
             decision = tool_call_with_decision.decision
             tool_result: Optional[ToolCallResult] = None
             if decision and decision.approved:
-                # Exchange encrypted OAuth auth code for token if present (from frontend browser OAuth flow).
-                # The encrypted token is passed via save_prefixes with a "__oauth_token__:" marker
-                # to avoid needing changes to the relay's ToolApprovalDecision model.
-                encrypted_token = None
+                # Exchange OAuth auth code for token if present (from frontend browser OAuth flow).
+                # The OAuth payload is passed via the encrypted_token field or save_prefixes
+                # with a "__oauth_token__:" marker.
+                oauth_payload = None
                 if decision.encrypted_token:
-                    encrypted_token = decision.encrypted_token
+                    oauth_payload = decision.encrypted_token
                     decision.encrypted_token = None
                 elif decision.save_prefixes:
                     for prefix in list(decision.save_prefixes):
                         if prefix.startswith("__oauth_token__:"):
-                            encrypted_token = prefix[len("__oauth_token__:"):]
+                            oauth_payload = prefix[len("__oauth_token__:"):]
                             decision.save_prefixes.remove(prefix)
                             break
 
-                if encrypted_token:
-                    logging.warning("OAuth: received encrypted auth code for tool_call_id=%s, exchanging for token", tool_call.id)
-                    from holmes.plugins.toolsets.mcp.toolset_mcp import decrypt_code_and_exchange_for_token
-                    decrypt_code_and_exchange_for_token(tool_call.id, encrypted_token, request_context)
+                if oauth_payload:
+                    logging.warning("OAuth: received auth code for tool_call_id=%s, exchanging for token", tool_call.id)
+                    from holmes.plugins.toolsets.mcp.toolset_mcp import exchange_code_for_token
+                    exchange_code_for_token(tool_call.id, oauth_payload, request_context)
 
                 tool_result = self._invoke_llm_tool_call(
                     tool_to_call=tool_call,
