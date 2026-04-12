@@ -36,7 +36,7 @@ class OAuthConfigLookupError(Exception):
 
 @dataclass
 class OAuthEndpoints:
-    """Minimal OAuth endpoint config — decoupled from MCPOAuthConfig.
+    """Minimal OAuth endpoint config
 
     Passed by toolset_mcp.py to the pure-OAuth functions so they
     don't depend on pydantic models or MCP-specific types.

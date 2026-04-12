@@ -38,7 +38,7 @@ from holmes.core.oauth_utils import (
     generate_pkce,
 )
 from holmes.plugins.toolsets.mcp.oauth_token_manager import OAuthTokenManager
-from holmes.plugins.toolsets.mcp.oauth_token_manager import _get_conversation_key, _get_user_id
+from holmes.plugins.toolsets.mcp.oauth_token_manager import _get_user_id
 from holmes.plugins.toolsets.mcp.oauth_token_store import _CachedToken
 from holmes.plugins.toolsets.mcp.oauth_tools_cache import (
     _LoadedToolsEntry,
@@ -111,13 +111,13 @@ class TestOAuthTokenCache:
     def test_set_and_get(self):
         cache = OAuthTokenCache()
         cache.set("conv-1", "token-abc", expires_in=60)
-        assert cache.get("conv-1") == "token-abc"
+        assert cache.get_valid_access_token("conv-1") == "token-abc"
 
     def test_has(self):
         cache = OAuthTokenCache()
-        assert not cache.has("conv-1")
+        assert not cache.has_token_or_refresh("conv-1")
         cache.set("conv-1", "token-abc", expires_in=60)
-        assert cache.has("conv-1")
+        assert cache.has_token_or_refresh("conv-1")
 
     def test_expired_entry(self):
         cache = OAuthTokenCache()
@@ -127,29 +127,16 @@ class TestOAuthTokenCache:
         # Manually expire it
         cache._cache["conv-exp"].expires_at = time.monotonic() - 1
         cache._cache["conv-exp"].refresh_expires_at = time.monotonic() - 1
-        assert cache.get("conv-exp") is None
-        assert not cache.has("conv-exp")
+        assert cache.get_valid_access_token("conv-exp") is None
+        assert not cache.has_token_or_refresh("conv-exp")
 
     def test_different_conversations(self):
         cache = OAuthTokenCache()
         cache.set("conv-1", "token-1", expires_in=60)
         cache.set("conv-2", "token-2", expires_in=60)
-        assert cache.get("conv-1") == "token-1"
-        assert cache.get("conv-2") == "token-2"
+        assert cache.get_valid_access_token("conv-1") == "token-1"
+        assert cache.get_valid_access_token("conv-2") == "token-2"
 
-
-class TestGetConversationKey:
-    def test_with_conversation_id_header(self):
-        ctx = {"headers": {"X-Conversation-Id": "abc-123"}}
-        assert _get_conversation_key(ctx) == "abc-123"
-
-    def test_with_session_id_header(self):
-        ctx = {"headers": {"X-Session-Id": "sess-456"}}
-        assert _get_conversation_key(ctx) == "sess-456"
-
-    def test_without_headers_returns_default(self):
-        assert _get_conversation_key(None) == "__default__"
-        assert _get_conversation_key({}) == "__default__"
 
 
 class TestRequiresApproval:
@@ -279,7 +266,7 @@ class TestExchangeCodeForToken:
 
         # Verify token was cached using the real cache key
         cache_key = _get_token_manager().get_cache_key(oauth_config, request_context)
-        assert _get_token_manager().cache.get(cache_key) == "final-access-token-abc"
+        assert _get_token_manager().cache.get_valid_access_token(cache_key) == "final-access-token-abc"
 
         # Pending exchange should be consumed
         assert tool_call_id not in _get_exchange_manager()._pending
@@ -350,20 +337,6 @@ class TestOAuthCacheKeySharedIdP:
         key2 = _get_token_manager().get_cache_key(oauth2, ctx)
         assert key1 != key2, "Different client_ids should produce different cache keys"
 
-    def test_different_conversation_different_cache_key(self):
-        """Same IdP + client but different conversation gets different cache key."""
-        oauth = MCPOAuthConfig(
-            enabled=True,
-            authorization_url="http://keycloak:8080/auth",
-            token_url="http://keycloak:8080/token",
-            client_id="holmes",
-        )
-        ctx1 = {"headers": {"X-Conversation-Id": "conv-1"}}
-        ctx2 = {"headers": {"X-Conversation-Id": "conv-2"}}
-        key1 = _get_token_manager().get_cache_key(oauth, ctx1)
-        key2 = _get_token_manager().get_cache_key(oauth, ctx2)
-        assert key1 != key2, "Different conversations should produce different cache keys"
-
     def test_shared_token_across_mcp_servers(self):
         """Token cached for one MCP server is reusable by another with same IdP."""
         oauth1 = MCPOAuthConfig(
@@ -386,7 +359,7 @@ class TestOAuthCacheKeySharedIdP:
 
         # Second MCP server should find the same token
         cache_key2 = _get_token_manager().get_cache_key(oauth2, ctx)
-        assert _get_token_manager().cache.get(cache_key2) == "shared-token-xyz"
+        assert _get_token_manager().cache.get_valid_access_token(cache_key2) == "shared-token-xyz"
 
 
 @pytest.mark.manual
@@ -886,11 +859,12 @@ class TestOAuthTokenCacheRefresh:
         cache.set("k", "access", expires_in=60, refresh_token="refresh-tok", refresh_expires_in=3600)
         assert cache.get_refresh_token("k") == "refresh-tok"
 
-    def test_get_refresh_token_expired(self):
+    def test_get_refresh_token_expired_still_returned(self):
+        """Expired refresh tokens are still returned — the IdP decides if they're valid."""
         cache = OAuthTokenCache()
         cache.set("k", "access", expires_in=60, refresh_token="r", refresh_expires_in=3600)
         cache._cache["k"].refresh_expires_at = time.monotonic() - 1
-        assert cache.get_refresh_token("k") is None
+        assert cache.get_refresh_token("k") == "r"
 
     def test_get_refresh_token_missing(self):
         cache = OAuthTokenCache()
@@ -900,21 +874,29 @@ class TestOAuthTokenCacheRefresh:
         cache = OAuthTokenCache()
         cache.set("k", "access", expires_in=60, refresh_token="r", refresh_expires_in=3600)
         cache._cache["k"].expires_at = time.monotonic() - 1
-        assert cache.has("k") is True
+        assert cache.has_token_or_refresh("k") is True
 
     def test_get_returns_none_when_access_expired_refresh_valid(self):
         """get() should return None when access is expired, even if refresh is valid — caller must refresh."""
         cache = OAuthTokenCache()
         cache.set("k", "access", expires_in=60, refresh_token="r", refresh_expires_in=3600)
         cache._cache["k"].expires_at = time.monotonic() - 1
-        assert cache.get("k") is None
+        assert cache.get_valid_access_token("k") is None
 
-    def test_both_expired_evicts_entry(self):
+    def test_both_expired_still_has_if_refresh_token_present(self):
+        """Entry kept even when both expired — refresh token may still work at the IdP."""
         cache = OAuthTokenCache()
         cache.set("k", "access", expires_in=60, refresh_token="r", refresh_expires_in=3600)
         cache._cache["k"].expires_at = time.monotonic() - 1
         cache._cache["k"].refresh_expires_at = time.monotonic() - 1
-        assert cache.has("k") is False
+        assert cache.has_token_or_refresh("k") is True  # kept because refresh token exists
+
+    def test_no_refresh_token_evicts_entry(self):
+        """Entry without refresh token is evicted when access expires."""
+        cache = OAuthTokenCache()
+        cache.set("k", "access", expires_in=60)
+        cache._cache["k"].expires_at = time.monotonic() - 1
+        assert cache.has_token_or_refresh("k") is False
         assert "k" not in cache._cache
 
     def test_set_without_refresh_token(self):
@@ -1489,6 +1471,224 @@ class TestPreloadOAuthMCPTools:
 
         result = load_authenticated_oauth_tools([ts], {"user_id": "user-5"})
         assert result == {}
+
+
+# ---------------------------------------------------------------------------
+# Background sweep
+# ---------------------------------------------------------------------------
+class TestBackgroundSweep:
+    def _make_manager(self) -> OAuthTokenManager:
+        manager = OAuthTokenManager()
+        manager._shutdown_event.set()  # prevent background thread from running
+        return manager
+
+    def test_sweep_refreshes_expiring_token_with_refresh_token(self):
+        """Tokens with refresh tokens are refreshed and pushed to DB."""
+        manager = self._make_manager()
+        cache_key = "user1:__no_conv__:http://idp/auth:cid1"
+
+        manager._cache.set(
+            cache_key, "old-access", expires_in=600,
+            refresh_token="refresh-tok",
+            token_url="http://idp/token", client_id="cid1",
+            authorization_url="http://idp/auth", user_id="user1",
+        )
+        # Force the token to be "expiring soon"
+        manager._cache._cache[cache_key].expires_at = time.monotonic() + 100
+
+        mock_response = MagicMock()
+        mock_response.status_code = 200
+        mock_response.json.return_value = {
+            "access_token": "new-access",
+            "expires_in": 3600,
+            "refresh_token": "new-refresh",
+        }
+
+        with patch("holmes.plugins.toolsets.mcp.oauth_token_manager.httpx.post", return_value=mock_response):
+            with patch.object(manager, "_store_to_db") as mock_db:
+                manager._sweep_expiring_tokens()
+
+        # Token should be refreshed in cache
+        assert manager._cache.get_valid_access_token(cache_key) == "new-access"
+        # Token should be pushed to DB
+        mock_db.assert_called_once()
+        manager.shutdown()
+
+    def test_sweep_checks_db_when_no_refresh_token(self):
+        """Tokens without refresh tokens check DB for a fresher version."""
+        manager = self._make_manager()
+        cache_key = "user2:__no_conv__:http://idp2/auth:cid2"
+
+        manager._cache.set(
+            cache_key, "old-access", expires_in=600,
+            token_url="http://idp2/token", client_id="cid2",
+            authorization_url="http://idp2/auth", user_id="user2",
+        )
+        manager._cache._cache[cache_key].expires_at = time.monotonic() + 100
+
+        mock_dal = MagicMock()
+        mock_dal.enabled = True
+        mock_dal.get_oauth_token.return_value = {
+            "encrypted_token": json.dumps({"access_token": "db-access", "expires_in": 7200}),
+            "signing_key_hash": "__frontend__",
+        }
+        manager._dal = mock_dal
+
+        manager._sweep_expiring_tokens()
+
+        # Token should be reloaded from DB
+        assert manager._cache.get_valid_access_token(cache_key) == "db-access"
+        mock_dal.get_oauth_token.assert_called_once_with("http://idp2/auth", user_id="user2")
+        manager.shutdown()
+
+    def test_sweep_skips_non_expiring_tokens(self):
+        """Tokens not expiring soon are left alone."""
+        manager = self._make_manager()
+        cache_key = "user3:__no_conv__:http://idp3/auth:cid3"
+
+        manager._cache.set(
+            cache_key, "fresh-access", expires_in=7200,
+            refresh_token="refresh-tok",
+            token_url="http://idp3/token", client_id="cid3",
+            authorization_url="http://idp3/auth", user_id="user3",
+        )
+
+        with patch("holmes.plugins.toolsets.mcp.oauth_token_manager.httpx.post") as mock_post:
+            manager._sweep_expiring_tokens()
+
+        # No refresh should have been attempted
+        mock_post.assert_not_called()
+        assert manager._cache.get_valid_access_token(cache_key) == "fresh-access"
+        manager.shutdown()
+
+    def test_sweep_falls_back_to_db_when_refresh_fails(self):
+        """When refresh fails, sweep checks DB for a fresher token."""
+        manager = self._make_manager()
+        cache_key = "user4:__no_conv__:http://idp4/auth:cid4"
+
+        manager._cache.set(
+            cache_key, "old-access", expires_in=600,
+            refresh_token="bad-refresh",
+            token_url="http://idp4/token", client_id="cid4",
+            authorization_url="http://idp4/auth", user_id="user4",
+        )
+        manager._cache._cache[cache_key].expires_at = time.monotonic() + 100
+
+        # Refresh fails
+        mock_response = MagicMock()
+        mock_response.status_code = 401
+        mock_dal = MagicMock()
+        mock_dal.enabled = True
+        mock_dal.get_oauth_token.return_value = {
+            "encrypted_token": json.dumps({"access_token": "db-fallback", "expires_in": 3600}),
+            "signing_key_hash": "__frontend__",
+        }
+        manager._dal = mock_dal
+
+        with patch("holmes.plugins.toolsets.mcp.oauth_token_manager.httpx.post", return_value=mock_response):
+            manager._sweep_expiring_tokens()
+
+        assert manager._cache.get_valid_access_token(cache_key) == "db-fallback"
+        manager.shutdown()
+
+    def test_expired_refresh_token_still_tried_before_reauth(self):
+        """An expired refresh token is still sent to the IdP — the IdP decides if it's valid."""
+        manager = self._make_manager()
+
+        oauth = MCPOAuthConfig(
+            enabled=True,
+            authorization_url="http://idp6/auth",
+            token_url="http://idp6/token",
+            client_id="cid6",
+        )
+        request_context = {"user_id": "user6"}
+        cache_key = manager.get_cache_key(oauth, request_context)
+
+        # Store token with refresh, then expire BOTH access and refresh
+        manager._cache.set(
+            cache_key, "old-access", expires_in=60,
+            refresh_token="expired-refresh",
+            refresh_expires_in=3600,
+            token_url="http://idp6/token", client_id="cid6",
+            authorization_url="http://idp6/auth", user_id="user6",
+        )
+        manager._cache._cache[cache_key].expires_at = time.monotonic() - 1
+        manager._cache._cache[cache_key].refresh_expires_at = time.monotonic() - 1
+
+        # IdP accepts the expired refresh token and returns a new access token
+        mock_response = MagicMock()
+        mock_response.status_code = 200
+        mock_response.json.return_value = {
+            "access_token": "new-from-expired-refresh",
+            "expires_in": 3600,
+            "refresh_token": "new-refresh",
+        }
+
+        with patch("holmes.plugins.toolsets.mcp.oauth_token_manager.httpx.post", return_value=mock_response) as mock_post:
+            token = manager.get_access_token(oauth, request_context)
+
+        # Should have tried the expired refresh token
+        assert mock_post.called
+        call_data = mock_post.call_args[1]["data"]
+        assert call_data["grant_type"] == "refresh_token"
+        assert call_data["refresh_token"] == "expired-refresh"
+
+        # Should have gotten a new token
+        assert token == "new-from-expired-refresh"
+        manager.shutdown()
+
+    def test_expired_refresh_token_rejected_returns_none(self):
+        """If IdP rejects the expired refresh token, get_access_token returns None (user must reauth)."""
+        manager = self._make_manager()
+
+        oauth = MCPOAuthConfig(
+            enabled=True,
+            authorization_url="http://idp7/auth",
+            token_url="http://idp7/token",
+            client_id="cid7",
+        )
+        request_context = {"user_id": "user7"}
+        cache_key = manager.get_cache_key(oauth, request_context)
+
+        manager._cache.set(
+            cache_key, "old-access", expires_in=60,
+            refresh_token="dead-refresh",
+            refresh_expires_in=3600,
+            token_url="http://idp7/token", client_id="cid7",
+            authorization_url="http://idp7/auth", user_id="user7",
+        )
+        manager._cache._cache[cache_key].expires_at = time.monotonic() - 1
+        manager._cache._cache[cache_key].refresh_expires_at = time.monotonic() - 1
+
+        # IdP rejects the expired refresh token
+        mock_response = MagicMock()
+        mock_response.status_code = 401
+
+        with patch("holmes.plugins.toolsets.mcp.oauth_token_manager.httpx.post", return_value=mock_response):
+            token = manager.get_access_token(oauth, request_context)
+
+        # No token — user must re-authenticate
+        assert token is None
+        manager.shutdown()
+
+    def test_sweep_no_op_when_no_dal_and_no_refresh(self):
+        """Without DAL and refresh token, sweep is a no-op."""
+        manager = self._make_manager()
+        cache_key = "user5:__no_conv__:http://idp5/auth:cid5"
+
+        manager._cache.set(
+            cache_key, "old-access", expires_in=600,
+            token_url="http://idp5/token", client_id="cid5",
+            authorization_url="http://idp5/auth", user_id="user5",
+        )
+        manager._cache._cache[cache_key].expires_at = time.monotonic() + 100
+
+        # No DAL, no refresh token
+        manager._sweep_expiring_tokens()
+
+        # Token unchanged
+        assert manager._cache.get_valid_access_token(cache_key) == "old-access"
+        manager.shutdown()
 
 
 # ---------------------------------------------------------------------------

@@ -8,9 +8,9 @@ import base64
 import hashlib
 import json
 import logging
+import os
 import threading
 import time
-from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, Optional, Tuple
 
@@ -26,20 +26,9 @@ from holmes.plugins.toolsets.mcp.oauth_token_store import (
 
 logger = logging.getLogger(__name__)
 
-# How long before access token expiry to trigger a background refresh
-_REFRESH_AHEAD_SECONDS = 3600  # 1 hour
-
-
-@dataclass
-class _ScheduledRefresh:
-    """Metadata for a token that needs background refresh."""
-
-    cache_key: str
-    token_url: str
-    client_id: Optional[str]
-    authorization_url: Optional[str]
-    user_id: Optional[str]
-    refresh_at: float  # monotonic time when refresh should happen
+# Background sweep interval and lookahead window (configurable via env vars)
+OAUTH_CREDENTIAL_INTERVAL_SECONDS = int(os.environ.get("OAUTH_CREDENTIAL_INTERVAL_SECONDS", "3600"))
+OAUTH_REFRESH_AHEAD_SECONDS = int(os.environ.get("OAUTH_REFRESH_AHEAD_SECONDS", "3600"))
 
 
 class OAuthTokenManager:
@@ -68,16 +57,14 @@ class OAuthTokenManager:
         self._disk_store = DiskTokenStore()
         self._dal: Optional[Any] = None
 
-        # Background refresh state
-        self._scheduled: Dict[str, _ScheduledRefresh] = {}
-        self._schedule_lock = threading.Lock()
+        # Background sweep thread
         self._shutdown_event = threading.Event()
-        self._refresh_thread = threading.Thread(
-            target=self._background_refresh_loop,
-            name="oauth-token-refresh",
+        self._sweep_thread = threading.Thread(
+            target=self._background_sweep_loop,
+            name="oauth-token-sweep",
             daemon=True,
         )
-        self._refresh_thread.start()
+        self._sweep_thread.start()
 
     # ── Configuration ──────────────────────────────────────────────────
 
@@ -110,15 +97,14 @@ class OAuthTokenManager:
         user_id = _get_user_id(request_context)
 
         # 1. Check in-memory cache
-        cached = self._cache.get(cache_key)
+        cached = self._cache.get_valid_access_token(cache_key)
         if cached:
             return cached
 
-        # 2. Access expired but refresh token available → refresh now
-        if self._cache.has(cache_key):
-            refreshed = self._refresh_token(cache_key, oauth_config, user_id=user_id)
-            if refreshed:
-                return refreshed
+        # 2. Try refresh (get_refresh_token returns the token if one exists, even expired)
+        refreshed = self._refresh_token(cache_key, oauth_config, user_id=user_id)
+        if refreshed:
+            return refreshed
 
         # 3. Check DB for cross-cluster token
         db_token = self._load_from_db(oauth_config, user_id, provider_aliases=provider_aliases)
@@ -129,8 +115,11 @@ class OAuthTokenManager:
                 expires_in=db_token.get("expires_in", 300),
                 refresh_token=db_token.get("refresh_token"),
                 refresh_expires_in=db_token.get("refresh_expires_in"),
+                token_url=oauth_config.token_url,
+                client_id=oauth_config.client_id,
+                authorization_url=oauth_config.authorization_url,
+                user_id=user_id,
             )
-            self._schedule_background_refresh(cache_key, oauth_config, db_token.get("expires_in", 300), user_id)
             logger.info("OAuthTokenManager: loaded token from DB (provider=%s)", oauth_config.authorization_url)
             return db_token["access_token"]
 
@@ -144,8 +133,11 @@ class OAuthTokenManager:
                 disk_token["access_token"],
                 expires_in=expires_in,
                 refresh_token=disk_token.get("refresh_token"),
+                token_url=oauth_config.token_url,
+                client_id=oauth_config.client_id,
+                authorization_url=oauth_config.authorization_url,
+                user_id=user_id,
             )
-            self._schedule_background_refresh(cache_key, oauth_config, expires_in, user_id)
             logger.info("OAuthTokenManager: loaded token from disk")
             return disk_token["access_token"]
 
@@ -158,7 +150,7 @@ class OAuthTokenManager:
     ) -> bool:
         """Check if any token (access or refreshable) is available in cache."""
         cache_key = self._get_cache_key(oauth_config, request_context)
-        return self._cache.has(cache_key)
+        return self._cache.has_token_or_refresh(cache_key)
 
     def store_token(
         self,
@@ -184,6 +176,10 @@ class OAuthTokenManager:
             expires_in=expires_in,
             refresh_token=token_data.get("refresh_token"),
             refresh_expires_in=token_data.get("refresh_expires_in"),
+            token_url=oauth_config.token_url,
+            client_id=oauth_config.client_id,
+            authorization_url=oauth_config.authorization_url,
+            user_id=user_id,
         )
 
         self._store_to_db(oauth_config.authorization_url, token_data, user_id)
@@ -192,16 +188,15 @@ class OAuthTokenManager:
             dk = disk_key or self._default_disk_key(oauth_config)
             self._disk_store.set(dk, token_data)
 
-        self._schedule_background_refresh(cache_key, oauth_config, expires_in, user_id)
         logger.info(
             "OAuthTokenManager: token stored (cache_key=%s, expires_in=%s, has_refresh=%s)",
             cache_key, expires_in, "refresh_token" in token_data,
         )
 
     def shutdown(self) -> None:
-        """Stop the background refresh thread."""
+        """Stop the background sweep thread."""
         self._shutdown_event.set()
-        self._refresh_thread.join(timeout=5)
+        self._sweep_thread.join(timeout=5)
 
     # ── Cache / key helpers (exposed for callers that need the key) ─────
 
@@ -217,88 +212,92 @@ class OAuthTokenManager:
         """Public accessor for the cache key (needed by inject_oauth_token and requires_approval)."""
         return self._get_cache_key(oauth_config, request_context)
 
-    # ── Background refresh ─────────────────────────────────────────────
+    # ── Background sweep ────────────────────────────────────────────────
 
-    def _schedule_background_refresh(
-        self,
-        cache_key: str,
-        oauth_config: Any,
-        expires_in: int,
-        user_id: Optional[str],
-    ) -> None:
-        """Schedule a background refresh for this token 1 hour before expiry."""
-        if expires_in <= _REFRESH_AHEAD_SECONDS:
-            return
-
-        refresh_at = time.monotonic() + expires_in - _REFRESH_AHEAD_SECONDS
-        with self._schedule_lock:
-            self._scheduled[cache_key] = _ScheduledRefresh(
-                cache_key=cache_key,
-                token_url=oauth_config.token_url,
-                client_id=oauth_config.client_id,
-                authorization_url=oauth_config.authorization_url,
-                user_id=user_id,
-                refresh_at=refresh_at,
-            )
-        logger.info(
-            "OAuthTokenManager: scheduled background refresh in %ds (cache_key=%s)",
-            expires_in - _REFRESH_AHEAD_SECONDS, cache_key,
-        )
-
-    def _background_refresh_loop(self) -> None:
-        """Daemon thread that checks for tokens needing refresh every 60s."""
+    def _background_sweep_loop(self) -> None:
+        """Daemon thread: every hour, refresh tokens expiring within the next hour."""
         while not self._shutdown_event.is_set():
-            self._shutdown_event.wait(timeout=60)
+            self._shutdown_event.wait(timeout=OAUTH_CREDENTIAL_INTERVAL_SECONDS)
             if self._shutdown_event.is_set():
                 break
-            self._process_pending_refreshes()
-
-    def _process_pending_refreshes(self) -> None:
-        """Check all scheduled refreshes and execute any that are due."""
-        now = time.monotonic()
-        due: list[_ScheduledRefresh] = []
-
-        with self._schedule_lock:
-            for key, entry in list(self._scheduled.items()):
-                if now >= entry.refresh_at:
-                    due.append(entry)
-                    del self._scheduled[key]
-
-        for entry in due:
             try:
-                self._execute_background_refresh(entry)
+                self._sweep_expiring_tokens()
             except Exception:
-                logger.warning(
-                    "OAuthTokenManager: background refresh failed (cache_key=%s)",
-                    entry.cache_key, exc_info=True,
-                )
+                logger.warning("OAuthTokenManager: sweep failed", exc_info=True)
 
-    def _execute_background_refresh(self, entry: _ScheduledRefresh) -> None:
-        """Execute a single background token refresh."""
-        refresh_token = self._cache.get_refresh_token(entry.cache_key)
-        if not refresh_token:
-            logger.warning("OAuthTokenManager: background refresh skipped, no refresh token (cache_key=%s)", entry.cache_key)
+    def _sweep_expiring_tokens(self) -> None:
+        """Check all cached tokens and refresh/reload those expiring soon."""
+        expiring = self._cache.get_expiring_entries(OAUTH_REFRESH_AHEAD_SECONDS)
+        if not expiring:
             return
 
-        result = self._do_refresh_request(entry.token_url, entry.client_id, refresh_token, entry.cache_key)
-        if not result:
+        signing_key_hash = self._get_signing_key_hash()
+        logger.info("OAuthTokenManager: sweep found %d tokens expiring within %ds", len(expiring), OAUTH_REFRESH_AHEAD_SECONDS)
+
+        for cache_key, entry in expiring:
+            try:
+                self._sweep_single_token(cache_key, entry, signing_key_hash)
+            except Exception:
+                logger.warning("OAuthTokenManager: sweep failed for cache_key=%s", cache_key, exc_info=True)
+
+    def _sweep_single_token(self, cache_key: str, entry: Any, signing_key_hash: Optional[str]) -> None:
+        """Refresh or reload a single expiring token.
+
+        - If we have a refresh token → this cluster owns the token, refresh it and push to DB.
+        - Otherwise → check DB for a fresher token from another cluster.
+        """
+        refresh_token = entry.refresh_token
+        if refresh_token and entry.token_url:
+            # Our token — refresh it and push to DB
+            result = self._do_refresh_request(entry.token_url, entry.client_id, refresh_token, cache_key)
+            if result:
+                token_data, _access_token, _expires_in = result
+                self._store_to_db(entry.authorization_url, token_data, entry.user_id)
+                logger.info("OAuthTokenManager: sweep refreshed token (cache_key=%s)", cache_key)
+                return
+
+        # No refresh token or refresh failed — check DB for a fresher token
+        if not self._dal or not self._dal.enabled or not entry.authorization_url:
             return
 
-        token_data, _access_token, _expires_in = result
-        self._store_to_db(entry.authorization_url, token_data, entry.user_id)
+        db_record = self._dal.get_oauth_token(entry.authorization_url, user_id=entry.user_id)
+        if not db_record:
+            return
 
-        # Re-schedule using a minimal oauth_config-like object
-        _OAuthLike = type("_OAuthLike", (), {
-            "token_url": entry.token_url,
-            "client_id": entry.client_id,
-            "authorization_url": entry.authorization_url,
-        })()
-        self._schedule_background_refresh(entry.cache_key, _OAuthLike, _expires_in, entry.user_id)
+        # Decrypt and reload into cache
+        stored_hash = db_record.get("signing_key_hash", "")
+        token_data = None
+        if stored_hash == "__frontend__":
+            try:
+                token_data = json.loads(db_record["encrypted_token"])
+            except (json.JSONDecodeError, TypeError):
+                pass
+        elif signing_key_hash and stored_hash == signing_key_hash:
+            token_data = self._decrypt_token(db_record["encrypted_token"])
+
+        if token_data and token_data.get("access_token"):
+            expires_in = token_data.get("expires_in", 300)
+            self._cache.set(
+                cache_key,
+                token_data["access_token"],
+                expires_in=expires_in,
+                refresh_token=token_data.get("refresh_token"),
+                refresh_expires_in=token_data.get("refresh_expires_in"),
+                token_url=entry.token_url,
+                client_id=entry.client_id,
+                authorization_url=entry.authorization_url,
+                user_id=entry.user_id,
+            )
+            logger.info("OAuthTokenManager: sweep reloaded token from DB (cache_key=%s)", cache_key)
 
     # ── Synchronous (reactive) refresh ─────────────────────────────────
 
     def _refresh_token(self, cache_key: str, oauth_config: Any, user_id: Optional[str] = None) -> Optional[str]:
-        """Attempt to refresh an expired access token using the cached refresh token."""
+        """Attempt to refresh an expired access token using the cached refresh token.
+
+        Evicts the cache entry on failure so subsequent calls don't keep retrying
+        a dead refresh token — the user will be prompted to re-authenticate instead.
+        """
         refresh_token = self._cache.get_refresh_token(cache_key)
         if not refresh_token:
             return None
@@ -306,14 +305,15 @@ class OAuthTokenManager:
         try:
             result = self._do_refresh_request(oauth_config.token_url, oauth_config.client_id, refresh_token, cache_key)
             if not result:
+                self._cache.evict(cache_key)
                 return None
 
             token_data, access_token, expires_in = result
             self._store_to_db(oauth_config.authorization_url, token_data, user_id)
-            self._schedule_background_refresh(cache_key, oauth_config, expires_in, user_id)
             return access_token
         except Exception:
             logger.warning("OAuthTokenManager: refresh failed (cache_key=%s)", cache_key, exc_info=True)
+            self._cache.evict(cache_key)
             return None
 
     def _do_refresh_request(
@@ -425,17 +425,6 @@ class OAuthTokenManager:
                 continue
 
             stored_hash = db_record.get("signing_key_hash", "")
-
-            if stored_hash == "__frontend__":
-                try:
-                    token_data = json.loads(db_record["encrypted_token"])
-                    if token_data.get("access_token"):
-                        logger.info("OAuthTokenManager: loaded frontend-stored token from DB (provider=%s)", provider)
-                        return token_data
-                except (json.JSONDecodeError, TypeError):
-                    logger.warning("OAuthTokenManager: failed to parse frontend token from DB (provider=%s)", provider)
-                continue
-
             if not signing_key_hash:
                 continue
             if stored_hash != signing_key_hash:
@@ -482,12 +471,11 @@ class OAuthTokenManager:
     # ── Key helpers ────────────────────────────────────────────────────
 
     def _get_cache_key(self, oauth_config: Any, request_context: Optional[Dict[str, Any]]) -> str:
-        conv_key = _get_conversation_key(request_context)
         user_id = _get_user_id(request_context) or "__no_user__"
         idp_key = hashlib.sha256(
             f"{oauth_config.authorization_url}:{oauth_config.client_id}".encode()
         ).hexdigest()[:12]
-        return f"{user_id}:{conv_key}:{idp_key}"
+        return f"{user_id}:{idp_key}"
 
     @staticmethod
     def _default_disk_key(oauth_config: Any) -> str:
@@ -497,15 +485,6 @@ class OAuthTokenManager:
 
 # ── Module-level helpers (used by the manager and shared with toolset_mcp) ──
 
-
-def _get_conversation_key(request_context: Optional[Dict[str, Any]]) -> str:
-    """Extract a conversation key from request context headers."""
-    if request_context:
-        headers = request_context.get("headers", {})
-        for key in ("X-Conversation-Id", "x-conversation-id", "X-Session-Id", "x-session-id"):
-            if key in headers:
-                return str(headers[key])
-    return "__default__"
 
 
 def _get_user_id(request_context: Optional[Dict[str, Any]]) -> Optional[str]:
