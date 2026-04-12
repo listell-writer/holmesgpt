@@ -1,22 +1,15 @@
 import asyncio
-import base64
-import hashlib
 import json
 import logging
 import os
-import re
-import secrets
-import socket
 import threading
 import time
-import webbrowser
 import yaml as _yaml
 from contextlib import asynccontextmanager
 from dataclasses import dataclass, field
 from enum import Enum
-from http.server import BaseHTTPRequestHandler, HTTPServer
 from typing import Any, ClassVar, Dict, List, Optional, TextIO, Tuple, Type, Union
-from urllib.parse import parse_qs, urlencode, urlparse
+from urllib.parse import urlparse
 
 import httpx
 from mcp.client.session import ClientSession
@@ -27,7 +20,15 @@ from mcp.types import Tool as MCP_Tool
 from pydantic import AnyUrl, BaseModel, Field, model_validator
 
 from holmes.common.env_vars import SSE_READ_TIMEOUT
-from holmes.core.oauth_utils import OAuthTokenExchangeError, exchange_code_for_tokens
+from holmes.core.oauth_utils import (
+    OAuthEndpoints,
+    OAuthTokenExchangeError,
+    cli_oauth_flow,
+    discover_auth_server_from_prm,
+    exchange_code_for_tokens,
+    fetch_oauth_metadata,
+    generate_pkce,
+)
 from holmes.core.config import config_path_dir
 from holmes.core.tools import (
     ApprovalRequirement,
@@ -43,7 +44,6 @@ from holmes.plugins.toolsets.mcp.oauth_token_manager import OAuthTokenManager, _
 from holmes.plugins.toolsets.mcp.oauth_token_store import (
     DiskTokenStore,
     OAuthTokenCache,
-    _CachedToken,
 )
 from holmes.utils.definitions import RobustaConfig
 from holmes.utils.header_rendering import render_header_templates
@@ -149,18 +149,6 @@ def _get_signing_key() -> Optional[str]:
     except Exception:
         logger.warning("Failed to load signing_key from Robusta config", exc_info=True)
         return None
-
-
-
-def _generate_pkce() -> Tuple[str, str]:
-    """Generate PKCE code_verifier and code_challenge (S256).
-
-    Returns (code_verifier, code_challenge).
-    """
-    code_verifier = secrets.token_urlsafe(64)[:128]
-    digest = hashlib.sha256(code_verifier.encode("ascii")).digest()
-    code_challenge = base64.urlsafe_b64encode(digest).rstrip(b"=").decode("ascii")
-    return code_verifier, code_challenge
 
 
 # Singleton token manager — the main interface for all token operations
@@ -270,163 +258,6 @@ def load_authenticated_oauth_tools(
     return result
 
 
-def _cli_oauth_flow(oauth_config: MCPOAuthConfig, server_name: str) -> Optional[Dict[str, Any]]:
-    """Run OAuth authorization_code flow via local browser + callback server.
-
-    Opens the user's browser to the IdP login page, starts a local HTTP
-    server to receive the callback, exchanges the auth code for a token.
-    Returns the token data dict or None on failure.
-    """
-    if not oauth_config.authorization_url or not oauth_config.token_url:
-        logger.warning("CLI OAuth %s: missing authorization_url or token_url", server_name)
-        return None
-
-    # DCR if no client_id (e.g. Atlassian auto-discovery)
-    if not oauth_config.client_id and oauth_config.registration_endpoint:
-        logger.info("CLI OAuth %s: no client_id, performing DCR at %s", server_name, oauth_config.registration_endpoint)
-        # We don't know the callback port yet — register with a placeholder, re-register after starting the server
-    elif not oauth_config.client_id:
-        logger.warning("CLI OAuth %s: no client_id and no registration_endpoint", server_name)
-        return None
-
-    # Generate PKCE
-    code_verifier, code_challenge = _generate_pkce()
-    state = secrets.token_urlsafe(32)
-
-    # Start callback server on an available port
-    callback_server = None
-    callback_port = 0
-    for port in range(18900, 18920):
-        try:
-            callback_server = HTTPServer(("127.0.0.1", port), type("H", (BaseHTTPRequestHandler,), {"do_GET": lambda s: None, "log_message": lambda s, *a: None}))
-            callback_port = port
-            callback_server.server_close()
-            break
-        except socket.error:
-            continue
-
-    if callback_port == 0:
-        logger.warning("CLI OAuth %s: could not find available port for callback server", server_name)
-        return None
-
-    redirect_uri = f"http://127.0.0.1:{callback_port}/callback"
-
-    # Register or re-register via DCR with the actual redirect_uri
-    if oauth_config.registration_endpoint:
-        try:
-            dcr_response = httpx.post(
-                oauth_config.registration_endpoint,
-                json={
-                    "client_name": f"HolmesGPT ({server_name})",
-                    "redirect_uris": [redirect_uri],
-                    "grant_types": ["authorization_code", "refresh_token"],
-                    "response_types": ["code"],
-                    "token_endpoint_auth_method": "none",
-                },
-                timeout=15,
-            )
-            if dcr_response.status_code in (200, 201):
-                dcr_data = dcr_response.json()
-                oauth_config.client_id = dcr_data.get("client_id", oauth_config.client_id)
-                logger.info("CLI OAuth %s: DCR registered client_id=%s with redirect_uri=%s", server_name, oauth_config.client_id, redirect_uri)
-            elif not oauth_config.client_id:
-                logger.warning("CLI OAuth %s: DCR failed HTTP %d and no client_id available", server_name, dcr_response.status_code)
-                return None
-        except Exception:
-            if not oauth_config.client_id:
-                logger.warning("CLI OAuth %s: DCR failed and no client_id available", server_name, exc_info=True)
-                return None
-            logger.warning("CLI OAuth %s: DCR re-registration failed, using existing client_id", server_name, exc_info=True)
-
-    if not oauth_config.client_id:
-        logger.warning("CLI OAuth %s: no client_id after DCR attempt", server_name)
-        return None
-
-    # Build authorization URL
-    auth_params = {
-        "response_type": "code",
-        "client_id": oauth_config.client_id,
-        "redirect_uri": redirect_uri,
-        "code_challenge": code_challenge,
-        "code_challenge_method": "S256",
-        "state": state,
-    }
-    if oauth_config.scopes:
-        auth_params["scope"] = " ".join(oauth_config.scopes)
-
-    auth_url = f"{oauth_config.authorization_url}?{urlencode(auth_params)}"
-
-    # Set up callback handler
-    result: Dict[str, Any] = {}
-    callback_event = threading.Event()
-
-    class CallbackHandler(BaseHTTPRequestHandler):
-        def do_GET(self):
-            parsed = urlparse(self.path)
-            params = parse_qs(parsed.query)
-            if "code" in params:
-                result["code"] = params["code"][0]
-                self.send_response(200)
-                self.send_header("Content-Type", "text/html")
-                self.end_headers()
-                self.wfile.write(b"<h1>Authenticated! You can close this tab.</h1>")
-            else:
-                result["error"] = params.get("error", ["unknown"])[0]
-                result["error_description"] = params.get("error_description", [""])[0]
-                self.send_response(400)
-                self.send_header("Content-Type", "text/html")
-                self.end_headers()
-                self.wfile.write(f"<h1>Error: {result['error']}</h1>".encode())
-            callback_event.set()
-
-        def log_message(self, format, *args):
-            pass
-
-    server = HTTPServer(("127.0.0.1", callback_port), CallbackHandler)
-    server_thread = threading.Thread(target=server.serve_forever, daemon=True)
-    server_thread.start()
-
-    try:
-        logger.info("CLI OAuth %s: opening browser for authentication", server_name)
-        print(f"\nOpening browser for OAuth authentication to {server_name}...")
-        print(f"If browser doesn't open, visit: {auth_url}\n")
-        webbrowser.open(auth_url)
-
-        logger.info("CLI OAuth %s: waiting for callback on port %d", server_name, callback_port)
-        callback_event.wait(timeout=300)
-
-        if "error" in result:
-            logger.warning("CLI OAuth %s: OAuth error: %s - %s", server_name, result["error"], result.get("error_description", ""))
-            return None
-
-        if "code" not in result:
-            logger.warning("CLI OAuth %s: no auth code received (timeout?)", server_name)
-            return None
-
-        # Exchange code for token
-        try:
-            token_data = exchange_code_for_tokens(
-                token_url=oauth_config.token_url,
-                code=result["code"],
-                redirect_uri=redirect_uri,
-                client_id=oauth_config.client_id,
-                code_verifier=code_verifier,
-            )
-        except OAuthTokenExchangeError as e:
-            logger.warning("CLI OAuth %s: token exchange failed: %s", server_name, e)
-            return None
-
-        # Add expires_at for disk storage
-        if "expires_in" in token_data and "expires_at" not in token_data:
-            token_data["expires_at"] = time.time() + token_data["expires_in"]
-
-        logger.info("CLI OAuth %s: authentication successful", server_name)
-        return token_data
-
-    finally:
-        server.shutdown()
-
-
 class _PendingOAuthExchange:
     """State for a pending OAuth approval: PKCE verifier and config."""
 
@@ -439,6 +270,7 @@ class _PendingOAuthExchange:
 # Pending OAuth exchanges and lock
 _pending_exchanges: Dict[str, _PendingOAuthExchange] = {}
 _exchanges_lock = threading.Lock()
+
 
 def set_oauth_dal(dal: Any) -> None:
     """Set the DAL instance for OAuth DB operations. Called during server startup."""
@@ -565,54 +397,45 @@ def _inject_oauth_token(
 def exchange_code_for_token(tool_call_id: str, payload_json: str, request_context: Optional[Dict[str, Any]]) -> None:
     """Exchange an OAuth authorization code for an access token.
 
-    The frontend sends a JSON payload: {"code": "...", "redirect_uri": "...", "client_id": "..."}.
-    Holmes exchanges the code at the IdP's token_url using the PKCE code_verifier
-    (generated during requires_approval). The access token stays server-side.
-
-    Called from tool_calling_llm._execute_tool_decisions() when a decision
-    includes an oauth_payload from the frontend OAuth flow.
+    Called from tool_calling_llm when a tool approval decision includes an
+    OAuth payload from the frontend browser flow.
     """
     with _exchanges_lock:
         pending = _pending_exchanges.pop(tool_call_id, None)
 
     if pending is None:
-        logger.error("OAuth exchange failed: no pending exchange for tool_call_id=%s (possible timeout or duplicate)", tool_call_id)
+        logger.error("OAuth exchange: no pending exchange for tool_call_id=%s", tool_call_id)
         return
 
     try:
         payload = json.loads(payload_json)
-        auth_code = payload["code"]
-        redirect_uri = payload.get("redirect_uri", "")
-        # Frontend may include client_id from DCR (when Holmes didn't have one at discovery time)
-        client_id = payload.get("client_id") or pending.oauth_config.client_id
-        if client_id and not pending.oauth_config.client_id:
-            pending.oauth_config.client_id = client_id
-            logger.info("OAuth: using client_id from frontend DCR: %s", client_id)
-        logger.info("OAuth: exchanging code at token endpoint %s (client_id=%s)", pending.oauth_config.token_url, client_id)
+    except json.JSONDecodeError:
+        logger.exception("OAuth exchange: invalid JSON payload for tool_call_id=%s", tool_call_id)
+        return
 
-        # Exchange auth code for access token at the IdP's token endpoint (server-side)
+    # Frontend may include client_id from DCR (when Holmes didn't have one at discovery time)
+    client_id = payload.get("client_id") or pending.oauth_config.client_id
+    if client_id and not pending.oauth_config.client_id:
+        pending.oauth_config.client_id = client_id
+        logger.info("OAuth: using client_id from frontend DCR: %s", client_id)
+
+    try:
         token_data = exchange_code_for_tokens(
             token_url=pending.oauth_config.token_url,
-            code=auth_code,
-            redirect_uri=redirect_uri,
+            code=payload["code"],
+            redirect_uri=payload.get("redirect_uri", ""),
             client_id=client_id,
             code_verifier=pending.code_verifier,
         )
+    except (OAuthTokenExchangeError, KeyError, Exception):
+        logger.exception("OAuth exchange failed (tool_call_id=%s, token_url=%s)", tool_call_id, pending.oauth_config.token_url)
+        return
 
-        # Store token via manager (cache + DB + schedule background refresh)
-        _token_manager.store_token(pending.oauth_config, token_data, request_context)
-        logger.warning(
-            "OAuth token stored via manager (idp=%s, expires_in=%s, has_refresh=%s)",
-            pending.oauth_config.token_url, token_data.get("expires_in"), "refresh_token" in token_data,
-        )
-    except json.JSONDecodeError:
-        logger.exception("OAuth token exchange: failed to parse JSON response from %s", pending.oauth_config.token_url)
-    except OAuthTokenExchangeError:
-        logger.exception("OAuth token exchange failed at %s", pending.oauth_config.token_url)
-    except Exception:
-        logger.exception("OAuth token exchange failed (tool_call_id=%s, token_url=%s)", tool_call_id, pending.oauth_config.token_url)
-
-
+    _token_manager.store_token(pending.oauth_config, token_data, request_context)
+    logger.info(
+        "OAuth token stored (idp=%s, expires_in=%s, has_refresh=%s)",
+        pending.oauth_config.token_url, token_data.get("expires_in"), "refresh_token" in token_data,
+    )
 
 
 @asynccontextmanager
@@ -703,7 +526,14 @@ class RemoteMCPTool(Tool):
         if not is_frontend:
             # CLI mode: run browser OAuth flow synchronously
             logger.info("OAuth MCP %s: CLI mode, running browser OAuth flow", self.toolset.name)
-            token_data = _cli_oauth_flow(oauth_config, self.toolset.name)
+            oauth_endpoints = OAuthEndpoints(
+                authorization_url=oauth_config.authorization_url,
+                token_url=oauth_config.token_url,
+                client_id=oauth_config.client_id,
+                scopes=oauth_config.scopes,
+                registration_endpoint=oauth_config.registration_endpoint,
+            )
+            token_data = cli_oauth_flow(oauth_endpoints, self.toolset.name)
             if token_data:
                 _token_manager.store_token(
                     oauth_config, token_data, context.request_context,
@@ -716,7 +546,7 @@ class RemoteMCPTool(Tool):
                 # Fall through to frontend flow as fallback
 
         # Frontend mode: use PKCE + approval mechanism
-        code_verifier, code_challenge = _generate_pkce()
+        code_verifier, code_challenge = generate_pkce()
 
         with _exchanges_lock:
             _pending_exchanges[context.tool_call_id] = _PendingOAuthExchange(
@@ -1263,81 +1093,25 @@ class RemoteMCPToolset(Toolset):
         Discovery order (matching mcp.client.auth):
         1. Try Protected Resource Metadata (RFC 9728) — path-based, then root-based
         2. If PRM found auth server → fetch its OIDC/OAuth metadata
-        3. If PRM not found → legacy fallback: /.well-known/oauth-authorization-server on MCP server
-        4. Dynamic Client Registration if no client_id configured
+        3. If PRM not found → legacy fallback on MCP server itself
+        4. Dynamic Client Registration deferred to runtime
 
         Returns True if discovery succeeded and oauth config is fully populated.
         """
         assert isinstance(self._mcp_config, MCPConfig) and self._mcp_config.oauth is not None
         oauth_config = self._mcp_config.oauth
         verify_ssl = self._mcp_config.verify_ssl
-        parsed = urlparse(mcp_url)
-        base_url = f"{parsed.scheme}://{parsed.netloc}"
 
-        # Step 1: Try to find auth server via Protected Resource Metadata (RFC 9728)
-        auth_server_url = None
-        prm_urls = []
+        # Step 1: Find auth server via Protected Resource Metadata (RFC 9728)
+        auth_server_url, prm_scopes = discover_auth_server_from_prm(
+            initial_response, mcp_url, verify_ssl, self.name,
+        )
+        if prm_scopes and not oauth_config.scopes:
+            oauth_config.scopes = prm_scopes
 
-        # From WWW-Authenticate header
-        www_auth = initial_response.headers.get("www-authenticate", "")
-        rm_match = re.search(r'resource_metadata="([^"]+)"', www_auth)
-        if rm_match:
-            prm_urls.append(rm_match.group(1))
-
-        # Path-based well-known (e.g. /.well-known/oauth-protected-resource/v1/mcp)
-        if parsed.path and parsed.path != "/":
-            prm_urls.append(f"{base_url}/.well-known/oauth-protected-resource{parsed.path}")
-
-        # Root-based well-known
-        prm_urls.append(f"{base_url}/.well-known/oauth-protected-resource")
-
-        for prm_url in prm_urls:
-            try:
-                prm_response = httpx.get(prm_url, timeout=10, verify=verify_ssl)
-                if prm_response.status_code == 200:
-                    prm = prm_response.json()
-                    auth_servers = prm.get("authorization_servers", [])
-                    if auth_servers:
-                        auth_server_url = auth_servers[0].rstrip("/")
-                        if not oauth_config.scopes and prm.get("scopes_supported"):
-                            oauth_config.scopes = prm["scopes_supported"]
-                        logging.info("OAuth discovery %s: found auth server from PRM %s: %s", self.name, prm_url, auth_server_url)
-                        break
-            except Exception:
-                continue
-
-        # Step 2: Fetch OAuth/OIDC metadata from auth server (or legacy fallback)
-        oidc_config = None
-
-        if auth_server_url:
-            # Auth server found via PRM — try its OIDC/OAuth metadata
-            auth_parsed = urlparse(auth_server_url)
-            auth_base = f"{auth_parsed.scheme}://{auth_parsed.netloc}"
-            discovery_urls = []
-            if auth_parsed.path and auth_parsed.path != "/":
-                discovery_urls.append(f"{auth_base}/.well-known/oauth-authorization-server{auth_parsed.path.rstrip('/')}")
-                discovery_urls.append(f"{auth_base}/.well-known/openid-configuration{auth_parsed.path.rstrip('/')}")
-            discovery_urls.append(f"{auth_base}/.well-known/oauth-authorization-server")
-            discovery_urls.append(f"{auth_base}/.well-known/openid-configuration")
-        else:
-            # Legacy fallback (MCP spec 2025-03-26): try on the MCP server itself
-            discovery_urls = [
-                f"{base_url}/.well-known/oauth-authorization-server",
-                f"{base_url}/.well-known/openid-configuration",
-            ]
-
-        for disc_url in discovery_urls:
-            try:
-                disc_response = httpx.get(disc_url, timeout=10, verify=verify_ssl)
-                if disc_response.status_code == 200:
-                    oidc_config = disc_response.json()
-                    logging.info("OAuth discovery %s: fetched OAuth metadata from %s", self.name, disc_url)
-                    break
-            except Exception:
-                continue
-
+        # Step 2: Fetch OAuth/OIDC metadata
+        oidc_config = fetch_oauth_metadata(auth_server_url, mcp_url, verify_ssl, self.name)
         if not oidc_config:
-            logging.warning("OAuth discovery %s: all OAuth metadata discovery attempts failed", self.name)
             return False
 
         if not oauth_config.authorization_url:
@@ -1346,24 +1120,18 @@ class RemoteMCPToolset(Toolset):
             oauth_config.token_url = oidc_config.get("token_endpoint")
 
         if not oauth_config.authorization_url or not oauth_config.token_url:
-            logging.warning("OAuth discovery %s: missing authorization or token endpoint in OAuth metadata", self.name)
+            logging.warning("OAuth discovery %s: missing authorization or token endpoint in metadata", self.name)
             return False
 
-        # Save registration endpoint for potential CLI re-registration later
-        registration_endpoint = oidc_config.get("registration_endpoint")
-        if registration_endpoint:
-            oauth_config.registration_endpoint = registration_endpoint
+        if oidc_config.get("registration_endpoint"):
+            oauth_config.registration_endpoint = oidc_config["registration_endpoint"]
 
-        # Step 3: Dynamic Client Registration if no client_id
-        # At startup, we don't know the redirect_uri (it depends on CLI port or frontend URL).
-        # Skip DCR here — it will be done at runtime by the CLI flow (with actual port)
-        # or by the frontend (with its own callback URL).
+        # DCR deferred to runtime — we don't know redirect_uri at startup
         if not oauth_config.client_id:
-            if not registration_endpoint:
-                logging.warning("OAuth discovery %s: no client_id and no DCR endpoint — frontend or CLI must provide client_id", self.name)
-                # Don't fail — the frontend may handle DCR itself
+            if oauth_config.registration_endpoint:
+                logging.info("OAuth discovery %s: no client_id, DCR deferred to runtime", self.name)
             else:
-                logging.info("OAuth discovery %s: no client_id, DCR deferred to runtime (registration_endpoint=%s)", self.name, registration_endpoint)
+                logging.warning("OAuth discovery %s: no client_id and no DCR endpoint", self.name)
 
         logging.info(
             "OAuth discovery %s complete: authorization_url=%s, token_url=%s, client_id=%s",

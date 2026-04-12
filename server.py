@@ -71,8 +71,6 @@ from holmes.plugins.toolsets.mcp.toolset_mcp import (
 )
 from holmes.utils.stream import stream_chat_formatter
 
-# removed: add_runbooks_to_user_prompt
-
 
 def init_logging():
     # Filter out periodical healniss and readiness probe.

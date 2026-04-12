@@ -8,7 +8,6 @@ import time
 import urllib.request
 import webbrowser
 from http.server import BaseHTTPRequestHandler, HTTPServer
-from pathlib import Path
 from unittest.mock import MagicMock, patch
 from urllib.parse import parse_qs, urlencode, urlparse
 
@@ -28,7 +27,13 @@ from holmes.core.tools import (
 )
 from holmes.core.tools_utils.tool_executor import ToolExecutor
 from holmes.plugins.toolsets.mcp.oauth_token_manager import OAuthTokenManager
+from holmes.core.oauth_utils import (
+    OAuthEndpoints,
+    cli_oauth_flow,
+    generate_pkce,
+)
 from holmes.plugins.toolsets.mcp.oauth_token_manager import _get_conversation_key, _get_user_id
+from holmes.plugins.toolsets.mcp.oauth_token_store import _CachedToken
 from holmes.plugins.toolsets.mcp.toolset_mcp import (
     DiskTokenStore,
     MCPConfig,
@@ -37,11 +42,8 @@ from holmes.plugins.toolsets.mcp.toolset_mcp import (
     OAuthTokenCache,
     RemoteMCPTool,
     RemoteMCPToolset,
-    _CachedToken,
     _LoadedToolsEntry,
-    _cli_oauth_flow,
     _exchanges_lock,
-    _generate_pkce,
     _inject_oauth_token,
     _mcp_tools_cache,
     _mcp_tools_cache_lock,
@@ -52,7 +54,6 @@ from holmes.plugins.toolsets.mcp.toolset_mcp import (
     exchange_code_for_token,
     load_authenticated_oauth_tools,
 )
-
 
 
 class TestMCPOAuthConfig:
@@ -88,11 +89,9 @@ class TestMCPOAuthConfig:
         assert oauth.scopes is None
 
 
-
-
 class TestPKCE:
     def test_generate_pkce(self):
-        verifier, challenge = _generate_pkce()
+        verifier, challenge = generate_pkce()
         assert len(verifier) <= 128
         assert len(verifier) >= 43
         assert len(challenge) > 0
@@ -102,8 +101,8 @@ class TestPKCE:
         assert "/" not in challenge
 
     def test_pkce_different_each_time(self):
-        v1, c1 = _generate_pkce()
-        v2, c2 = _generate_pkce()
+        v1, c1 = generate_pkce()
+        v2, c2 = generate_pkce()
         assert v1 != v2
         assert c1 != c2
 
@@ -265,7 +264,7 @@ class TestExchangeCodeForToken:
 
         request_context = {"headers": {"X-Conversation-Id": conv_id}}
 
-        with patch("holmes.plugins.toolsets.mcp.toolset_mcp.httpx.post", return_value=mock_response) as mock_post:
+        with patch("holmes.core.oauth_utils.httpx.post", return_value=mock_response) as mock_post:
             exchange_code_for_token(tool_call_id, payload_json, request_context)
 
             # Verify token endpoint was called correctly
@@ -521,7 +520,7 @@ class TestLiveAtlassianOAuthDiscovery:
         print(f"  client_id: {oauth.client_id}")
 
         # Step 2: Generate PKCE
-        code_verifier, code_challenge = _generate_pkce()
+        code_verifier, code_challenge = generate_pkce()
 
         # Step 3: Start local callback server (port 0 = OS-assigned)
         auth_code_result = {}
@@ -638,20 +637,19 @@ class TestLiveAtlassianOAuthDiscovery:
 class TestCLIOAuthFlow:
     """Tests for the CLI OAuth browser flow with mocked browser/server/network."""
 
-    def _make_oauth_config(self, **overrides):
+    def _make_oauth_endpoints(self, **overrides):
         defaults = dict(
-            enabled=True,
             authorization_url="http://idp.test/authorize",
             token_url="http://idp.test/token",
             client_id="test-client",
             scopes=["mcp:tools"],
         )
         defaults.update(overrides)
-        return MCPOAuthConfig(**defaults)
+        return OAuthEndpoints(**defaults)
 
     def test_cli_flow_full_roundtrip(self):
         """Mock browser + callback: DCR → auth URL → callback with code → token exchange."""
-        oauth = self._make_oauth_config()
+        oauth = self._make_oauth_endpoints()
 
         # Mock httpx.post for the token exchange
         mock_token_response = MagicMock()
@@ -693,9 +691,9 @@ class TestCLIOAuthFlow:
 
             threading.Thread(target=send_callback, daemon=True).start()
 
-        with patch("holmes.plugins.toolsets.mcp.toolset_mcp.httpx.post", side_effect=mock_post), \
-             patch("webbrowser.open", side_effect=mock_browser_open):
-            result = _cli_oauth_flow(oauth, "test-server")
+        with patch("holmes.core.oauth_utils.httpx.post", side_effect=mock_post), \
+             patch("holmes.core.oauth_utils.webbrowser.open", side_effect=mock_browser_open):
+            result = cli_oauth_flow(oauth, "test-server")
 
         assert result is not None, "CLI flow should return token data"
         assert result["access_token"] == "cli-test-token-abc"
@@ -706,7 +704,7 @@ class TestCLIOAuthFlow:
     def test_cli_flow_with_dcr(self):
         """CLI flow performs DCR when client_id is None."""
 
-        oauth = self._make_oauth_config(client_id=None, registration_endpoint="http://idp.test/register")
+        oauth = self._make_oauth_endpoints(client_id=None, registration_endpoint="http://idp.test/register")
 
         def mock_post(url, **kwargs):
             if "register" in url:
@@ -737,9 +735,9 @@ class TestCLIOAuthFlow:
 
             threading.Thread(target=send_callback, daemon=True).start()
 
-        with patch("holmes.plugins.toolsets.mcp.toolset_mcp.httpx.post", side_effect=mock_post), \
-             patch("webbrowser.open", side_effect=mock_browser_open):
-            result = _cli_oauth_flow(oauth, "dcr-test")
+        with patch("holmes.core.oauth_utils.httpx.post", side_effect=mock_post), \
+             patch("holmes.core.oauth_utils.webbrowser.open", side_effect=mock_browser_open):
+            result = cli_oauth_flow(oauth, "dcr-test")
 
         assert result is not None
         assert result["access_token"] == "dcr-token"
@@ -748,7 +746,7 @@ class TestCLIOAuthFlow:
     def test_cli_flow_dcr_cache_key_consistency(self):
         """After DCR changes client_id, cache key should use the new client_id."""
 
-        oauth = self._make_oauth_config(client_id=None, registration_endpoint="http://idp.test/register")
+        oauth = self._make_oauth_endpoints(client_id=None, registration_endpoint="http://idp.test/register")
         ctx = {"headers": {"X-Conversation-Id": "cli-conv"}}
 
         # Cache key before DCR (client_id=None)
@@ -780,9 +778,9 @@ class TestCLIOAuthFlow:
 
             threading.Thread(target=send_callback, daemon=True).start()
 
-        with patch("holmes.plugins.toolsets.mcp.toolset_mcp.httpx.post", side_effect=mock_post), \
-             patch("webbrowser.open", side_effect=mock_browser_open):
-            _cli_oauth_flow(oauth, "key-test")
+        with patch("holmes.core.oauth_utils.httpx.post", side_effect=mock_post), \
+             patch("holmes.core.oauth_utils.webbrowser.open", side_effect=mock_browser_open):
+            cli_oauth_flow(oauth, "key-test")
 
         # Cache key after DCR (client_id="new-dcr-id")
         key_after = _token_manager.get_cache_key(oauth, ctx)
@@ -792,26 +790,25 @@ class TestCLIOAuthFlow:
 
     def test_cli_flow_fails_without_endpoints(self):
         """CLI flow returns None when authorization_url or token_url is missing."""
-        oauth = MCPOAuthConfig(enabled=True, authorization_url=None, token_url=None, client_id="x")
-        result = _cli_oauth_flow(oauth, "no-endpoints")
+        oauth = OAuthEndpoints(authorization_url=None, token_url=None, client_id="x")
+        result = cli_oauth_flow(oauth, "no-endpoints")
         assert result is None
 
     def test_cli_flow_fails_without_client_id_and_no_dcr(self):
         """CLI flow returns None when client_id is None and no registration_endpoint."""
-        oauth = MCPOAuthConfig(
-            enabled=True,
+        oauth = OAuthEndpoints(
             authorization_url="http://idp/auth",
             token_url="http://idp/token",
             client_id=None,
             registration_endpoint=None,
         )
-        result = _cli_oauth_flow(oauth, "no-dcr")
+        result = cli_oauth_flow(oauth, "no-dcr")
         assert result is None
 
     def test_cli_flow_token_exchange_failure(self):
         """CLI flow returns None when token exchange fails."""
 
-        oauth = self._make_oauth_config()
+        oauth = self._make_oauth_endpoints()
 
         def mock_post(url, **kwargs):
             resp = MagicMock()
@@ -834,9 +831,9 @@ class TestCLIOAuthFlow:
 
             threading.Thread(target=send_callback, daemon=True).start()
 
-        with patch("holmes.plugins.toolsets.mcp.toolset_mcp.httpx.post", side_effect=mock_post), \
-             patch("webbrowser.open", side_effect=mock_browser_open):
-            result = _cli_oauth_flow(oauth, "fail-test")
+        with patch("holmes.core.oauth_utils.httpx.post", side_effect=mock_post), \
+             patch("holmes.core.oauth_utils.webbrowser.open", side_effect=mock_browser_open):
+            result = cli_oauth_flow(oauth, "fail-test")
 
         assert result is None
 
@@ -1154,7 +1151,7 @@ class TestDiscoverOAuthEndpoints:
     def _mock_401_response(self, www_authenticate=""):
         resp = MagicMock(spec=httpx.Response)
         resp.status_code = 401
-        resp.headers = {"www-authenticate": www_authenticate}
+        resp.headers = httpx.Headers({"www-authenticate": www_authenticate})
         return resp
 
     def test_discovery_via_legacy_fallback(self):
@@ -1178,7 +1175,7 @@ class TestDiscoverOAuthEndpoints:
             resp.status_code = 404
             return resp
 
-        with patch("holmes.plugins.toolsets.mcp.toolset_mcp.httpx.get", side_effect=mock_get):
+        with patch("holmes.core.oauth_utils.httpx.get", side_effect=mock_get):
             result = ts._discover_oauth_endpoints("http://mcp-server:8000/v1/mcp", initial_resp)
 
         assert result is True
@@ -1210,7 +1207,7 @@ class TestDiscoverOAuthEndpoints:
             resp.status_code = 404
             return resp
 
-        with patch("holmes.plugins.toolsets.mcp.toolset_mcp.httpx.get", side_effect=mock_get):
+        with patch("holmes.core.oauth_utils.httpx.get", side_effect=mock_get):
             result = ts._discover_oauth_endpoints("http://mcp-server:8000/v1/mcp", initial_resp)
 
         assert result is True
@@ -1246,7 +1243,7 @@ class TestDiscoverOAuthEndpoints:
             resp.status_code = 404
             return resp
 
-        with patch("holmes.plugins.toolsets.mcp.toolset_mcp.httpx.get", side_effect=mock_get):
+        with patch("holmes.core.oauth_utils.httpx.get", side_effect=mock_get):
             result = ts._discover_oauth_endpoints("http://mcp-server:8000/v1/mcp", initial_resp)
 
         assert result is True
@@ -1262,7 +1259,7 @@ class TestDiscoverOAuthEndpoints:
             resp.status_code = 404
             return resp
 
-        with patch("holmes.plugins.toolsets.mcp.toolset_mcp.httpx.get", side_effect=mock_get):
+        with patch("holmes.core.oauth_utils.httpx.get", side_effect=mock_get):
             result = ts._discover_oauth_endpoints("http://mcp-server:8000/v1/mcp", initial_resp)
 
         assert result is False
@@ -1285,7 +1282,7 @@ class TestDiscoverOAuthEndpoints:
             resp.status_code = 404
             return resp
 
-        with patch("holmes.plugins.toolsets.mcp.toolset_mcp.httpx.get", side_effect=mock_get):
+        with patch("holmes.core.oauth_utils.httpx.get", side_effect=mock_get):
             result = ts._discover_oauth_endpoints("http://mcp-server:8000/v1/mcp", initial_resp)
 
         assert result is True
