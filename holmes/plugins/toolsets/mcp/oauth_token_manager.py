@@ -14,6 +14,9 @@ from datetime import datetime, timedelta, timezone
 from typing import Any, Callable, Dict, Optional
 
 import httpx
+from cryptography.fernet import Fernet
+from cryptography.hazmat.primitives.hashes import SHA256
+from cryptography.hazmat.primitives.kdf.hkdf import HKDF
 
 from holmes.plugins.toolsets.mcp.oauth_token_store import (
     DiskTokenStore,
@@ -431,9 +434,6 @@ class OAuthTokenManager:
         signing_key = self._get_signing_key()
         if not signing_key:
             return None
-        from cryptography.fernet import Fernet
-        from cryptography.hazmat.primitives.hashes import SHA256
-        from cryptography.hazmat.primitives.kdf.hkdf import HKDF
 
         fernet_key = base64.urlsafe_b64encode(
             HKDF(algorithm=SHA256(), length=32, salt=b"holmesgpt-oauth-db-token", info=b"token-encryption")
@@ -446,9 +446,6 @@ class OAuthTokenManager:
         signing_key = self._get_signing_key()
         if not signing_key:
             return None
-        from cryptography.fernet import Fernet
-        from cryptography.hazmat.primitives.hashes import SHA256
-        from cryptography.hazmat.primitives.kdf.hkdf import HKDF
 
         try:
             fernet_key = base64.urlsafe_b64encode(

@@ -8,6 +8,7 @@ from holmes.config import Config
 from holmes.core.supabase_dal import SupabaseDal
 from holmes.core.tools import Toolset, ToolsetDBModel
 from holmes.plugins.prompts import load_and_render_prompt
+from holmes.plugins.toolsets.mcp.toolset_mcp import RemoteMCPToolset
 
 
 def log_toolsets_statuses(toolsets: List[Toolset]):
@@ -70,7 +71,6 @@ def holmes_sync_toolsets_status(dal: SupabaseDal, config: Config) -> None:
 
 
 def get_config_meta_for_toolset(toolset: Toolset) -> dict | None:
-    from holmes.plugins.toolsets.mcp.toolset_mcp import RemoteMCPToolset
     if not isinstance(toolset, RemoteMCPToolset):
         return None
     # For MCP toolsets, extract oauth config from installation_instructions if present

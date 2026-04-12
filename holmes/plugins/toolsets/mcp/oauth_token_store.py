@@ -4,7 +4,10 @@ import json
 import logging
 import threading
 import time
+from pathlib import Path
 from typing import Any, Dict, Optional
+
+from holmes.core.config import config_path_dir
 
 logger = logging.getLogger(__name__)
 
@@ -91,10 +94,6 @@ class DiskTokenStore:
     """Persists OAuth tokens to ~/.holmes/auth/mcp_tokens.json for CLI usage."""
 
     def __init__(self) -> None:
-        from pathlib import Path
-
-        from holmes.core.config import config_path_dir
-
         self._path = Path(config_path_dir) / "auth" / "mcp_tokens.json"
         self._enabled = True
         self._lock = threading.Lock()
