@@ -202,16 +202,6 @@ class OAuthTokenManager:
             cache_key, expires_in, "refresh_token" in token_data,
         )
 
-    def try_refresh(
-        self,
-        oauth_config: Any,
-        request_context: Optional[Dict[str, Any]] = None,
-    ) -> Optional[str]:
-        """Explicitly try to refresh the token. Returns new access token or None."""
-        cache_key = self._get_cache_key(oauth_config, request_context)
-        user_id = _get_user_id(request_context)
-        return self._refresh_token(cache_key, oauth_config, user_id=user_id)
-
     def shutdown(self) -> None:
         """Stop the background refresh thread."""
         self._shutdown_event.set()

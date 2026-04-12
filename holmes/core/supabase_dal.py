@@ -947,29 +947,6 @@ class SupabaseDal:
             )
             return False
 
-    def get_toolset_oauth_config(self, toolset_name: str) -> Optional[Dict]:
-        """Look up the OAuth config for a toolset from the HolmesToolsStatus table."""
-        if not self.enabled:
-            return None
-        try:
-            response = (
-                self.client.table(HOLMES_TOOLSET)
-                .select("meta")
-                .eq("account_id", self.account_id)
-                .eq("toolset_name", toolset_name)
-                .limit(1)
-                .execute()
-            )
-            if not response.data:
-                return None
-            meta = response.data[0].get("meta")
-            if not meta or not meta.get("oauth_config"):
-                return None
-            return meta["oauth_config"]
-        except Exception:
-            logging.exception("Error fetching OAuth config for toolset %s", toolset_name)
-            return None
-
     # --- OAuth Token Storage ---
 
     def get_oauth_token(self, provider_name: str, user_id: Optional[str] = None) -> Optional[Dict]:
@@ -1025,18 +1002,3 @@ class SupabaseDal:
             logging.exception("Error upserting OAuth token for provider %s", provider_name)
             return False
 
-    def delete_oauth_token(self, provider_name: str, user_id: Optional[str] = None) -> bool:
-        """Delete OAuth tokens for a provider in this account, optionally scoped to a user."""
-        if not self.enabled:
-            return False
-        try:
-            query = self.client.table(OAUTH_TOKENS_TABLE).delete().eq(
-                "account_id", self.account_id
-            ).eq("provider_name", provider_name)
-            if user_id:
-                query = query.eq("user_id", user_id)
-            query.execute()
-            return True
-        except Exception:
-            logging.exception("Error deleting OAuth token for provider %s", provider_name)
-            return False

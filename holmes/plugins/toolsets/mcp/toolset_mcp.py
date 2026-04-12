@@ -638,10 +638,6 @@ def exchange_code_for_token(tool_call_id: str, payload_json: str, request_contex
 
 
 
-def _try_refresh_token(cache_key: str, oauth_config: MCPOAuthConfig, user_id: Optional[str] = None) -> Optional[str]:
-    """Attempt to refresh an expired access token — delegates to OAuthTokenManager."""
-    return _token_manager._refresh_token(cache_key, oauth_config, user_id=user_id)
-
 
 @asynccontextmanager
 async def get_initialized_mcp_session(
