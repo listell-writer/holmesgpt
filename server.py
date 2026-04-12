@@ -271,6 +271,10 @@ init_checks_app(app, config)
 
 @app.post("/api/oauth/callback")
 def oauth_callback(request: OAuthCallbackRequest) -> OAuthCallbackResponse:
+    logging.info(
+        "OAuth callback: toolset=%s client_id=%s client_secret_present=%s code_present=%s",
+        request.toolset_name, request.client_id, bool(request.client_secret), bool(request.code),
+    )
     try:
         toolsets = config.create_tool_executor(dal=dal).toolsets
         return process_oauth_callback(request, toolsets, _get_token_manager())
