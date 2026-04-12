@@ -28,6 +28,7 @@ from holmes.core.tools import (
 )
 from holmes.core.tools_utils.tool_executor import ToolExecutor
 from holmes.plugins.toolsets.mcp.oauth_token_manager import OAuthTokenManager
+from holmes.plugins.toolsets.mcp.oauth_token_manager import _get_conversation_key, _get_user_id
 from holmes.plugins.toolsets.mcp.toolset_mcp import (
     DiskTokenStore,
     MCPConfig,
@@ -41,9 +42,6 @@ from holmes.plugins.toolsets.mcp.toolset_mcp import (
     _cli_oauth_flow,
     _exchanges_lock,
     _generate_pkce,
-    _get_conversation_key,
-    _get_oauth_cache_key,
-    _get_user_id,
     _inject_oauth_token,
     _mcp_tools_cache,
     _mcp_tools_cache_lock,
@@ -217,7 +215,7 @@ class TestRequiresApproval:
         tool = self._make_tool(oauth)
         context = self._make_context(conv_id="cached-conv-2")
         # Cache using the real cache key (conv + idp hash)
-        cache_key = _get_oauth_cache_key(oauth, context.request_context)
+        cache_key = _token_manager.get_cache_key(oauth, context.request_context)
         _oauth_token_cache.set(cache_key, "some-token")
 
         result = tool.requires_approval({}, context)
@@ -282,7 +280,7 @@ class TestExchangeCodeForToken:
             assert post_data["redirect_uri"] == "http://frontend/callback"
 
         # Verify token was cached using the real cache key
-        cache_key = _get_oauth_cache_key(oauth_config, request_context)
+        cache_key = _token_manager.get_cache_key(oauth_config, request_context)
         assert _oauth_token_cache.get(cache_key) == "final-access-token-abc"
 
         # Pending exchange should be consumed
@@ -312,8 +310,8 @@ class TestOAuthCacheKeySharedIdP:
             client_id="holmes-client",
         )
         ctx = {"headers": {"X-Conversation-Id": "conv-shared"}}
-        key1 = _get_oauth_cache_key(oauth1, ctx)
-        key2 = _get_oauth_cache_key(oauth2, ctx)
+        key1 = _token_manager.get_cache_key(oauth1, ctx)
+        key2 = _token_manager.get_cache_key(oauth2, ctx)
         assert key1 == key2, "Same authorization_url + client_id should produce same cache key"
 
     def test_different_idp_different_cache_key(self):
@@ -331,8 +329,8 @@ class TestOAuthCacheKeySharedIdP:
             client_id="holmes-client",
         )
         ctx = {"headers": {"X-Conversation-Id": "conv-diff"}}
-        key1 = _get_oauth_cache_key(oauth1, ctx)
-        key2 = _get_oauth_cache_key(oauth2, ctx)
+        key1 = _token_manager.get_cache_key(oauth1, ctx)
+        key2 = _token_manager.get_cache_key(oauth2, ctx)
         assert key1 != key2, "Different authorization_urls should produce different cache keys"
 
     def test_different_client_id_different_cache_key(self):
@@ -350,8 +348,8 @@ class TestOAuthCacheKeySharedIdP:
             client_id="client-b",
         )
         ctx = {"headers": {"X-Conversation-Id": "conv-cid"}}
-        key1 = _get_oauth_cache_key(oauth1, ctx)
-        key2 = _get_oauth_cache_key(oauth2, ctx)
+        key1 = _token_manager.get_cache_key(oauth1, ctx)
+        key2 = _token_manager.get_cache_key(oauth2, ctx)
         assert key1 != key2, "Different client_ids should produce different cache keys"
 
     def test_different_conversation_different_cache_key(self):
@@ -364,8 +362,8 @@ class TestOAuthCacheKeySharedIdP:
         )
         ctx1 = {"headers": {"X-Conversation-Id": "conv-1"}}
         ctx2 = {"headers": {"X-Conversation-Id": "conv-2"}}
-        key1 = _get_oauth_cache_key(oauth, ctx1)
-        key2 = _get_oauth_cache_key(oauth, ctx2)
+        key1 = _token_manager.get_cache_key(oauth, ctx1)
+        key2 = _token_manager.get_cache_key(oauth, ctx2)
         assert key1 != key2, "Different conversations should produce different cache keys"
 
     def test_shared_token_across_mcp_servers(self):
@@ -385,11 +383,11 @@ class TestOAuthCacheKeySharedIdP:
         ctx = {"headers": {"X-Conversation-Id": "conv-share-test"}}
 
         # Cache token via first MCP server's config
-        cache_key1 = _get_oauth_cache_key(oauth1, ctx)
+        cache_key1 = _token_manager.get_cache_key(oauth1, ctx)
         _oauth_token_cache.set(cache_key1, "shared-token-xyz", expires_in=300)
 
         # Second MCP server should find the same token
-        cache_key2 = _get_oauth_cache_key(oauth2, ctx)
+        cache_key2 = _token_manager.get_cache_key(oauth2, ctx)
         assert _oauth_token_cache.get(cache_key2) == "shared-token-xyz"
 
 
@@ -754,7 +752,7 @@ class TestCLIOAuthFlow:
         ctx = {"headers": {"X-Conversation-Id": "cli-conv"}}
 
         # Cache key before DCR (client_id=None)
-        key_before = _get_oauth_cache_key(oauth, ctx)
+        key_before = _token_manager.get_cache_key(oauth, ctx)
 
         def mock_post(url, **kwargs):
             if "register" in url:
@@ -787,7 +785,7 @@ class TestCLIOAuthFlow:
             _cli_oauth_flow(oauth, "key-test")
 
         # Cache key after DCR (client_id="new-dcr-id")
-        key_after = _get_oauth_cache_key(oauth, ctx)
+        key_after = _token_manager.get_cache_key(oauth, ctx)
 
         assert key_before != key_after, "Cache key should change after DCR sets client_id"
         assert oauth.client_id == "new-dcr-id"
@@ -1073,7 +1071,7 @@ class TestInjectOAuthToken:
         )
         ts = self._make_toolset(oauth)
         ctx = {"headers": {"X-Conversation-Id": "inject-conv"}}
-        cache_key = _get_oauth_cache_key(oauth, ctx)
+        cache_key = _token_manager.get_cache_key(oauth, ctx)
         _oauth_token_cache.set(cache_key, "my-bearer-token", expires_in=300)
 
         result = _inject_oauth_token(ts, ctx, {})
@@ -1088,7 +1086,7 @@ class TestInjectOAuthToken:
         )
         ts = self._make_toolset(oauth)
         ctx = {"headers": {"X-Conversation-Id": "inject-conv-2"}}
-        cache_key = _get_oauth_cache_key(oauth, ctx)
+        cache_key = _token_manager.get_cache_key(oauth, ctx)
         _oauth_token_cache.set(cache_key, "tok", expires_in=300)
 
         result = _inject_oauth_token(ts, ctx, {"X-Custom": "val"})
@@ -1124,7 +1122,7 @@ class TestInjectOAuthToken:
         )
         ts = self._make_toolset(oauth)
         ctx = {"headers": {"X-Conversation-Id": "refresh-inject-conv"}}
-        cache_key = _get_oauth_cache_key(oauth, ctx)
+        cache_key = _token_manager.get_cache_key(oauth, ctx)
 
         _oauth_token_cache.set(cache_key, "old", expires_in=60, refresh_token="r", refresh_expires_in=3600)
         _oauth_token_cache._cache[cache_key].expires_at = time.monotonic() - 1
@@ -1487,6 +1485,7 @@ class TestPreloadOAuthMCPTools:
         ts.name = "plain-mcp"
         ts._mcp_config = MagicMock(spec=MCPConfig)
         ts._mcp_config.oauth = None
+        ts.is_oauth_enabled = False
 
         result = load_authenticated_oauth_tools([ts], {"user_id": "user-5"})
         assert result == {}
