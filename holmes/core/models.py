@@ -131,6 +131,7 @@ class OAuthCallbackRequest(BaseModel):
     code_verifier: Optional[str] = None  # Optional: frontend provides when it generated PKCE, Holmes provides when it generated PKCE
     redirect_uri: str
     client_id: Optional[str] = None
+    client_secret: Optional[str] = None  # Required by some IdPs (e.g. Supabase) that don't support public clients
     user_id: Optional[str] = None
 
 

@@ -413,8 +413,9 @@ def exchange_code_for_token(tool_call_id: str, payload_json: str, request_contex
         logger.warning("OAuth exchange: invalid JSON payload for tool_call_id=%s", tool_call_id)
         return
 
-    # Frontend may include client_id from DCR (when Holmes didn't have one at discovery time)
+    # Frontend may include client_id and client_secret from DCR
     client_id = payload.get("client_id") or pending.oauth_config.client_id
+    client_secret = payload.get("client_secret")
     if client_id and not pending.oauth_config.client_id:
         pending.oauth_config.client_id = client_id
         logger.info("OAuth: using client_id from frontend DCR: %s", client_id)
@@ -426,6 +427,7 @@ def exchange_code_for_token(tool_call_id: str, payload_json: str, request_contex
             redirect_uri=payload.get("redirect_uri", ""),
             client_id=client_id,
             code_verifier=pending.code_verifier,
+            client_secret=client_secret,
         )
     except (OAuthTokenExchangeError, KeyError, Exception):
         logger.exception("OAuth exchange failed (tool_call_id=%s, token_url=%s)", tool_call_id, pending.oauth_config.token_url)
