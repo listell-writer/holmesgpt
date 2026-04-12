@@ -77,6 +77,10 @@ def get_toolset_oauth_config(
     Returns ``(oauth_config, client_id, token_manager)``.
     Raises :class:`OAuthConfigLookupError` on failure.
     """
+    # OAuth placeholder tools are named {toolset_name}_connect
+    if toolset_name.endswith("_connect"):
+        toolset_name = toolset_name[: -len("_connect")]
+
     toolset = None
     for ts in toolsets:
         if ts.name == toolset_name:
@@ -122,6 +126,7 @@ def process_oauth_callback(
         code_verifier=request.code_verifier,
     )
 
-    mgr.store_token(oauth, token_data)
+    request_context = {"user_id": request.user_id} if request.user_id else None
+    mgr.store_token(oauth, token_data, request_context=request_context)
     logger.info("OAuth tokens stored for toolset '%s'", request.toolset_name)
     return OAuthCallbackResponse(success=True)

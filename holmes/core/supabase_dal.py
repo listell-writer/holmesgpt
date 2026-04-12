@@ -999,8 +999,11 @@ class SupabaseDal:
         token_expiry: Optional[str] = None,
         user_id: Optional[str] = None,
     ) -> bool:
-        """Store or update an OAuth token for a provider in this account, optionally scoped to a user."""
+        """Store or update an OAuth token for a provider in this account, scoped to a user."""
         if not self.enabled:
+            return False
+        if not user_id:
+            logging.warning("Cannot upsert OAuth token without user_id (provider=%s)", provider_name)
             return False
         try:
             row = {
@@ -1011,7 +1014,7 @@ class SupabaseDal:
                 "signing_key_hash": signing_key_hash,
                 "token_expiry": token_expiry,
                 "updated_at": "now()",
-                "user_id": user_id or "",
+                "user_id": user_id,
             }
             self.client.table(OAUTH_TOKENS_TABLE).upsert(
                 row,

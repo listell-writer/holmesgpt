@@ -458,8 +458,6 @@ def set_oauth_dal(dal: Any) -> None:
     global _oauth_dal
     _oauth_dal = dal
     _token_manager.set_dal(dal)
-    if dal and dal.enabled:
-        logger.warning("OAuth: DAL initialized for cross-cluster token storage")
 
 
 # Import helpers from oauth_token_manager (canonical implementations)
