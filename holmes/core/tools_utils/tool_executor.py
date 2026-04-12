@@ -46,45 +46,21 @@ class ToolExecutor:
                 self.tools_by_name[tool.name] = tool
                 self._tool_to_toolset[tool.name] = ts
 
-    def _sync_dynamic_tools(self) -> None:
-        """Register any tools that toolsets loaded dynamically (e.g. after OAuth)."""
-        seen_toolsets: set[str] = set()
-        for ts in list(self._tool_to_toolset.values()):
-            if ts.name in seen_toolsets:
-                continue
-            seen_toolsets.add(ts.name)
-            for tool in ts.tools:
-                if tool.name not in self.tools_by_name:
-                    self.tools_by_name[tool.name] = tool
-                    self._tool_to_toolset[tool.name] = ts
-                    logging.warning(f"Dynamically registered tool '{tool.name}' from toolset '{ts.name}'")
-
     def get_tool_by_name(self, name: str) -> Optional[Tool]:
         if name in self.tools_by_name:
             return self.tools_by_name[name]
 
-        # Check if any toolset has dynamically loaded tools not yet in our registry
-        self._sync_dynamic_tools()
-        if name in self.tools_by_name:
-            return self.tools_by_name[name]
+        # OAuth MCP toolsets load tools after authentication; check for newly registered tools
+        if self._register_oauth_tools():
+            if name in self.tools_by_name:
+                return self.tools_by_name[name]
 
-        stripped = self._try_strip_toolset_prefix(name)
+        # MCP LLMs sometimes prefix tool names with the toolset name (e.g. "my-mcp_add_numbers")
+        stripped = self._try_strip_mcp_prefix(name)
         if stripped:
             return stripped
 
         logging.warning(f"could not find tool {name}. skipping")
-        return None
-
-    def _try_strip_toolset_prefix(self, name: str) -> Optional[Tool]:
-        """LLMs sometimes prefix tool names with the toolset name (e.g. "my-mcp_add_numbers"
-        instead of "add_numbers"). Try stripping known toolset prefixes."""
-        for ts_name in self._toolset_names:
-            prefix = f"{ts_name}_"
-            if name.startswith(prefix):
-                stripped = name[len(prefix):]
-                if stripped in self.tools_by_name:
-                    logging.warning(f"Tool '{name}' not found, matched '{stripped}' after stripping prefix '{ts_name}_'")
-                    return self.tools_by_name[stripped]
         return None
 
     def get_toolset_name(self, tool_name: str) -> Optional[str]:
@@ -138,11 +114,44 @@ class ToolExecutor:
             tools.append(tool.get_openai_format())
         return tools
 
+    # ── OAuth MCP helpers ──────────────────────────────────────────────
+
+    def _register_oauth_tools(self) -> bool:
+        """Register tools from OAuth MCP toolsets that loaded tools after authentication.
+
+        Returns True if any new tools were registered.
+        """
+        registered = False
+        seen_toolsets: set[str] = set()
+        for ts in list(self._tool_to_toolset.values()):
+            if ts.name in seen_toolsets:
+                continue
+            seen_toolsets.add(ts.name)
+            for tool in ts.tools:
+                if tool.name not in self.tools_by_name:
+                    self.tools_by_name[tool.name] = tool
+                    self._tool_to_toolset[tool.name] = ts
+                    logging.info(f"Registered OAuth MCP tool '{tool.name}' from toolset '{ts.name}'")
+                    registered = True
+        return registered
+
+    def _try_strip_mcp_prefix(self, name: str) -> Optional[Tool]:
+        """MCP LLMs sometimes prefix tool names with the toolset name (e.g. "my-mcp_add_numbers"
+        instead of "add_numbers"). Try stripping known toolset prefixes."""
+        for ts_name in self._toolset_names:
+            prefix = f"{ts_name}_"
+            if name.startswith(prefix):
+                stripped = name[len(prefix):]
+                if stripped in self.tools_by_name:
+                    logging.warning(f"Tool '{name}' not found, matched '{stripped}' after stripping prefix '{ts_name}_'")
+                    return self.tools_by_name[stripped]
+        return None
+
     def with_replaced_tools(
         self,
         replacements: Dict[str, List[Tool]],
     ) -> "ToolExecutor":
-        """Create a shallow copy with placeholder tools replaced by real tools.
+        """Create a shallow copy with placeholder OAuth tools replaced by real tools.
 
         For each toolset_name in replacements, removes all existing tools belonging
         to that toolset and adds the replacement tools instead.

@@ -51,7 +51,6 @@ from holmes.plugins.toolsets.mcp.toolset_mcp import (
     _PendingOAuthExchange,
     _pending_exchanges,
     _token_manager,
-    _try_refresh_token,
     exchange_code_for_token,
     has_oauth_mcp_toolsets,
     preload_oauth_mcp_tools,
@@ -1054,77 +1053,6 @@ class TestDBTokenEncryption:
 
 
 # ---------------------------------------------------------------------------
-# _try_refresh_token
-# ---------------------------------------------------------------------------
-class TestTryRefreshToken:
-    def _setup_cache_with_refresh(self, cache_key: str, refresh_token: str = "refresh-123"):
-        _oauth_token_cache.set(
-            cache_key, "old-access", expires_in=60,
-            refresh_token=refresh_token, refresh_expires_in=3600,
-        )
-        _oauth_token_cache._cache[cache_key].expires_at = time.monotonic() - 1
-
-    def test_successful_refresh(self):
-        cache_key = "refresh-test-success"
-        self._setup_cache_with_refresh(cache_key)
-
-        oauth = MCPOAuthConfig(
-            enabled=True,
-            authorization_url="http://idp/auth",
-            token_url="http://idp/token",
-            client_id="cid",
-        )
-
-        mock_resp = MagicMock()
-        mock_resp.status_code = 200
-        mock_resp.json.return_value = {
-            "access_token": "new-access-tok",
-            "expires_in": 600,
-            "refresh_token": "new-refresh-tok",
-        }
-
-        with patch("holmes.plugins.toolsets.mcp.toolset_mcp.httpx.post", return_value=mock_resp) as mock_post:
-            result = _try_refresh_token(cache_key, oauth)
-
-        assert result == "new-access-tok"
-        assert _oauth_token_cache.get(cache_key) == "new-access-tok"
-        mock_post.assert_called_once()
-        call_data = mock_post.call_args[1]["data"]
-        assert call_data["grant_type"] == "refresh_token"
-        assert call_data["refresh_token"] == "refresh-123"
-
-    def test_refresh_http_failure(self):
-        cache_key = "refresh-test-fail"
-        self._setup_cache_with_refresh(cache_key)
-
-        oauth = MCPOAuthConfig(
-            enabled=True,
-            authorization_url="http://idp/auth",
-            token_url="http://idp/token",
-            client_id="cid",
-        )
-
-        mock_resp = MagicMock()
-        mock_resp.status_code = 401
-        mock_resp.json.return_value = {}
-
-        with patch("holmes.plugins.toolsets.mcp.toolset_mcp.httpx.post", return_value=mock_resp):
-            result = _try_refresh_token(cache_key, oauth)
-
-        assert result is None
-
-    def test_no_refresh_token_in_cache(self):
-        oauth = MCPOAuthConfig(
-            enabled=True,
-            authorization_url="http://idp/auth",
-            token_url="http://idp/token",
-            client_id="cid",
-        )
-        result = _try_refresh_token("no-refresh-entry", oauth)
-        assert result is None
-
-
-# ---------------------------------------------------------------------------
 # _inject_oauth_token
 # ---------------------------------------------------------------------------
 class TestInjectOAuthToken:
@@ -1184,8 +1112,7 @@ class TestInjectOAuthToken:
         ts = self._make_toolset(oauth)
         ctx = {"headers": {"X-Conversation-Id": "no-cache-conv"}}
 
-        with patch("holmes.plugins.toolsets.mcp.toolset_mcp._try_refresh_token", return_value=None):
-            result = _inject_oauth_token(ts, ctx, None)
+        result = _inject_oauth_token(ts, ctx, None)
 
         assert result is None or "Authorization" not in (result or {})
 
