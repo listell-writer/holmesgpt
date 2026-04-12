@@ -584,9 +584,11 @@ class ToolCallingLLM:
         tool_span.set_attributes(name=tool_call_result.tool_name)
         status = tool_call_result.result.status
 
+        is_oauth = "__oauth_metadata" in (tool_call_result.result.params or {})
         if (
             status == StructuredToolResultStatus.APPROVAL_REQUIRED
             and not approval_possible
+            and not is_oauth
         ):
             status = StructuredToolResultStatus.ERROR
 
@@ -1011,7 +1013,9 @@ class ToolCallingLLM:
                         tool_call_result.result.status
                         == StructuredToolResultStatus.APPROVAL_REQUIRED
                     ):
-                        if enable_tool_approval:
+                        # OAuth approvals are always sent to frontend (user must authenticate)
+                        is_oauth = "__oauth_metadata" in (tool_call_result.result.params or {})
+                        if enable_tool_approval or is_oauth:
                             pending_approvals.append(
                                 PendingToolApproval(
                                     tool_call_id=tool_call_result.tool_call_id,
