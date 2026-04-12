@@ -46,6 +46,7 @@ def holmes_sync_toolsets_status(dal: SupabaseDal, config: Config) -> None:
         if toolset.experimental and not toolset.enabled:
             continue
 
+        meta = get_config_meta_for_toolset(toolset)
         if not toolset.installation_instructions:
             instructions = get_config_schema_for_toolset(toolset)
             toolset.installation_instructions = instructions
@@ -61,10 +62,26 @@ def holmes_sync_toolsets_status(dal: SupabaseDal, config: Config) -> None:
                 description=toolset.description,
                 docs_url=toolset.docs_url,
                 installation_instructions=toolset.installation_instructions,
+                meta=meta,
             ).model_dump()
         )
     dal.sync_toolsets(db_toolsets, config.cluster_name)
     log_toolsets_statuses(tool_executor.toolsets)
+
+
+def get_config_meta_for_toolset(toolset: Toolset) -> dict | None:
+    from holmes.plugins.toolsets.mcp.toolset_mcp import RemoteMCPToolset
+    if not isinstance(toolset, RemoteMCPToolset):
+        return None
+    # For MCP toolsets, extract oauth config from installation_instructions if present
+    if toolset.installation_instructions:
+        try:
+            parsed = json.loads(toolset.installation_instructions)
+            if isinstance(parsed, dict) and "oauth" in parsed:
+                return {"oauth_config": parsed["oauth"]}
+        except (json.JSONDecodeError, TypeError):
+            pass
+    return None
 
 
 def get_config_schema_for_toolset(toolset: Toolset) -> str:

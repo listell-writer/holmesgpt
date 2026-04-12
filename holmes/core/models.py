@@ -122,7 +122,7 @@ class ToolApprovalDecision(BaseModel):
     approved: bool
     save_prefixes: Optional[List[str]] = None  # Prefixes to remember for session
     feedback: Optional[str] = None  # User feedback when denying a tool call
-    encrypted_token: Optional[str] = None  # OAuth auth code payload from frontend (JSON string)
+    decision: Optional[Dict[str, Any]] = None  # Structured decision data (e.g. OAuth callback)
 
 
 class StoreOAuthTokenRequest(BaseModel):

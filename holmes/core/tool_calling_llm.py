@@ -139,6 +139,26 @@ def extract_bash_session_prefixes(messages: List[Dict[str, Any]]) -> List[str]:
     return list(prefixes)
 
 
+def _try_process_oauth_decision(decision_data: Dict[str, Any]) -> None:
+    """Try to process an OAuth callback from a tool approval decision.
+
+    If the decision contains fields matching OAuthCallbackRequest
+    (toolset_name, code, code_verifier, redirect_uri), exchange the
+    auth code for tokens and store them.
+    """
+    try:
+        from holmes.oauth.oauth_api import OAuthCallbackRequest, oauth_callback
+
+        req = OAuthCallbackRequest(**decision_data)
+        result = oauth_callback(req)
+        if not result.success:
+            logging.error(f"OAuth decision processing failed: {result.error}")
+    except (TypeError, ValueError) as e:
+        logging.debug(f"Decision is not an OAuth callback request: {e}")
+    except Exception as e:
+        logging.error(f"Failed to process OAuth decision: {e}", exc_info=True)
+
+
 # Callback type: receives a pending approval, returns (approved, optional_feedback)
 ApprovalCallback = Callable[[PendingToolApproval], tuple[bool, Optional[str]]]
 
@@ -313,6 +333,10 @@ class ToolCallingLLM:
                     data=tool_result.to_client_dict(),
                 )
             )
+
+            # If the decision contains OAuth callback data, process token exchange
+            if decision and decision.approved and decision.decision:
+                _try_process_oauth_decision(decision.decision)
 
             # If user chose "Yes, and don't ask again", include prefixes in metadata
             extra_metadata = None

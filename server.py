@@ -13,11 +13,13 @@ import json
 import logging
 import threading
 import time
+from datetime import datetime
 from pathlib import Path
 from typing import List, Optional
 
 import colorlog
 import litellm
+from holmes.core.oauth_utils import OAuthTokenExchangeError, exchange_code_for_tokens
 import sentry_sdk
 import uvicorn
 from fastapi import FastAPI, HTTPException, Request
@@ -46,6 +48,8 @@ from holmes.core.models import (
     ChatRequest,
     ChatResponse,
     FollowUpAction,
+    OAuthCallbackRequest,
+    OAuthCallbackResponse,
     StoreOAuthTokenRequest,
 )
 from holmes.core.prompt import PromptComponent
@@ -57,6 +61,11 @@ from holmes.utils.holmes_sync_toolsets import holmes_sync_toolsets_status
 from holmes.utils.log import EndpointFilter
 from holmes.checks.checks_api import init_checks_app
 from holmes.core.tools_utils.filesystem_result_storage import tool_result_storage
+from holmes.plugins.toolsets.mcp.toolset_mcp import (
+    _token_manager,
+    has_oauth_mcp_toolsets,
+    preload_oauth_mcp_tools,
+)
 from holmes.utils.stream import stream_chat_formatter
 
 # removed: add_runbooks_to_user_prompt
@@ -265,6 +274,68 @@ if LOG_PERFORMANCE:
 init_checks_app(app, config)
 
 
+def _get_toolset_oauth_config(toolset_name: str, client_id_override: Optional[str] = None):
+    """Look up a toolset's OAuth config from the in-memory tool executor.
+
+    Returns (oauth_config, client_id) or raises HTTPException.
+    """
+    tool_executor = config.create_tool_executor(dal=dal)
+    toolset = None
+    for ts in tool_executor.toolsets:
+        if ts.name == toolset_name:
+            toolset = ts
+            break
+
+    if not toolset:
+        raise HTTPException(status_code=404, detail=f"Toolset '{toolset_name}' not found")
+
+    mcp_config = getattr(toolset, "_mcp_config", None)
+    oauth = getattr(mcp_config, "oauth", None) if mcp_config else None
+    if not oauth or not oauth.enabled:
+        raise HTTPException(status_code=400, detail=f"Toolset '{toolset_name}' does not have OAuth enabled")
+
+    if not oauth.token_url:
+        raise HTTPException(status_code=400, detail=f"OAuth config for '{toolset_name}' missing token_url")
+
+    client_id = client_id_override or oauth.client_id
+    if not client_id:
+        raise HTTPException(status_code=400, detail=f"No client_id available for '{toolset_name}'")
+
+    return oauth, client_id, _token_manager
+
+
+def process_oauth_callback(request: OAuthCallbackRequest) -> OAuthCallbackResponse:
+    """Process an OAuth callback: exchange code for tokens and store via OAuthTokenManager."""
+    try:
+        oauth, client_id, token_manager = _get_toolset_oauth_config(request.toolset_name, request.client_id)
+
+        token_data = exchange_code_for_tokens(
+            token_url=oauth.token_url,
+            code=request.code,
+            redirect_uri=request.redirect_uri,
+            client_id=client_id,
+            code_verifier=request.code_verifier,
+        )
+
+        token_manager.store_token(oauth, token_data)
+
+        logging.info(f"OAuth tokens stored for toolset '{request.toolset_name}'")
+        return OAuthCallbackResponse(success=True)
+
+    except HTTPException:
+        raise
+    except OAuthTokenExchangeError as e:
+        raise HTTPException(status_code=502, detail=str(e))
+    except Exception as e:
+        logging.error(f"OAuth callback failed for '{request.toolset_name}': {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/api/oauth/callback")
+def oauth_callback(request: OAuthCallbackRequest) -> OAuthCallbackResponse:
+    return process_oauth_callback(request)
+
+
 def already_answered(conversation_history: Optional[List[dict]]) -> bool:
     if conversation_history is None:
         return False
@@ -375,8 +446,6 @@ def chat(chat_request: ChatRequest, http_request: Request):
         # Skipped entirely when there are no OAuth MCP toolsets or no user_id.
         tool_executor = None
         if chat_request.user_id:
-            from holmes.plugins.toolsets.mcp.toolset_mcp import has_oauth_mcp_toolsets, preload_oauth_mcp_tools
-
             base_executor = config.create_tool_executor(dal)
             if has_oauth_mcp_toolsets(base_executor.toolsets):
                 logging.info("Preloading OAuth MCP tools for user %s", chat_request.user_id)
@@ -456,29 +525,12 @@ scheduled_prompts_executor = ScheduledPromptsExecutor(
 @app.post("/api/oauth")
 def store_oauth_token(request: StoreOAuthTokenRequest):
     """Store an OAuth token from the frontend OAuth flow. Holmes encrypts and persists it."""
-    from holmes.plugins.toolsets.mcp.toolset_mcp import _token_manager
-
     try:
-        # Find the MCP toolset to get its OAuth config
-        tool_executor = config.create_tool_executor(dal=dal)
-        toolset = None
-        for ts in tool_executor.toolsets:
-            if ts.name == request.toolset_name:
-                toolset = ts
-                break
+        oauth, _client_id, token_manager = _get_toolset_oauth_config(request.toolset_name)
 
-        if not toolset:
-            raise HTTPException(status_code=404, detail=f"Toolset '{request.toolset_name}' not found")
-
-        mcp_config = getattr(toolset, '_mcp_config', None)
-        if not mcp_config or not hasattr(mcp_config, 'oauth') or not mcp_config.oauth or not mcp_config.oauth.enabled:
-            raise HTTPException(status_code=400, detail=f"Toolset '{request.toolset_name}' does not have OAuth enabled")
-
-        # Build a minimal request_context with user_id for token scoping
         request_context = {"user_id": request.user_id}
-
-        _token_manager.store_token(
-            oauth_config=mcp_config.oauth,
+        token_manager.store_token(
+            oauth_config=oauth,
             token_data=request.token_data,
             request_context=request_context,
         )
