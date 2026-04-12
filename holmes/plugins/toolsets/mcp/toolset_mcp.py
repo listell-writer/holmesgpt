@@ -4,9 +4,7 @@ import logging
 import os
 import threading
 import time
-import yaml as _yaml
 from contextlib import asynccontextmanager
-from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any, ClassVar, Dict, List, Optional, TextIO, Tuple, Type, Union
 from urllib.parse import urlparse
@@ -20,12 +18,16 @@ from mcp.types import Tool as MCP_Tool
 from pydantic import AnyUrl, BaseModel, Field, model_validator
 
 from holmes.common.env_vars import SSE_READ_TIMEOUT
-from holmes.core.oauth_utils import (
+from holmes.core.oauth_config import (
+    MCPOAuthConfig,
     OAuthEndpoints,
     OAuthTokenExchangeError,
+    _get_exchange_manager,
+)
+from holmes.core.oauth_utils import (
+    _get_token_manager,
     cli_oauth_flow,
     discover_auth_server_from_prm,
-    exchange_code_for_tokens,
     fetch_oauth_metadata,
     generate_pkce,
 )
@@ -40,12 +42,11 @@ from holmes.core.tools import (
     ToolParameter,
     Toolset,
 )
-from holmes.plugins.toolsets.mcp.oauth_token_manager import OAuthTokenManager, _get_user_id
+from holmes.plugins.toolsets.mcp.oauth_token_manager import _get_user_id
 from holmes.plugins.toolsets.mcp.oauth_token_store import (
     DiskTokenStore,
     OAuthTokenCache,
 )
-from holmes.utils.definitions import RobustaConfig
 from holmes.utils.header_rendering import render_header_templates
 from holmes.utils.pydantic_utils import ToolsetConfig
 
@@ -112,169 +113,7 @@ class MCPMode(str, Enum):
     STDIO = "stdio"
 
 
-class MCPOAuthConfig(BaseModel):
-    """OAuth authorization_code config for MCP servers requiring user login.
 
-    Set enabled=true with no other fields to auto-discover OAuth endpoints
-    via the MCP OAuth flow (RFC 9728 Protected Resource Metadata + OIDC Discovery + DCR).
-
-    If any of authorization_url, token_url, or client_id is set, enabled defaults to true.
-    """
-
-    enabled: bool = Field(default=False, description="Enable OAuth for this MCP server. Auto-set to true when other OAuth fields are provided.")
-    authorization_url: Optional[str] = Field(default=None, description="IdP authorization endpoint URL. Auto-discovered if omitted.")
-    token_url: Optional[str] = Field(default=None, description="IdP token endpoint URL. Auto-discovered if omitted.")
-    client_id: Optional[str] = Field(default=None, description="OAuth public client ID. Auto-registered via DCR if omitted.")
-    scopes: Optional[List[str]] = Field(default=None, description="OAuth scopes to request.")
-    registration_endpoint: Optional[str] = Field(default=None, exclude=True, description="DCR endpoint (auto-populated during discovery, not user-facing).")
-
-    @model_validator(mode="after")
-    def auto_enable_when_configured(self):
-        """Auto-enable OAuth when any endpoint or client_id is explicitly set."""
-        if not self.enabled and (self.authorization_url or self.token_url or self.client_id):
-            self.enabled = True
-        return self
-
-
-def _get_signing_key() -> Optional[str]:
-    """Load the signing_key from Robusta's global_config. Returns None in CLI mode."""
-    config_file_path = os.environ.get("RUNNER_CONFIG_PATH", "/etc/robusta/config/active_playbooks.yaml")
-    if not os.path.exists(config_file_path):
-        return None
-    try:
-        with open(config_file_path) as f:
-            yaml_content = _yaml.safe_load(f)
-            config = RobustaConfig(**yaml_content)
-            return config.global_config.get("signing_key")
-    except Exception:
-        logger.warning("Failed to load signing_key from Robusta config", exc_info=True)
-        return None
-
-
-# Singleton token manager — the main interface for all token operations
-_token_manager = OAuthTokenManager()
-_token_manager.set_signing_key_getter(_get_signing_key)
-
-# Backwards-compat aliases used by existing code and tests
-_oauth_token_cache = _token_manager.cache
-_disk_token_store = _token_manager.disk_store
-
-# ── Per-user MCP tool cache (TTL-based, never mutates the shared executor) ──
-
-_MCP_TOOLS_CACHE_TTL = 300  # 5 minutes
-
-
-@dataclass
-class _LoadedToolsEntry:
-    """Cached MCP tools loaded after OAuth authentication."""
-
-    tools: List[Any]  # List[RemoteMCPTool] — forward ref
-    toolset: Any  # RemoteMCPToolset — forward ref
-    loaded_at: float = field(default_factory=time.monotonic)
-
-
-_mcp_tools_cache: Dict[str, _LoadedToolsEntry] = {}
-_mcp_tools_cache_lock = threading.Lock()
-
-
-def _get_oauth_mcp_toolsets(toolsets: List[Any]) -> List["RemoteMCPToolset"]:
-    """Return OAuth-enabled MCP toolsets from the given list."""
-    return [
-        ts for ts in toolsets
-        if isinstance(ts, RemoteMCPToolset) and ts.is_oauth_enabled
-    ]
-
-
-def has_oauth_mcp_toolsets(toolsets: List[Any]) -> bool:
-    """Quick check: are there any OAuth-enabled MCP toolsets?"""
-    return bool(_get_oauth_mcp_toolsets(toolsets))
-
-
-def load_authenticated_oauth_tools(
-    toolsets: List[Any],
-    request_context: Optional[Dict[str, Any]],
-) -> Dict[str, List[Any]]:
-    """Load real MCP tools for OAuth toolsets that have cached tokens.
-
-    Checks the token manager for existing tokens (cache → refresh → DB → disk).
-    Loaded tools are cached per (user_id, toolset_name) with a 5-minute TTL.
-
-    Returns a dict of toolset_name -> list of RemoteMCPTool to replace placeholders.
-    The shared tool executor is NOT modified.
-    """
-    result: Dict[str, List[Any]] = {}
-    now = time.monotonic()
-
-    for ts in _get_oauth_mcp_toolsets(toolsets):
-
-        oauth_config = ts._mcp_config.oauth
-        user_id = (request_context or {}).get("user_id", "__no_user__")
-
-        # Check if user has a token (has_token checks in-memory only, get_access_token also checks DB/disk)
-        if not _token_manager.has_token(oauth_config, request_context):
-            token = _token_manager.get_access_token(oauth_config, request_context)
-            if not token:
-                logger.info(
-                    "OAuth MCP %s: no token found for user %s (authorization_url=%s, client_id=%s)",
-                    ts.name, user_id, oauth_config.authorization_url, oauth_config.client_id,
-                )
-                continue
-        cache_key = f"{user_id}:{ts.name}"
-
-        # Check tool cache for a fresh entry
-        with _mcp_tools_cache_lock:
-            entry = _mcp_tools_cache.get(cache_key)
-            if entry and (now - entry.loaded_at) < _MCP_TOOLS_CACHE_TTL:
-                result[ts.name] = entry.tools
-                logger.info("OAuth MCP %s: using cached tools for user %s", ts.name, user_id)
-                continue
-
-        # Cache miss — load tools from MCP server
-        try:
-            lock = get_server_lock(str(ts._mcp_config.get_lock_string()))
-            with lock:
-                tools_result = asyncio.run(ts._get_server_tools_with_context(request_context))
-
-            real_tools = [RemoteMCPTool.create(tool, ts) for tool in tools_result.tools]
-            if real_tools:
-                with _mcp_tools_cache_lock:
-                    _mcp_tools_cache[cache_key] = _LoadedToolsEntry(
-                        tools=real_tools,
-                        toolset=ts,
-                        loaded_at=now,
-                    )
-                result[ts.name] = real_tools
-                logger.warning(
-                    "OAuth MCP %s: preloaded %d tools for user %s",
-                    ts.name, len(real_tools), user_id,
-                )
-        except Exception as e:
-            logger.warning(
-                "OAuth MCP %s: failed to preload tools: %s",
-                ts.name, _extract_root_error_message(e),
-            )
-            # Graceful fallback — user will see the placeholder connect tool
-
-    return result
-
-
-class _PendingOAuthExchange:
-    """State for a pending OAuth approval: PKCE verifier and config."""
-
-    def __init__(self, code_verifier: str, oauth_config: MCPOAuthConfig, redirect_uri: str) -> None:
-        self.code_verifier = code_verifier
-        self.oauth_config = oauth_config
-        self.redirect_uri = redirect_uri
-
-
-# Pending OAuth exchanges and lock
-_pending_exchanges: Dict[str, _PendingOAuthExchange] = {}
-_exchanges_lock = threading.Lock()
-
-
-def set_oauth_dal(dal: Any) -> None:
-    """Set the DAL instance for OAuth DB operations. Called during server startup."""
-    _token_manager.set_dal(dal)
 
 
 class MCPConfig(ToolsetConfig):
@@ -384,7 +223,7 @@ def _inject_oauth_token(
         return headers
 
     oauth_config = toolset._mcp_config.oauth
-    cached_token = _token_manager.get_access_token(oauth_config, request_context)
+    cached_token = _get_token_manager().get_access_token(oauth_config, request_context)
     if cached_token:
         headers = headers or {}
         headers["Authorization"] = f"Bearer {cached_token}"
@@ -393,51 +232,6 @@ def _inject_oauth_token(
         logger.warning("OAuth MCP server %s: no cached token — request will likely 401", toolset.name)
     return headers
 
-
-def exchange_code_for_token(tool_call_id: str, payload_json: str, request_context: Optional[Dict[str, Any]]) -> None:
-    """Exchange an OAuth authorization code for an access token.
-
-    Called from tool_calling_llm when a tool approval decision includes an
-    OAuth payload from the frontend browser flow.
-    """
-    with _exchanges_lock:
-        pending = _pending_exchanges.pop(tool_call_id, None)
-
-    if pending is None:
-        logger.error("OAuth exchange: no pending exchange for tool_call_id=%s", tool_call_id)
-        return
-
-    try:
-        payload = json.loads(payload_json)
-    except json.JSONDecodeError:
-        logger.warning("OAuth exchange: invalid JSON payload for tool_call_id=%s", tool_call_id)
-        return
-
-    # Frontend may include client_id and client_secret from DCR
-    client_id = payload.get("client_id") or pending.oauth_config.client_id
-    client_secret = payload.get("client_secret")
-    if client_id and not pending.oauth_config.client_id:
-        pending.oauth_config.client_id = client_id
-        logger.info("OAuth: using client_id from frontend DCR: %s", client_id)
-
-    try:
-        token_data = exchange_code_for_tokens(
-            token_url=pending.oauth_config.token_url,
-            code=payload["code"],
-            redirect_uri=payload.get("redirect_uri", ""),
-            client_id=client_id,
-            code_verifier=pending.code_verifier,
-            client_secret=client_secret,
-        )
-    except (OAuthTokenExchangeError, KeyError, Exception):
-        logger.exception("OAuth exchange failed (tool_call_id=%s, token_url=%s)", tool_call_id, pending.oauth_config.token_url)
-        return
-
-    _token_manager.store_token(pending.oauth_config, token_data, request_context)
-    logger.info(
-        "OAuth token stored (idp=%s, expires_in=%s, has_refresh=%s)",
-        pending.oauth_config.token_url, token_data.get("expires_in"), "refresh_token" in token_data,
-    )
 
 
 @asynccontextmanager
@@ -513,7 +307,7 @@ class RemoteMCPTool(Tool):
         disk_key = str(self.toolset._mcp_config.url) if isinstance(self.toolset._mcp_config, MCPConfig) else None
 
         # Try to get a token from cache → refresh → DB → disk
-        token = _token_manager.get_access_token(oauth_config, context.request_context, disk_key=disk_key)
+        token = _get_token_manager().get_access_token(oauth_config, context.request_context, disk_key=disk_key)
         if token:
             logger.info("OAuth MCP %s: token available via manager", self.toolset.name)
             return None
@@ -537,7 +331,7 @@ class RemoteMCPTool(Tool):
             )
             token_data = cli_oauth_flow(oauth_endpoints, self.toolset.name)
             if token_data:
-                _token_manager.store_token(
+                _get_token_manager().store_token(
                     oauth_config, token_data, context.request_context,
                     disk_key=disk_key, store_to_disk=True,
                 )
@@ -550,12 +344,11 @@ class RemoteMCPTool(Tool):
         # Frontend mode: use PKCE + approval mechanism
         code_verifier, code_challenge = generate_pkce()
 
-        with _exchanges_lock:
-            _pending_exchanges[context.tool_call_id] = _PendingOAuthExchange(
-                code_verifier=code_verifier,
-                oauth_config=oauth_config,
-                redirect_uri="",  # Set by frontend in the payload
-            )
+        _get_exchange_manager().register_pending(
+            tool_call_id=context.tool_call_id,
+            code_verifier=code_verifier,
+            oauth_config=oauth_config,
+        )
 
         metadata: Dict[str, Any] = {
             "authorization_url": oauth_config.authorization_url,
@@ -1045,7 +838,7 @@ class RemoteMCPToolset(Toolset):
         oauth_config = self._mcp_config.oauth
         disk_key = str(self._mcp_config.url)
 
-        if _token_manager.get_access_token(oauth_config, None, disk_key=disk_key):
+        if _get_token_manager().get_access_token(oauth_config, None, disk_key=disk_key):
             try:
                 tools_result = asyncio.run(self._get_server_tools())
                 self.tools = [RemoteMCPTool.create(tool, self) for tool in tools_result.tools]

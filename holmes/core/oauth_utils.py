@@ -6,7 +6,6 @@ import socket
 import threading
 import time
 import webbrowser
-from dataclasses import dataclass
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from typing import Any, Dict, List, Optional, Tuple
 from urllib.parse import parse_qs, urlencode, urlparse
@@ -19,47 +18,33 @@ from mcp.client.auth.utils import (
     extract_resource_metadata_from_www_auth,
 )
 
-from holmes.core.models import OAuthCallbackRequest, OAuthCallbackResponse
+from holmes.core.oauth_config import (
+    OAuthConfigLookupError,
+    OAuthEndpoints,
+    OAuthTokenExchangeError,
+)
 
 logger = logging.getLogger(__name__)
 
 
-# ── Exceptions ────────────────────────────────────────────────────────────
+# ── Singleton token manager ──────────────────────────────────────────────
+# Lazy-initialized to avoid circular import (oauth_utils → oauth_token_manager
+# → toolsets/__init__ → toolset_mcp → oauth_utils).
+
+_token_manager = None
 
 
-class OAuthTokenExchangeError(Exception):
-    """Raised when an OAuth authorization code exchange fails."""
-
-    def __init__(self, status_code: int, detail: str) -> None:
-        self.status_code = status_code
-        self.detail = detail
-        super().__init__(f"Token exchange failed (HTTP {status_code}): {detail}")
-
-
-class OAuthConfigLookupError(Exception):
-    """Raised when a toolset's OAuth config cannot be found or is invalid."""
-
-    def __init__(self, detail: str) -> None:
-        self.detail = detail
-        super().__init__(detail)
+def _get_token_manager():
+    global _token_manager
+    if _token_manager is None:
+        from holmes.plugins.toolsets.mcp.oauth_token_manager import OAuthTokenManager
+        _token_manager = OAuthTokenManager()
+    return _token_manager
 
 
-# ── Data types ────────────────────────────────────────────────────────────
-
-
-@dataclass
-class OAuthEndpoints:
-    """Minimal OAuth endpoint config — decoupled from MCPOAuthConfig.
-
-    Passed by toolset_mcp.py to the pure-OAuth functions below so they
-    don't depend on pydantic models or MCP-specific types.
-    """
-
-    authorization_url: Optional[str] = None
-    token_url: Optional[str] = None
-    client_id: Optional[str] = None
-    scopes: Optional[List[str]] = None
-    registration_endpoint: Optional[str] = None
+def set_oauth_dal(dal: Any) -> None:
+    """Set the DAL instance for OAuth DB operations. Called during server startup."""
+    _get_token_manager().set_dal(dal)
 
 
 # ── Token exchange ────────────────────────────────────────────────────────
@@ -360,70 +345,3 @@ def fetch_oauth_metadata(
 
     logging.warning("OAuth discovery %s: all metadata discovery attempts failed", server_name)
     return None
-
-
-# ── Server callback endpoint helpers ──────────────────────────────────────
-
-
-def get_toolset_oauth_config(
-    toolsets: List[Any],
-    toolset_name: str,
-    token_manager: Any,
-    client_id_override: Optional[str] = None,
-) -> tuple:
-    """Look up a toolset's OAuth config from a list of toolsets.
-
-    Returns ``(oauth_config, client_id, token_manager)``.
-    Raises :class:`OAuthConfigLookupError` on failure.
-    """
-    from holmes.plugins.toolsets.mcp.toolset_mcp import RemoteMCPToolset
-
-    toolset = None
-    for ts in toolsets:
-        if isinstance(ts, RemoteMCPToolset) and (ts.name == toolset_name or ts.connect_tool_name == toolset_name):
-            toolset = ts
-            break
-
-    if not toolset:
-        raise OAuthConfigLookupError(f"Toolset '{toolset_name}' not found")
-
-    if not toolset.is_oauth_enabled:
-        raise OAuthConfigLookupError(f"Toolset '{toolset_name}' does not have OAuth enabled")
-
-    oauth = toolset._mcp_config.oauth
-    if not oauth.token_url:
-        raise OAuthConfigLookupError(f"OAuth config for '{toolset_name}' missing token_url")
-
-    client_id = client_id_override or oauth.client_id
-    if not client_id:
-        raise OAuthConfigLookupError(f"No client_id available for '{toolset_name}'")
-
-    return oauth, client_id, token_manager
-
-
-def process_oauth_callback(
-    request: OAuthCallbackRequest,
-    toolsets: List[Any],
-    token_manager: Any,
-) -> OAuthCallbackResponse:
-    """Process an OAuth callback: look up config, exchange code, store tokens.
-
-    Shared by both the HTTP endpoint and the in-flight tool-approval path.
-    """
-    oauth, client_id, mgr = get_toolset_oauth_config(
-        toolsets, request.toolset_name, token_manager, request.client_id,
-    )
-
-    token_data = exchange_code_for_tokens(
-        token_url=oauth.token_url,
-        code=request.code,
-        redirect_uri=request.redirect_uri,
-        client_id=client_id,
-        code_verifier=request.code_verifier,
-        client_secret=request.client_secret,
-    )
-
-    request_context = {"user_id": request.user_id} if request.user_id else None
-    mgr.store_token(oauth, token_data, request_context=request_context)
-    logger.info("OAuth tokens stored for toolset '%s'", request.toolset_name)
-    return OAuthCallbackResponse(success=True)

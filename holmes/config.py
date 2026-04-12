@@ -17,7 +17,6 @@ from pydantic import (
     SecretStr,
 )
 
-from holmes.common.env_vars import ROBUSTA_CONFIG_PATH
 from holmes.core.init_event import EventCallback, StatusEvent, StatusEventKind
 from holmes.core.llm import DefaultLLM, LLMModelRegistry
 from holmes.core.tools import Toolset
@@ -40,10 +39,13 @@ if TYPE_CHECKING:
     from holmes.plugins.sources.prometheus.plugin import AlertManagerSource
 
 from holmes.core.config import config_path_dir
+from holmes.core.oauth_utils import set_oauth_dal
 from holmes.core.supabase_dal import SupabaseDal
-from holmes.plugins.toolsets.mcp.toolset_mcp import has_oauth_mcp_toolsets, set_oauth_dal
+from holmes.plugins.toolsets.mcp.oauth_tools_cache import has_oauth_mcp_toolsets
 from holmes.utils.definitions import RobustaConfig
 from holmes.utils.pydantic_utils import RobustaBaseConfig, load_model_from_file
+
+
 
 DEFAULT_CONFIG_LOCATION = os.path.join(config_path_dir, "config.yaml")
 
@@ -244,23 +246,27 @@ class Config(RobustaBaseConfig):
         return result
 
     @staticmethod
+    def get_robusta_global_config_value(key: str) -> Optional[str]:
+        """Read a value from Robusta's global_config. Returns None in CLI mode or on error."""
+        from holmes.common.env_vars import ROBUSTA_CONFIG_PATH
+
+        if not os.path.exists(ROBUSTA_CONFIG_PATH):
+            return None
+        try:
+            with open(ROBUSTA_CONFIG_PATH) as f:
+                yaml_content = yaml.safe_load(f)
+                config = RobustaConfig(**yaml_content)
+                return config.global_config.get(key)
+        except Exception:
+            logging.warning("Failed to load '%s' from Robusta config", key, exc_info=True)
+            return None
+
+    @staticmethod
     def __get_cluster_name() -> Optional[str]:
-        config_file_path = ROBUSTA_CONFIG_PATH
         env_cluster_name = os.environ.get("CLUSTER_NAME")
         if env_cluster_name:
             return env_cluster_name
-
-        if not os.path.exists(config_file_path):
-            logging.info(f"No robusta config in {config_file_path}")
-            return None
-
-        logging.info(f"loading config {config_file_path}")
-        with open(config_file_path) as file:
-            yaml_content = yaml.safe_load(file)
-            config = RobustaConfig(**yaml_content)
-            return config.global_config.get("cluster_name")
-
-        return None
+        return Config.get_robusta_global_config_value("cluster_name")
 
     def get_runbook_catalog(self) -> Optional[RunbookCatalog]:
         runbook_catalog = load_runbook_catalog(

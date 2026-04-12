@@ -19,12 +19,9 @@ from typing import List, Optional
 
 import colorlog
 import litellm
-from holmes.core.oauth_utils import (
-    OAuthConfigLookupError,
-    OAuthTokenExchangeError,
-    get_toolset_oauth_config,
-    process_oauth_callback,
-)
+from holmes.core.oauth_config import OAuthConfigLookupError, OAuthTokenExchangeError
+from holmes.core.oauth_server_callbacks import get_toolset_oauth_config, process_oauth_callback
+from holmes.core.oauth_utils import _get_token_manager
 import sentry_sdk
 import uvicorn
 from fastapi import FastAPI, HTTPException, Request
@@ -65,10 +62,7 @@ from holmes.utils.holmes_sync_toolsets import holmes_sync_toolsets_status
 from holmes.utils.log import EndpointFilter
 from holmes.checks.checks_api import init_checks_app
 from holmes.core.tools_utils.filesystem_result_storage import tool_result_storage
-from holmes.plugins.toolsets.mcp.toolset_mcp import (
-    _token_manager,
-    load_authenticated_oauth_tools,
-)
+from holmes.plugins.toolsets.mcp.oauth_tools_cache import load_authenticated_oauth_tools
 from holmes.utils.stream import stream_chat_formatter
 
 
@@ -279,7 +273,7 @@ init_checks_app(app, config)
 def oauth_callback(request: OAuthCallbackRequest) -> OAuthCallbackResponse:
     try:
         toolsets = config.create_tool_executor(dal=dal).toolsets
-        return process_oauth_callback(request, toolsets, _token_manager)
+        return process_oauth_callback(request, toolsets, _get_token_manager())
     except OAuthConfigLookupError as e:
         raise HTTPException(status_code=400, detail=e.detail)
     except OAuthTokenExchangeError as e:

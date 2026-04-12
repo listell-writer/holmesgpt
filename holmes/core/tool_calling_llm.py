@@ -30,7 +30,7 @@ from holmes.core.models import (
     ToolApprovalDecision,
     ToolCallResult,
 )
-from holmes.plugins.toolsets.mcp.toolset_mcp import exchange_code_for_token
+from holmes.core.oauth_config import _get_exchange_manager
 from holmes.core.safeguards import prevent_overly_repeated_tool_call
 from holmes.core.tools import (
     StructuredToolResult,
@@ -152,7 +152,7 @@ def _try_process_oauth_decision(
     """
     try:
         payload_json = json.dumps(decision_data)
-        exchange_code_for_token(tool_call_id, payload_json, request_context)
+        _get_exchange_manager().complete_exchange(tool_call_id, payload_json, request_context)
     except Exception as e:
         logging.error(f"Failed to process OAuth decision: {e}", exc_info=True)
 
