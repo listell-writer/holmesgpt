@@ -236,9 +236,13 @@ class ToolInvokeContext(BaseModel):
         str
     ] = []  # Bash prefixes approved during this session
     request_context: Optional[Dict[str, Any]] = None
+    tool_executor: Optional[Any] = None  # ToolExecutor reference for dynamic tool registration (e.g., OAuth MCP)
 
     def model_dump(self, **kwargs):
         """Override to exclude sensitive context from serialization"""
+        kwargs.setdefault("exclude", set())
+        if isinstance(kwargs["exclude"], set):
+            kwargs["exclude"].add("tool_executor")
         data = super().model_dump(**kwargs)
         if data.get("request_context"):
             data["request_context"] = {
