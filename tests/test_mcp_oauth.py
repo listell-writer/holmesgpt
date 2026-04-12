@@ -39,8 +39,6 @@ from holmes.plugins.toolsets.mcp.toolset_mcp import (
     _CachedToken,
     _LoadedToolsEntry,
     _cli_oauth_flow,
-    _decrypt_token_from_db,
-    _encrypt_token_for_db,
     _exchanges_lock,
     _generate_pkce,
     _get_conversation_key,
@@ -59,8 +57,6 @@ from holmes.plugins.toolsets.mcp.toolset_mcp import (
     preload_oauth_mcp_tools,
 )
 
-# Backwards-compat alias used by some test references
-decrypt_code_and_exchange_for_token = exchange_code_for_token
 
 
 class TestMCPOAuthConfig:
@@ -1087,8 +1083,7 @@ class TestTryRefreshToken:
             "refresh_token": "new-refresh-tok",
         }
 
-        with patch("holmes.plugins.toolsets.mcp.toolset_mcp.httpx.post", return_value=mock_resp) as mock_post, \
-             patch("holmes.plugins.toolsets.mcp.toolset_mcp._store_token_to_db"):
+        with patch("holmes.plugins.toolsets.mcp.toolset_mcp.httpx.post", return_value=mock_resp) as mock_post:
             result = _try_refresh_token(cache_key, oauth)
 
         assert result == "new-access-tok"

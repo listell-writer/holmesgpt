@@ -31,6 +31,8 @@ from holmes.core.models import (
     ToolApprovalDecision,
     ToolCallResult,
 )
+from holmes.core.oauth_utils import process_oauth_callback
+from holmes.plugins.toolsets.mcp.toolset_mcp import _token_manager
 from holmes.core.safeguards import prevent_overly_repeated_tool_call
 from holmes.core.tools import (
     StructuredToolResult,
@@ -140,7 +142,7 @@ def extract_bash_session_prefixes(messages: List[Dict[str, Any]]) -> List[str]:
     return list(prefixes)
 
 
-def _try_process_oauth_decision(decision_data: Dict[str, Any]) -> None:
+def _try_process_oauth_decision(decision_data: Dict[str, Any], toolsets: List[Any]) -> None:
     """Try to process an OAuth callback from a tool approval decision.
 
     If the decision contains fields matching OAuthCallbackRequest
@@ -148,10 +150,8 @@ def _try_process_oauth_decision(decision_data: Dict[str, Any]) -> None:
     auth code for tokens and store them.
     """
     try:
-        from server import process_oauth_callback
-
         req = OAuthCallbackRequest(**decision_data)
-        result = process_oauth_callback(req)
+        result = process_oauth_callback(req, toolsets, _token_manager)
         if not result.success:
             logging.error(f"OAuth decision processing failed: {result.error}")
     except (TypeError, ValueError) as e:
@@ -293,7 +293,7 @@ class ToolCallingLLM:
             if tool_decision and tool_decision.approved:
                 # Process OAuth decision if present (auth code from frontend browser OAuth flow)
                 if tool_decision.decision:
-                    _try_process_oauth_decision(tool_decision.decision)
+                    _try_process_oauth_decision(tool_decision.decision, self.tool_executor.toolsets)
 
                 tool_result = self._invoke_llm_tool_call(
                     tool_to_call=tool_call,

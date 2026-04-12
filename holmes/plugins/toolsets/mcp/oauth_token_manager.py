@@ -10,8 +10,9 @@ import json
 import logging
 import threading
 import time
+from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
-from typing import Any, Callable, Dict, Optional
+from typing import Any, Callable, Dict, Optional, Tuple
 
 import httpx
 from cryptography.fernet import Fernet
@@ -29,24 +30,16 @@ logger = logging.getLogger(__name__)
 _REFRESH_AHEAD_SECONDS = 3600  # 1 hour
 
 
+@dataclass
 class _ScheduledRefresh:
     """Metadata for a token that needs background refresh."""
 
-    def __init__(
-        self,
-        cache_key: str,
-        token_url: str,
-        client_id: Optional[str],
-        authorization_url: Optional[str],
-        user_id: Optional[str],
-        refresh_at: float,  # monotonic time when refresh should happen
-    ) -> None:
-        self.cache_key = cache_key
-        self.token_url = token_url
-        self.client_id = client_id
-        self.authorization_url = authorization_url
-        self.user_id = user_id
-        self.refresh_at = refresh_at
+    cache_key: str
+    token_url: str
+    client_id: Optional[str]
+    authorization_url: Optional[str]
+    user_id: Optional[str]
+    refresh_at: float  # monotonic time when refresh should happen
 
 
 class OAuthTokenManager:
@@ -93,7 +86,7 @@ class OAuthTokenManager:
         """Set the DAL instance for DB token operations. Called during server startup."""
         self._dal = dal
         if dal and dal.enabled:
-            logger.warning("OAuthTokenManager: DAL initialized for cross-cluster token storage")
+            logger.info("OAuthTokenManager: DAL initialized for cross-cluster token storage")
 
     def set_signing_key_getter(self, getter: Callable[[], Optional[str]]) -> None:
         """Set the function used to retrieve the signing key (lazy, avoids import cycles)."""
@@ -142,7 +135,7 @@ class OAuthTokenManager:
                 refresh_expires_in=db_token.get("refresh_expires_in"),
             )
             self._schedule_background_refresh(cache_key, oauth_config, db_token.get("expires_in", 300), user_id)
-            logger.warning("OAuthTokenManager: loaded token from DB (provider=%s)", oauth_config.authorization_url)
+            logger.info("OAuthTokenManager: loaded token from DB (provider=%s)", oauth_config.authorization_url)
             return db_token["access_token"]
 
         # 4. Check disk store (CLI persistence)
@@ -157,7 +150,7 @@ class OAuthTokenManager:
                 refresh_token=disk_token.get("refresh_token"),
             )
             self._schedule_background_refresh(cache_key, oauth_config, expires_in, user_id)
-            logger.warning("OAuthTokenManager: loaded token from disk")
+            logger.info("OAuthTokenManager: loaded token from disk")
             return disk_token["access_token"]
 
         return None
@@ -189,7 +182,6 @@ class OAuthTokenManager:
 
         expires_in = token_data.get("expires_in", 300)
 
-        # Cache
         self._cache.set(
             cache_key,
             access_token,
@@ -198,18 +190,14 @@ class OAuthTokenManager:
             refresh_expires_in=token_data.get("refresh_expires_in"),
         )
 
-        # DB
-        self._store_to_db(oauth_config, token_data, user_id)
+        self._store_to_db(oauth_config.authorization_url, token_data, user_id)
 
-        # Disk (CLI mode)
         if store_to_disk:
             dk = disk_key or self._default_disk_key(oauth_config)
             self._disk_store.set(dk, token_data)
 
-        # Schedule background refresh
         self._schedule_background_refresh(cache_key, oauth_config, expires_in, user_id)
-
-        logger.warning(
+        logger.info(
             "OAuthTokenManager: token stored (cache_key=%s, expires_in=%s, has_refresh=%s)",
             cache_key, expires_in, "refresh_token" in token_data,
         )
@@ -254,8 +242,6 @@ class OAuthTokenManager:
     ) -> None:
         """Schedule a background refresh for this token 1 hour before expiry."""
         if expires_in <= _REFRESH_AHEAD_SECONDS:
-            # Token lifetime is shorter than refresh-ahead window; skip scheduling
-            # (the reactive refresh on access will handle it)
             return
 
         refresh_at = time.monotonic() + expires_in - _REFRESH_AHEAD_SECONDS
@@ -268,7 +254,7 @@ class OAuthTokenManager:
                 user_id=user_id,
                 refresh_at=refresh_at,
             )
-        logger.warning(
+        logger.info(
             "OAuthTokenManager: scheduled background refresh in %ds (cache_key=%s)",
             expires_in - _REFRESH_AHEAD_SECONDS, cache_key,
         )
@@ -308,63 +294,20 @@ class OAuthTokenManager:
             logger.warning("OAuthTokenManager: background refresh skipped, no refresh token (cache_key=%s)", entry.cache_key)
             return
 
-        logger.warning("OAuthTokenManager: background refresh starting (cache_key=%s)", entry.cache_key)
-        response = httpx.post(
-            entry.token_url,
-            data={
-                "grant_type": "refresh_token",
-                "refresh_token": refresh_token,
-                "client_id": entry.client_id,
-            },
-            headers={"Content-Type": "application/x-www-form-urlencoded"},
-            timeout=30,
-        )
-        if response.status_code != 200:
-            logger.warning(
-                "OAuthTokenManager: background refresh HTTP %d (cache_key=%s)",
-                response.status_code, entry.cache_key,
-            )
+        result = self._do_refresh_request(entry.token_url, entry.client_id, refresh_token, entry.cache_key)
+        if not result:
             return
 
-        token_data = response.json()
-        access_token = token_data.get("access_token")
-        if not access_token:
-            logger.warning("OAuthTokenManager: background refresh response missing access_token")
-            return
+        token_data, _access_token, _expires_in = result
+        self._store_to_db(entry.authorization_url, token_data, entry.user_id)
 
-        expires_in = token_data.get("expires_in", 300)
-        self._cache.set(
-            entry.cache_key,
-            access_token,
-            expires_in=expires_in,
-            refresh_token=token_data.get("refresh_token", refresh_token),
-            refresh_expires_in=token_data.get("refresh_expires_in"),
-        )
-        logger.warning(
-            "OAuthTokenManager: background refresh successful (cache_key=%s, expires_in=%s)",
-            entry.cache_key, expires_in,
-        )
-
-        # Update DB
-        # Build a minimal oauth_config-like object for _store_to_db
-        self._store_to_db_raw(
-            authorization_url=entry.authorization_url,
-            token_data=token_data,
-            user_id=entry.user_id,
-        )
-
-        # Re-schedule for next refresh cycle
-        if expires_in > _REFRESH_AHEAD_SECONDS:
-            refresh_at = time.monotonic() + expires_in - _REFRESH_AHEAD_SECONDS
-            with self._schedule_lock:
-                self._scheduled[entry.cache_key] = _ScheduledRefresh(
-                    cache_key=entry.cache_key,
-                    token_url=entry.token_url,
-                    client_id=entry.client_id,
-                    authorization_url=entry.authorization_url,
-                    user_id=entry.user_id,
-                    refresh_at=refresh_at,
-                )
+        # Re-schedule using a minimal oauth_config-like object
+        _OAuthLike = type("_OAuthLike", (), {
+            "token_url": entry.token_url,
+            "client_id": entry.client_id,
+            "authorization_url": entry.authorization_url,
+        })()
+        self._schedule_background_refresh(entry.cache_key, _OAuthLike, _expires_in, entry.user_id)
 
     # ── Synchronous (reactive) refresh ─────────────────────────────────
 
@@ -375,46 +318,56 @@ class OAuthTokenManager:
             return None
 
         try:
-            logger.warning("OAuthTokenManager: refreshing token at %s (cache_key=%s)", oauth_config.token_url, cache_key)
-            response = httpx.post(
-                oauth_config.token_url,
-                data={
-                    "grant_type": "refresh_token",
-                    "refresh_token": refresh_token,
-                    "client_id": oauth_config.client_id,
-                },
-                headers={"Content-Type": "application/x-www-form-urlencoded"},
-                timeout=30,
-            )
-            if response.status_code != 200:
-                logger.warning("OAuthTokenManager: refresh failed HTTP %d (cache_key=%s)", response.status_code, cache_key)
+            result = self._do_refresh_request(oauth_config.token_url, oauth_config.client_id, refresh_token, cache_key)
+            if not result:
                 return None
 
-            token_data = response.json()
-            access_token = token_data.get("access_token")
-            if not access_token:
-                return None
-
-            expires_in = token_data.get("expires_in", 300)
-            self._cache.set(
-                cache_key,
-                access_token,
-                expires_in=expires_in,
-                refresh_token=token_data.get("refresh_token", refresh_token),
-                refresh_expires_in=token_data.get("refresh_expires_in"),
-            )
-            logger.warning("OAuthTokenManager: token refreshed (cache_key=%s, expires_in=%s)", cache_key, expires_in)
-
-            # Update DB
-            self._store_to_db(oauth_config, token_data, user_id)
-
-            # Schedule next background refresh
+            token_data, access_token, expires_in = result
+            self._store_to_db(oauth_config.authorization_url, token_data, user_id)
             self._schedule_background_refresh(cache_key, oauth_config, expires_in, user_id)
-
             return access_token
         except Exception:
             logger.warning("OAuthTokenManager: refresh failed (cache_key=%s)", cache_key, exc_info=True)
             return None
+
+    def _do_refresh_request(
+        self, token_url: str, client_id: Optional[str], refresh_token: str, cache_key: str,
+    ) -> Optional[Tuple[Dict[str, Any], str, int]]:
+        """POST to token endpoint, validate response, update cache.
+
+        Returns (token_data, access_token, expires_in) on success, None on failure.
+        """
+        logger.info("OAuthTokenManager: refreshing token at %s (cache_key=%s)", token_url, cache_key)
+        response = httpx.post(
+            token_url,
+            data={
+                "grant_type": "refresh_token",
+                "refresh_token": refresh_token,
+                "client_id": client_id,
+            },
+            headers={"Content-Type": "application/x-www-form-urlencoded"},
+            timeout=30,
+        )
+        if response.status_code != 200:
+            logger.warning("OAuthTokenManager: refresh HTTP %d (cache_key=%s)", response.status_code, cache_key)
+            return None
+
+        token_data = response.json()
+        access_token = token_data.get("access_token")
+        if not access_token:
+            logger.warning("OAuthTokenManager: refresh response missing access_token (cache_key=%s)", cache_key)
+            return None
+
+        expires_in = token_data.get("expires_in", 300)
+        self._cache.set(
+            cache_key,
+            access_token,
+            expires_in=expires_in,
+            refresh_token=token_data.get("refresh_token", refresh_token),
+            refresh_expires_in=token_data.get("refresh_expires_in"),
+        )
+        logger.info("OAuthTokenManager: token refreshed (cache_key=%s, expires_in=%s)", cache_key, expires_in)
+        return token_data, access_token, expires_in
 
     # ── DB operations ──────────────────────────────────────────────────
 
@@ -429,17 +382,19 @@ class OAuthTokenManager:
             return None
         return hashlib.sha256(key.encode()).hexdigest()
 
+    def _derive_fernet_key(self, signing_key: str) -> bytes:
+        """Derive a Fernet encryption key from the signing key via HKDF."""
+        return base64.urlsafe_b64encode(
+            HKDF(algorithm=SHA256(), length=32, salt=b"holmesgpt-oauth-db-token", info=b"token-encryption")
+            .derive(signing_key.encode())
+        )
+
     def _encrypt_token(self, token_data: Dict[str, Any]) -> Optional[str]:
         """Encrypt token data with signing_key-derived Fernet key for DB storage."""
         signing_key = self._get_signing_key()
         if not signing_key:
             return None
-
-        fernet_key = base64.urlsafe_b64encode(
-            HKDF(algorithm=SHA256(), length=32, salt=b"holmesgpt-oauth-db-token", info=b"token-encryption")
-            .derive(signing_key.encode())
-        )
-        return Fernet(fernet_key).encrypt(json.dumps(token_data).encode()).decode()
+        return Fernet(self._derive_fernet_key(signing_key)).encrypt(json.dumps(token_data).encode()).decode()
 
     def _decrypt_token(self, encrypted: str) -> Optional[Dict[str, Any]]:
         """Decrypt token data from DB using signing_key-derived Fernet key."""
@@ -448,11 +403,7 @@ class OAuthTokenManager:
             return None
 
         try:
-            fernet_key = base64.urlsafe_b64encode(
-                HKDF(algorithm=SHA256(), length=32, salt=b"holmesgpt-oauth-db-token", info=b"token-encryption")
-                .derive(signing_key.encode())
-            )
-            decrypted = Fernet(fernet_key).decrypt(encrypted.encode())
+            decrypted = Fernet(self._derive_fernet_key(signing_key)).decrypt(encrypted.encode())
             return json.loads(decrypted)
         except Exception:
             logger.warning("OAuthTokenManager: failed to decrypt token from DB (signing_key mismatch?)")
@@ -475,7 +426,6 @@ class OAuthTokenManager:
 
         signing_key_hash = self._get_signing_key_hash()
 
-        # Build list of provider names to try
         providers_to_try = []
         if oauth_config.authorization_url:
             providers_to_try.append(oauth_config.authorization_url)
@@ -491,21 +441,16 @@ class OAuthTokenManager:
 
             stored_hash = db_record.get("signing_key_hash", "")
 
-            # Frontend-stored tokens: unencrypted JSON, signing_key_hash='__frontend__'
             if stored_hash == "__frontend__":
                 try:
                     token_data = json.loads(db_record["encrypted_token"])
                     if token_data.get("access_token"):
-                        logger.warning(
-                            "OAuthTokenManager: loaded frontend-stored token from DB (provider=%s, user_id=%s)",
-                            provider, user_id,
-                        )
+                        logger.info("OAuthTokenManager: loaded frontend-stored token from DB (provider=%s)", provider)
                         return token_data
                 except (json.JSONDecodeError, TypeError):
                     logger.warning("OAuthTokenManager: failed to parse frontend token from DB (provider=%s)", provider)
                 continue
 
-            # Holmes-encrypted tokens: verify signing key hash and decrypt
             if not signing_key_hash:
                 continue
             if stored_hash != signing_key_hash:
@@ -519,16 +464,8 @@ class OAuthTokenManager:
 
         return None
 
-    def _store_to_db(self, oauth_config: Any, token_data: Dict[str, Any], user_id: Optional[str]) -> None:
+    def _store_to_db(self, authorization_url: Optional[str], token_data: Dict[str, Any], user_id: Optional[str]) -> None:
         """Store an encrypted token to the DB."""
-        self._store_to_db_raw(
-            authorization_url=oauth_config.authorization_url,
-            token_data=token_data,
-            user_id=user_id,
-        )
-
-    def _store_to_db_raw(self, authorization_url: Optional[str], token_data: Dict[str, Any], user_id: Optional[str]) -> None:
-        """Store token to DB using raw fields (no oauth_config object needed)."""
         signing_key_hash = self._get_signing_key_hash()
         if not self._dal or not self._dal.enabled or not signing_key_hash:
             return
@@ -553,7 +490,7 @@ class OAuthTokenManager:
                 token_expiry=expiry,
                 user_id=user_id,
             )
-            logger.warning("OAuthTokenManager: stored token to DB (provider=%s, user_id=%s)", provider_name, user_id)
+            logger.info("OAuthTokenManager: stored token to DB (provider=%s, user_id=%s)", provider_name, user_id)
         except Exception:
             logger.warning("OAuthTokenManager: failed to store token to DB", exc_info=True)
 

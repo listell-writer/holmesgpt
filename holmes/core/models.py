@@ -125,14 +125,6 @@ class ToolApprovalDecision(BaseModel):
     decision: Optional[Dict[str, Any]] = None  # Structured decision data (e.g. OAuth callback)
 
 
-class StoreOAuthTokenRequest(BaseModel):
-    """Request to store an OAuth token for a user+toolset via the frontend OAuth flow."""
-
-    toolset_name: str
-    user_id: str
-    token_data: dict  # { access_token, refresh_token, expires_in, ... }
-
-
 class OAuthCallbackRequest(BaseModel):
     toolset_name: str
     code: str
