@@ -275,8 +275,10 @@ def oauth_callback(request: OAuthCallbackRequest) -> OAuthCallbackResponse:
         toolsets = config.create_tool_executor(dal=dal).toolsets
         return process_oauth_callback(request, toolsets, _get_token_manager())
     except OAuthConfigLookupError as e:
+        logging.error("OAuth config error for '%s': %s", request.toolset_name, e.detail)
         raise HTTPException(status_code=400, detail=e.detail)
     except OAuthTokenExchangeError as e:
+        logging.error("OAuth token exchange failed for '%s': %s", request.toolset_name, e)
         raise HTTPException(status_code=502, detail=str(e))
     except Exception as e:
         logging.error(f"OAuth callback failed for '{request.toolset_name}': {e}", exc_info=True)
