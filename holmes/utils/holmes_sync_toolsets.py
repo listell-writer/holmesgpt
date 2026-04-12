@@ -73,15 +73,10 @@ def holmes_sync_toolsets_status(dal: SupabaseDal, config: Config) -> None:
 def get_config_meta_for_toolset(toolset: Toolset) -> dict | None:
     if not isinstance(toolset, RemoteMCPToolset):
         return None
-    # For MCP toolsets, extract oauth config from installation_instructions if present
-    if toolset.installation_instructions:
-        try:
-            parsed = json.loads(toolset.installation_instructions)
-            if isinstance(parsed, dict) and "oauth" in parsed:
-                return {"oauth_config": parsed["oauth"]}
-        except (json.JSONDecodeError, TypeError):
-            pass
-    return None
+    oauth_config = toolset.get_oauth_config()
+    if not oauth_config:
+        return None
+    return {"oauth_config": oauth_config}
 
 
 def get_config_schema_for_toolset(toolset: Toolset) -> str:
@@ -89,18 +84,6 @@ def get_config_schema_for_toolset(toolset: Toolset) -> str:
         "example_yaml": render_default_installation_instructions_for_toolset(toolset),
         "schema": toolset.get_config_schema(),
     }
-    # Add oauth info for MCP toolsets that require OAuth authentication
-    mcp_config = getattr(toolset, '_mcp_config', None)
-    if mcp_config and hasattr(mcp_config, 'oauth') and mcp_config.oauth and mcp_config.oauth.enabled:
-        oauth_config = mcp_config.oauth
-        res["oauth"] = {
-            "enabled": True,
-            "authorization_url": oauth_config.authorization_url,
-            "token_url": oauth_config.token_url,
-            "client_id": oauth_config.client_id,
-            "scopes": oauth_config.scopes,
-            "registration_endpoint": oauth_config.registration_endpoint,
-        }
     return json.dumps(res)
 
 def render_default_installation_instructions_for_toolset(toolset: Toolset) -> str:

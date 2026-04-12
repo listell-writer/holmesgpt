@@ -1075,6 +1075,20 @@ class RemoteMCPToolset(Toolset):
         """The name of the OAuth placeholder tool for this MCP server."""
         return f"{self.name}_connect"
 
+    def get_oauth_config(self) -> Optional[Dict[str, Any]]:
+        """Return OAuth config dict for syncing to DB/frontend, or None if not OAuth-enabled."""
+        if not isinstance(self._mcp_config, MCPConfig) or not self._mcp_config.oauth or not self._mcp_config.oauth.enabled:
+            return None
+        oauth = self._mcp_config.oauth
+        return {
+            "enabled": True,
+            "authorization_url": oauth.authorization_url,
+            "token_url": oauth.token_url,
+            "client_id": oauth.client_id,
+            "scopes": oauth.scopes,
+            "registration_endpoint": oauth.registration_endpoint,
+        }
+
     def _render_headers(
         self, request_context: Optional[Dict[str, Any]] = None
     ) -> Optional[Dict[str, str]]:

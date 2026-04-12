@@ -2,6 +2,8 @@
 tmp/
 config.yaml
 checks.yaml
+.claude/skills/dev-skills/
+command.sh
 
 # Byte-compiled / optimized / DLL files
 __pycache__/
