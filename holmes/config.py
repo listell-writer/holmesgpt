@@ -41,6 +41,7 @@ if TYPE_CHECKING:
 
 from holmes.core.config import config_path_dir
 from holmes.core.supabase_dal import SupabaseDal
+from holmes.plugins.toolsets.mcp.toolset_mcp import set_oauth_dal
 from holmes.utils.definitions import RobustaConfig
 from holmes.utils.pydantic_utils import RobustaBaseConfig, load_model_from_file
 
@@ -312,7 +313,6 @@ class Config(RobustaBaseConfig):
             return self._server_tool_executor
 
         # Make DAL available for OAuth cross-cluster token storage
-        from holmes.plugins.toolsets.mcp.toolset_mcp import set_oauth_dal
         set_oauth_dal(dal)
 
         toolsets = self.toolset_manager.list_server_toolsets(dal=dal)

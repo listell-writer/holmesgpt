@@ -133,6 +133,19 @@ class StoreOAuthTokenRequest(BaseModel):
     token_data: dict  # { access_token, refresh_token, expires_in, ... }
 
 
+class OAuthCallbackRequest(BaseModel):
+    toolset_name: str
+    code: str
+    code_verifier: Optional[str] = None  # Optional: frontend provides when it generated PKCE, Holmes provides when it generated PKCE
+    redirect_uri: str
+    client_id: Optional[str] = None
+
+
+class OAuthCallbackResponse(BaseModel):
+    success: bool
+    error: Optional[str] = None
+
+
 class ChatRequestBaseModel(BaseModel):
     conversation_history: Optional[list[dict]] = None
     model: Optional[str] = None

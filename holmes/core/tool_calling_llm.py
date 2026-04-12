@@ -55,6 +55,8 @@ from holmes.utils.stream import (
     build_stream_event_token_count,
 )
 from holmes.utils.tags import parse_messages_tags
+from holmes.core.models import OAuthCallbackRequest
+from holmes.plugins.toolsets.mcp.toolset_mcp import exchange_code_for_token
 
 class LLMInterruptedError(Exception):
     """Raised when the user interrupts an in-progress LLM call (e.g. via Escape key)."""
@@ -147,10 +149,10 @@ def _try_process_oauth_decision(decision_data: Dict[str, Any]) -> None:
     auth code for tokens and store them.
     """
     try:
-        from holmes.oauth.oauth_api import OAuthCallbackRequest, oauth_callback
-
         req = OAuthCallbackRequest(**decision_data)
-        result = oauth_callback(req)
+        from server import process_oauth_callback
+
+        result = process_oauth_callback(req)
         if not result.success:
             logging.error(f"OAuth decision processing failed: {result.error}")
     except (TypeError, ValueError) as e:
@@ -301,7 +303,6 @@ class ToolCallingLLM:
 
                 if oauth_payload:
                     logging.warning("OAuth: received auth code for tool_call_id=%s, exchanging for token", tool_call.id)
-                    from holmes.plugins.toolsets.mcp.toolset_mcp import exchange_code_for_token
                     exchange_code_for_token(tool_call.id, oauth_payload, request_context)
 
                 tool_result = self._invoke_llm_tool_call(
