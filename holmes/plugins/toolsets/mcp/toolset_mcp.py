@@ -410,7 +410,7 @@ def exchange_code_for_token(tool_call_id: str, payload_json: str, request_contex
     try:
         payload = json.loads(payload_json)
     except json.JSONDecodeError:
-        logger.exception("OAuth exchange: invalid JSON payload for tool_call_id=%s", tool_call_id)
+        logger.warning("OAuth exchange: invalid JSON payload for tool_call_id=%s", tool_call_id)
         return
 
     # Frontend may include client_id from DCR (when Holmes didn't have one at discovery time)
@@ -615,7 +615,7 @@ class RemoteMCPTool(Tool):
                 self.toolset.tools = real_tools
 
                 # Register new tools in the tool executor so the LLM can call them
-                tool_executor = getattr(context.llm, "tool_executor", None)
+                tool_executor = context.tool_executor
                 if tool_executor:
                     # Remove the placeholder
                     tool_executor.tools_by_name.pop(self.name, None)
@@ -1017,7 +1017,7 @@ class RemoteMCPToolset(Toolset):
             ]
 
             if not self.tools:
-                logging.warning(f"mcp server {self.name} loaded 0 tools.")
+                logging.warning("mcp server %s loaded 0 tools.", self.name)
 
             return (True, "")
         except Exception as e:
@@ -1048,24 +1048,42 @@ class RemoteMCPToolset(Toolset):
                 tools_result = asyncio.run(self._get_server_tools())
                 self.tools = [RemoteMCPTool.create(tool, self) for tool in tools_result.tools]
                 if self.tools:
-                    logging.info(f"OAuth MCP server {self.name}: loaded {len(self.tools)} tools using cached token")
+                    logging.info("OAuth MCP server %s: loaded %d tools using cached token", self.name, len(self.tools))
                     return (True, "")
             except Exception as e:
-                logging.warning(f"OAuth MCP server {self.name}: cached token failed, falling back to placeholder: {_extract_root_error_message(e)}")
+                logging.warning("OAuth MCP server %s: cached token failed, falling back to placeholder: %s", self.name, _extract_root_error_message(e))
 
         try:
-            # Try the well-known endpoint first (no auth needed)
-            response = httpx.get(
-                f"{url}/.well-known/oauth-protected-resource",
-                timeout=10,
-                verify=self._mcp_config.verify_ssl,
-            )
-            if response.status_code not in (200, 401):
-                # Also try the root — a 401 means server is up but needs auth
-                response = httpx.post(url, timeout=10, verify=self._mcp_config.verify_ssl)
+            # Collect HTTP responses for PRM discovery.  The WWW-Authenticate header
+            # (typically on a 401) contains the resource_metadata URL needed to find
+            # the authorization server.  We try two endpoints and pick the best
+            # response — preferring one with a WWW-Authenticate header.
+            responses: list[httpx.Response] = []
+            try:
+                r = httpx.get(
+                    f"{url}/.well-known/oauth-protected-resource",
+                    timeout=10,
+                    verify=self._mcp_config.verify_ssl,
+                    follow_redirects=False,
+                )
+                responses.append(r)
+            except Exception:
+                pass
 
-            if response.status_code not in (200, 401):
-                return (False, f"MCP server {self.name} returned HTTP {response.status_code}")
+            try:
+                r2 = httpx.post(url, timeout=10, verify=self._mcp_config.verify_ssl, follow_redirects=False)
+                responses.append(r2)
+            except Exception:
+                pass
+
+            if not responses:
+                return (False, f"MCP server {self.name} unreachable: no HTTP response from either endpoint")
+
+            # Prefer the response with a WWW-Authenticate header (needed for PRM discovery)
+            response = next(
+                (r for r in responses if r.headers.get("www-authenticate")),
+                responses[0],
+            )
 
             # Auto-discover OAuth endpoints if not configured
             if not oauth_config.authorization_url or not oauth_config.token_url or not oauth_config.client_id:
@@ -1084,7 +1102,7 @@ class RemoteMCPToolset(Toolset):
             inputSchema={"type": "object", "properties": {}},
         )
         self.tools = [RemoteMCPTool.create(placeholder, self)]
-        logging.info(f"OAuth MCP server {self.name} is reachable, registered placeholder tool (auth required)")
+        logging.info("OAuth MCP server %s is reachable, registered placeholder tool (auth required)", self.name)
         return (True, "")
 
     def _discover_oauth_endpoints(self, mcp_url: str, initial_response: httpx.Response) -> bool:
