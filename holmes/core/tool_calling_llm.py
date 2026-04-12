@@ -26,13 +26,11 @@ from holmes.common.env_vars import (
 from holmes.core.llm import LLM
 from holmes.core.llm_usage import RequestStats
 from holmes.core.models import (
-    OAuthCallbackRequest,
     PendingToolApproval,
     ToolApprovalDecision,
     ToolCallResult,
 )
-from holmes.core.oauth_utils import process_oauth_callback
-from holmes.plugins.toolsets.mcp.toolset_mcp import _token_manager
+from holmes.plugins.toolsets.mcp.toolset_mcp import exchange_code_for_token
 from holmes.core.safeguards import prevent_overly_repeated_tool_call
 from holmes.core.tools import (
     StructuredToolResult,
@@ -142,20 +140,19 @@ def extract_bash_session_prefixes(messages: List[Dict[str, Any]]) -> List[str]:
     return list(prefixes)
 
 
-def _try_process_oauth_decision(decision_data: Dict[str, Any], toolsets: List[Any]) -> None:
-    """Try to process an OAuth callback from a tool approval decision.
+def _try_process_oauth_decision(
+    tool_call_id: str,
+    decision_data: Dict[str, Any],
+    request_context: Optional[Dict[str, Any]],
+) -> None:
+    """Process an OAuth callback from a tool approval decision.
 
-    If the decision contains fields matching OAuthCallbackRequest
-    (toolset_name, code, code_verifier, redirect_uri), exchange the
-    auth code for tokens and store them.
+    Uses the pending exchange (which holds the PKCE code_verifier generated
+    when Holmes sent the approval request) to exchange the auth code for tokens.
     """
     try:
-        req = OAuthCallbackRequest(**decision_data)
-        result = process_oauth_callback(req, toolsets, _token_manager)
-        if not result.success:
-            logging.error(f"OAuth decision processing failed: {result.error}")
-    except (TypeError, ValueError) as e:
-        logging.debug(f"Decision is not an OAuth callback request: {e}")
+        payload_json = json.dumps(decision_data)
+        exchange_code_for_token(tool_call_id, payload_json, request_context)
     except Exception as e:
         logging.error(f"Failed to process OAuth decision: {e}", exc_info=True)
 
@@ -293,7 +290,7 @@ class ToolCallingLLM:
             if tool_decision and tool_decision.approved:
                 # Process OAuth decision if present (auth code from frontend browser OAuth flow)
                 if tool_decision.decision:
-                    _try_process_oauth_decision(tool_decision.decision, self.tool_executor.toolsets)
+                    _try_process_oauth_decision(tool_call.id, tool_decision.decision, request_context)
 
                 tool_result = self._invoke_llm_tool_call(
                     tool_to_call=tool_call,

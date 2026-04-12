@@ -131,6 +131,7 @@ class OAuthCallbackRequest(BaseModel):
     code_verifier: Optional[str] = None  # Optional: frontend provides when it generated PKCE, Holmes provides when it generated PKCE
     redirect_uri: str
     client_id: Optional[str] = None
+    user_id: Optional[str] = None
 
 
 class OAuthCallbackResponse(BaseModel):
