@@ -9,6 +9,7 @@ from holmes.core.tools import (
     Toolset,
     ToolsetStatusEnum,
 )
+from holmes.plugins.toolsets.mcp.toolset_mcp import RemoteMCPToolset
 
 display_logger = logging.getLogger("holmes.display.tool_executor")
 
@@ -46,9 +47,6 @@ class ToolExecutor:
                 self._tool_to_toolset[tool.name] = ts
 
     def get_tool_by_name(self, name: str) -> Optional[Tool]:
-        if self._has_unregistered_oauth_tools():
-            self._register_oauth_tools()
-
         if name in self.tools_by_name:
             return self.tools_by_name[name]
 
@@ -106,74 +104,33 @@ class ToolExecutor:
             tools.append(tool.get_openai_format())
         return tools
 
-    # ── OAuth MCP helpers ──────────────────────────────────────────────
-
-    def _has_unregistered_oauth_tools(self) -> bool:
-        """Check if any OAuth MCP toolset has tools not yet in our registry."""
-        seen_toolsets: set[str] = set()
-        for ts in self._tool_to_toolset.values():
-            if ts.name in seen_toolsets:
-                continue
-            seen_toolsets.add(ts.name)
-            for tool in ts.tools:
-                if tool.name not in self.tools_by_name:
-                    return True
-        return False
-
-    def _register_oauth_tools(self) -> None:
-        """Register tools from OAuth MCP toolsets that loaded tools after authentication."""
-        seen_toolsets: set[str] = set()
-        for ts in list(self._tool_to_toolset.values()):
-            if ts.name in seen_toolsets:
-                continue
-            seen_toolsets.add(ts.name)
-            for tool in ts.tools:
-                if tool.name not in self.tools_by_name:
-                    self.tools_by_name[tool.name] = tool
-                    self._tool_to_toolset[tool.name] = ts
-                    logging.info(f"Registered OAuth MCP tool '{tool.name}' from toolset '{ts.name}'")
-
-    def with_replaced_tools(
+    def with_oauth_tools(
         self,
-        replacements: Dict[str, List[Tool]],
+        oauth_tools: Dict[str, List[Tool]],
     ) -> "ToolExecutor":
-        """Create a shallow copy with placeholder OAuth tools replaced by real tools.
-
-        For each toolset_name in replacements, removes all existing tools belonging
-        to that toolset and adds the replacement tools instead.
+        """Create a copy with OAuth placeholder _connect tools replaced by real tools.
 
         The original ToolExecutor is NOT modified.
         """
+        toolsets_by_name = {ts.name: ts for ts in self.enabled_toolsets}
+
         new = object.__new__(ToolExecutor)
-        new.toolsets = list(self.toolsets)
-        new.enabled_toolsets = list(self.enabled_toolsets)
+        new.toolsets = self.toolsets
+        new.enabled_toolsets = self.enabled_toolsets
         new.tools_by_name = dict(self.tools_by_name)
         new._tool_to_toolset = dict(self._tool_to_toolset)
 
-        for toolset_name, new_tools in replacements.items():
-            # Find the toolset object
-            toolset = None
-            for ts in new.enabled_toolsets:
-                if ts.name == toolset_name:
-                    toolset = ts
-                    break
-            if toolset is None:
+        for toolset_name, new_tools in oauth_tools.items():
+            toolset = toolsets_by_name.get(toolset_name)
+            if not isinstance(toolset, RemoteMCPToolset):
                 continue
 
-            # Remove existing tools for this toolset (the placeholders)
-            to_remove = [
-                tool_name
-                for tool_name, ts in new._tool_to_toolset.items()
-                if ts.name == toolset_name
-            ]
-            for tool_name in to_remove:
-                new.tools_by_name.pop(tool_name, None)
-                new._tool_to_toolset.pop(tool_name, None)
+            # Remove the placeholder _connect tool
+            new.tools_by_name.pop(toolset.connect_tool_name, None)
+            new._tool_to_toolset.pop(toolset.connect_tool_name, None)
 
-            # Add replacement tools
+            # Add real tools
             for tool in new_tools:
-                if tool.icon_url is None and toolset.icon_url is not None:
-                    tool.icon_url = toolset.icon_url
                 new.tools_by_name[tool.name] = tool
                 new._tool_to_toolset[tool.name] = toolset
 

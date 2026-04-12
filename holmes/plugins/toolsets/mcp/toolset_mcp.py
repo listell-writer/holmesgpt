@@ -189,23 +189,23 @@ _mcp_tools_cache: Dict[str, _LoadedToolsEntry] = {}
 _mcp_tools_cache_lock = threading.Lock()
 
 
+def _get_oauth_mcp_toolsets(toolsets: List[Any]) -> List["RemoteMCPToolset"]:
+    """Return OAuth-enabled MCP toolsets from the given list."""
+    return [
+        ts for ts in toolsets
+        if isinstance(ts, RemoteMCPToolset)
+        and isinstance(ts._mcp_config, MCPConfig)
+        and ts._mcp_config.oauth
+        and ts._mcp_config.oauth.enabled
+    ]
+
+
 def has_oauth_mcp_toolsets(toolsets: List[Any]) -> bool:
-    """Quick check: are there any OAuth-enabled MCP toolsets?
-
-    Use this to skip the preload path entirely when no OAuth MCP servers are configured.
-    """
-    for ts in toolsets:
-        if (
-            isinstance(ts, RemoteMCPToolset)
-            and isinstance(ts._mcp_config, MCPConfig)
-            and ts._mcp_config.oauth
-            and ts._mcp_config.oauth.enabled
-        ):
-            return True
-    return False
+    """Quick check: are there any OAuth-enabled MCP toolsets?"""
+    return bool(_get_oauth_mcp_toolsets(toolsets))
 
 
-def preload_oauth_mcp_tools(
+def load_authenticated_oauth_tools(
     toolsets: List[Any],
     request_context: Optional[Dict[str, Any]],
 ) -> Dict[str, List[Any]]:
@@ -220,13 +220,7 @@ def preload_oauth_mcp_tools(
     result: Dict[str, List[Any]] = {}
     now = time.monotonic()
 
-    for ts in toolsets:
-        if not isinstance(ts, RemoteMCPToolset):
-            continue
-        if not isinstance(ts._mcp_config, MCPConfig):
-            continue
-        if not ts._mcp_config.oauth or not ts._mcp_config.oauth.enabled:
-            continue
+    for ts in _get_oauth_mcp_toolsets(toolsets):
 
         oauth_config = ts._mcp_config.oauth
         user_id = (request_context or {}).get("user_id", "__no_user__")
@@ -1076,6 +1070,11 @@ class RemoteMCPToolset(Toolset):
     tools: List[RemoteMCPTool] = Field(default_factory=list)  # type: ignore
     _mcp_config: Optional[Union[MCPConfig, StdioMCPConfig]] = None
 
+    @property
+    def connect_tool_name(self) -> str:
+        """The name of the OAuth placeholder tool for this MCP server."""
+        return f"{self.name}_connect"
+
     def _render_headers(
         self, request_context: Optional[Dict[str, Any]] = None
     ) -> Optional[Dict[str, str]]:
@@ -1264,7 +1263,7 @@ class RemoteMCPToolset(Toolset):
         # Register a placeholder tool that will trigger OAuth on first call.
         # After auth succeeds, _invoke will load the real tools dynamically.
         placeholder = MCP_Tool(
-            name=f"{self.name}_connect",
+            name=self.connect_tool_name,
             description=f"Connect to {self.name} (requires OAuth authentication). Call this tool to authenticate and discover available tools.",
             inputSchema={"type": "object", "properties": {}},
         )

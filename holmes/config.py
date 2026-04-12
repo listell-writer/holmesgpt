@@ -41,7 +41,7 @@ if TYPE_CHECKING:
 
 from holmes.core.config import config_path_dir
 from holmes.core.supabase_dal import SupabaseDal
-from holmes.plugins.toolsets.mcp.toolset_mcp import set_oauth_dal
+from holmes.plugins.toolsets.mcp.toolset_mcp import has_oauth_mcp_toolsets, set_oauth_dal
 from holmes.utils.definitions import RobustaConfig
 from holmes.utils.pydantic_utils import RobustaBaseConfig, load_model_from_file
 
@@ -111,6 +111,7 @@ class Config(RobustaBaseConfig):
 
     _server_tool_executor: Optional[ToolExecutor] = None
     _agui_tool_executor: Optional[ToolExecutor] = None
+    _has_oauth_toolsets: bool = False
 
     # TODO: Separate those fields to facade class, this shouldn't be part of the config.
     _toolset_manager: Optional[ToolsetManager] = PrivateAttr(None)
@@ -318,6 +319,7 @@ class Config(RobustaBaseConfig):
         toolsets = self.toolset_manager.list_server_toolsets(dal=dal)
 
         self._server_tool_executor = ToolExecutor(toolsets)
+        self._has_oauth_toolsets = has_oauth_mcp_toolsets(toolsets)
 
         logging.debug(
             f"Starting AI session with tools: {[tn for tn in self._server_tool_executor.tools_by_name.keys()]}"
@@ -341,6 +343,7 @@ class Config(RobustaBaseConfig):
 
         if changes:
             self._server_tool_executor = ToolExecutor(new_toolsets)
+            self._has_oauth_toolsets = has_oauth_mcp_toolsets(new_toolsets)
 
         return [(name, old.value, new.value) for name, old, new in changes]
 
