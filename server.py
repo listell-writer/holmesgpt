@@ -67,8 +67,7 @@ from holmes.checks.checks_api import init_checks_app
 from holmes.core.tools_utils.filesystem_result_storage import tool_result_storage
 from holmes.plugins.toolsets.mcp.toolset_mcp import (
     _token_manager,
-    has_oauth_mcp_toolsets,
-    preload_oauth_mcp_tools,
+    load_authenticated_oauth_tools,
 )
 from holmes.utils.stream import stream_chat_formatter
 
@@ -397,21 +396,13 @@ def chat(chat_request: ChatRequest, http_request: Request):
         storage = tool_result_storage()
         tool_results_dir = storage.__enter__()
 
-        # Preload real MCP tools for users with existing OAuth tokens,
-        # creating a per-request executor copy (shared executor is untouched).
-        # Skipped entirely when there are no OAuth MCP toolsets or no user_id.
         tool_executor = None
-        if chat_request.user_id:
+        if chat_request.user_id and config._has_oauth_toolsets:
             base_executor = config.create_tool_executor(dal)
-            if has_oauth_mcp_toolsets(base_executor.toolsets):
-                logging.info("Preloading OAuth MCP tools for user %s", chat_request.user_id)
-                oauth_tools = preload_oauth_mcp_tools(base_executor.toolsets, request_context)
-                if oauth_tools:
-                    tool_executor = base_executor.with_replaced_tools(oauth_tools)
-                    logging.info(
-                        "Augmented tool executor with OAuth tools for user %s: %s",
-                        chat_request.user_id, list(oauth_tools.keys()),
-                    )
+            # loads tools by user who authenticated
+            authenticated_tools = load_authenticated_oauth_tools(base_executor.toolsets, request_context)
+            if authenticated_tools:
+                tool_executor = base_executor.with_oauth_tools(authenticated_tools)
 
         ai = config.create_toolcalling_llm(
             dal=dal, model=chat_request.model, tool_results_dir=tool_results_dir,

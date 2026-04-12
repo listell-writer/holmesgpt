@@ -52,8 +52,7 @@ from holmes.plugins.toolsets.mcp.toolset_mcp import (
     _pending_exchanges,
     _token_manager,
     exchange_code_for_token,
-    has_oauth_mcp_toolsets,
-    preload_oauth_mcp_tools,
+    load_authenticated_oauth_tools,
 )
 
 
@@ -1312,11 +1311,13 @@ class TestToolExecutorDynamicTools:
 
         return FakeTool(name=name, description=description, parameters={})
 
-    def _make_toolset(self, name: str, tools: list):
-        class FakeToolset(Toolset):
-            model_config = ConfigDict(extra="forbid")
-
-        ts = FakeToolset(name=name, description="test", enabled=True, tools=tools, tags=[ToolsetTag.CORE])
+    def _make_toolset(self, name: str, tools: list, mcp: bool = False):
+        if mcp:
+            ts = RemoteMCPToolset(name=name, description="test", enabled=True, tools=tools, tags=[ToolsetTag.CORE])
+        else:
+            class FakeToolset(Toolset):
+                model_config = ConfigDict(extra="forbid")
+            ts = FakeToolset(name=name, description="test", enabled=True, tools=tools, tags=[ToolsetTag.CORE])
         ts.status = ToolsetStatusEnum.ENABLED
         return ts
 
@@ -1327,60 +1328,48 @@ class TestToolExecutorDynamicTools:
 
         assert executor.get_tool_by_name("nonexistent") is None
 
-    def test_dynamic_tool_registration(self):
-        tool1 = self._make_tool("initial_tool")
-        ts = self._make_toolset("dynamic-ts", [tool1])
+    def test_with_oauth_tools_replaces_placeholder(self):
+        ts = self._make_toolset("my-mcp", [], mcp=True)
+        placeholder = self._make_tool(ts.connect_tool_name)
+        ts.tools = [placeholder]
         executor = ToolExecutor([ts])
 
-        assert executor.get_tool_by_name("initial_tool") is tool1
-        assert executor.get_tool_by_name("new_tool") is None
-
-        tool2 = self._make_tool("new_tool")
-        ts.tools.append(tool2)
-
-        found = executor.get_tool_by_name("new_tool")
-        assert found is tool2
-
-    def test_with_replaced_tools_replaces_placeholder(self):
-        placeholder = self._make_tool("my_mcp_connect")
-        ts = self._make_toolset("my-mcp", [placeholder])
-        executor = ToolExecutor([ts])
-
-        assert "my_mcp_connect" in executor.tools_by_name
+        assert ts.connect_tool_name in executor.tools_by_name
 
         real_tool_a = self._make_tool("real_tool_a")
         real_tool_b = self._make_tool("real_tool_b")
-        augmented = executor.with_replaced_tools({"my-mcp": [real_tool_a, real_tool_b]})
+        augmented = executor.with_oauth_tools({"my-mcp": [real_tool_a, real_tool_b]})
 
         # Augmented has real tools, no placeholder
-        assert "my_mcp_connect" not in augmented.tools_by_name
+        assert ts.connect_tool_name not in augmented.tools_by_name
         assert "real_tool_a" in augmented.tools_by_name
         assert "real_tool_b" in augmented.tools_by_name
 
         # Original is untouched
-        assert "my_mcp_connect" in executor.tools_by_name
+        assert ts.connect_tool_name in executor.tools_by_name
         assert "real_tool_a" not in executor.tools_by_name
 
-    def test_with_replaced_tools_preserves_other_toolsets(self):
-        placeholder = self._make_tool("mcp_connect")
-        mcp_ts = self._make_toolset("my-mcp", [placeholder])
+    def test_with_oauth_tools_preserves_other_toolsets(self):
+        mcp_ts = self._make_toolset("my-mcp", [], mcp=True)
+        placeholder = self._make_tool(mcp_ts.connect_tool_name)
+        mcp_ts.tools = [placeholder]
         other_tool = self._make_tool("kubectl_get")
         other_ts = self._make_toolset("kubernetes", [other_tool])
         executor = ToolExecutor([mcp_ts, other_ts])
 
         real_tool = self._make_tool("real_tool")
-        augmented = executor.with_replaced_tools({"my-mcp": [real_tool]})
+        augmented = executor.with_oauth_tools({"my-mcp": [real_tool]})
 
         # Other toolset tools are preserved
         assert "kubectl_get" in augmented.tools_by_name
         assert augmented.tools_by_name["kubectl_get"] is other_tool
 
-    def test_with_replaced_tools_unknown_toolset_is_noop(self):
+    def test_with_oauth_tools_unknown_toolset_is_noop(self):
         tool = self._make_tool("some_tool")
         ts = self._make_toolset("my-ts", [tool])
         executor = ToolExecutor([ts])
 
-        augmented = executor.with_replaced_tools({"nonexistent": [self._make_tool("x")]})
+        augmented = executor.with_oauth_tools({"nonexistent": [self._make_tool("x")]})
 
         # Nothing changed
         assert "some_tool" in augmented.tools_by_name
@@ -1388,10 +1377,10 @@ class TestToolExecutorDynamicTools:
 
 
 # ---------------------------------------------------------------------------
-# preload_oauth_mcp_tools — tool preloading for OAuth MCP servers
+# load_authenticated_oauth_tools — tool preloading for OAuth MCP servers
 # ---------------------------------------------------------------------------
 class TestPreloadOAuthMCPTools:
-    """Tests for preload_oauth_mcp_tools()."""
+    """Tests for load_authenticated_oauth_tools()."""
 
     def _make_oauth_toolset(self, name: str = "test-mcp"):
         """Create a minimal RemoteMCPToolset with OAuth enabled."""
@@ -1433,7 +1422,7 @@ class TestPreloadOAuthMCPTools:
         with patch("holmes.plugins.toolsets.mcp.toolset_mcp.asyncio") as mock_asyncio:
             mock_asyncio.run.return_value = mock_tools_result
             request_context = {"user_id": "user-1", "headers": {}}
-            result = preload_oauth_mcp_tools([ts], request_context)
+            result = load_authenticated_oauth_tools([ts], request_context)
 
         assert "test-mcp" in result
         assert len(result["test-mcp"]) == 2
@@ -1449,7 +1438,7 @@ class TestPreloadOAuthMCPTools:
 
         ts = self._make_oauth_toolset()
         request_context = {"user_id": "user-2", "headers": {}}
-        result = preload_oauth_mcp_tools([ts], request_context)
+        result = load_authenticated_oauth_tools([ts], request_context)
 
         assert result == {}
 
@@ -1462,7 +1451,7 @@ class TestPreloadOAuthMCPTools:
         with patch("holmes.plugins.toolsets.mcp.toolset_mcp.asyncio") as mock_asyncio:
             mock_asyncio.run.side_effect = ConnectionError("MCP server unreachable")
             request_context = {"user_id": "user-3", "headers": {}}
-            result = preload_oauth_mcp_tools([ts], request_context)
+            result = load_authenticated_oauth_tools([ts], request_context)
 
         # Should return empty, not raise
         assert result == {}
@@ -1484,7 +1473,7 @@ class TestPreloadOAuthMCPTools:
 
         try:
             request_context = {"user_id": "user-4", "headers": {}}
-            result = preload_oauth_mcp_tools([ts], request_context)
+            result = load_authenticated_oauth_tools([ts], request_context)
 
             # Should return cached tools without calling the MCP server
             assert "test-mcp" in result
@@ -1499,7 +1488,7 @@ class TestPreloadOAuthMCPTools:
         ts._mcp_config = MagicMock(spec=MCPConfig)
         ts._mcp_config.oauth = None
 
-        result = preload_oauth_mcp_tools([ts], {"user_id": "user-5"})
+        result = load_authenticated_oauth_tools([ts], {"user_id": "user-5"})
         assert result == {}
 
 
