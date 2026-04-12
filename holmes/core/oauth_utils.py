@@ -71,15 +71,31 @@ def exchange_code_for_tokens(
     }
     if code_verifier:
         data["code_verifier"] = code_verifier
+
+    # Some IdPs (e.g. Notion) require client credentials via HTTP Basic Auth,
+    # while others (e.g. Supabase) accept them in the POST body.
+    # Try Basic Auth first when client_secret is present, fall back to POST body.
+    auth = None
     if client_secret:
-        data["client_secret"] = client_secret
+        auth = httpx.BasicAuth(client_id, client_secret)
 
     resp = httpx.post(
         token_url,
         data=data,
         headers={"Content-Type": "application/x-www-form-urlencoded"},
+        auth=auth,
         timeout=30,
     )
+
+    # If Basic Auth failed, retry with client_secret in POST body
+    if client_secret and not resp.is_success:
+        data["client_secret"] = client_secret
+        resp = httpx.post(
+            token_url,
+            data=data,
+            headers={"Content-Type": "application/x-www-form-urlencoded"},
+            timeout=30,
+        )
 
     if not resp.is_success:
         detail = resp.text[:300] if resp.text else "Unknown error"
