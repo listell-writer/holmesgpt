@@ -1,15 +1,33 @@
 """Tests for MCP OAuth authorization_code support."""
 
+import asyncio
 import json
+import secrets
 import threading
 import time
+import urllib.request
+import webbrowser
+from http.server import BaseHTTPRequestHandler, HTTPServer
 from pathlib import Path
 from unittest.mock import MagicMock, patch
+from urllib.parse import parse_qs, urlencode, urlparse
 
 import httpx
 import pytest
+from mcp.client.session import ClientSession
+from mcp.client.streamable_http import streamablehttp_client
 from pydantic import ConfigDict
 
+from holmes.core.tools import (
+    StructuredToolResult,
+    Tool,
+    ToolInvokeContext,
+    Toolset,
+    ToolsetStatusEnum,
+    ToolsetTag,
+)
+from holmes.core.tools_utils.tool_executor import ToolExecutor
+from holmes.plugins.toolsets.mcp.oauth_token_manager import OAuthTokenManager
 from holmes.plugins.toolsets.mcp.toolset_mcp import (
     DiskTokenStore,
     MCPConfig,
@@ -19,21 +37,26 @@ from holmes.plugins.toolsets.mcp.toolset_mcp import (
     RemoteMCPTool,
     RemoteMCPToolset,
     _CachedToken,
+    _LoadedToolsEntry,
     _cli_oauth_flow,
-    _encrypt_token_for_db,
     _decrypt_token_from_db,
+    _encrypt_token_for_db,
+    _exchanges_lock,
     _generate_pkce,
     _get_conversation_key,
     _get_oauth_cache_key,
     _get_user_id,
     _inject_oauth_token,
+    _mcp_tools_cache,
+    _mcp_tools_cache_lock,
     _oauth_token_cache,
-    _pending_exchanges,
-    _exchanges_lock,
     _PendingOAuthExchange,
+    _pending_exchanges,
     _token_manager,
     _try_refresh_token,
     exchange_code_for_token,
+    has_oauth_mcp_toolsets,
+    preload_oauth_mcp_tools,
 )
 
 # Backwards-compat alias used by some test references
@@ -376,13 +399,14 @@ class TestOAuthCacheKeySharedIdP:
         assert _oauth_token_cache.get(cache_key2) == "shared-token-xyz"
 
 
+@pytest.mark.manual
 class TestLiveAtlassianOAuthDiscovery:
     """Live tests against Atlassian's MCP server OAuth discovery.
 
     These tests hit real Atlassian endpoints to verify our discovery logic
     matches what the MCP SDK does. No authentication is needed — only discovery.
 
-    Run with: poetry run pytest tests/test_mcp_oauth.py -k "LiveAtlassian" -v --no-cov
+    Run manually: poetry run pytest tests/test_mcp_oauth.py -k "LiveAtlassian" -m manual -v --no-cov
     """
 
     ATLASSIAN_MCP_URL = "https://mcp.atlassian.com/v1/mcp"
@@ -483,10 +507,6 @@ class TestLiveAtlassianOAuthDiscovery:
 
         Run with: poetry run pytest tests/test_mcp_oauth.py -k "test_full_oauth_flow_with_browser" -v --no-cov -s
         """
-        import webbrowser
-        from http.server import HTTPServer, BaseHTTPRequestHandler
-        from urllib.parse import urlparse, parse_qs, urlencode
-
         # Step 1: Discover OAuth endpoints
         toolset = RemoteMCPToolset(name="atlassian-live", enabled=True)
         toolset._mcp_config = MCPConfig(
@@ -559,7 +579,6 @@ class TestLiveAtlassianOAuthDiscovery:
                 print(f"  Re-registered client_id={oauth.client_id} with redirect_uri={redirect_uri}")
 
         # Step 4: Build authorization URL and open browser
-        import secrets
         state = secrets.token_urlsafe(32)
         auth_params = {
             "response_type": "code",
@@ -608,10 +627,6 @@ class TestLiveAtlassianOAuthDiscovery:
         print(f"  Has refresh_token: {'refresh_token' in token_data}")
 
         # Step 7: Use token to list MCP tools
-        import asyncio
-        from mcp.client.streamable_http import streamablehttp_client
-        from mcp.client.session import ClientSession
-
         async def list_tools():
             headers = {"Authorization": f"Bearer {token_data['access_token']}"}
             async with streamablehttp_client(self.ATLASSIAN_MCP_URL, headers=headers) as (read, write, _):
@@ -644,10 +659,6 @@ class TestCLIOAuthFlow:
 
     def test_cli_flow_full_roundtrip(self):
         """Mock browser + callback: DCR → auth URL → callback with code → token exchange."""
-        import threading
-        from http.server import HTTPServer, BaseHTTPRequestHandler
-        from urllib.parse import urlparse, parse_qs
-
         oauth = self._make_oauth_config()
 
         # Mock httpx.post for the token exchange
@@ -681,9 +692,7 @@ class TestCLIOAuthFlow:
 
             # Simulate IdP redirecting back with an auth code
             def send_callback():
-                import time as _time
-                _time.sleep(0.3)  # Give server time to start
-                import urllib.request
+                time.sleep(0.3)  # Give server time to start
                 callback_url = f"http://127.0.0.1:{port}/callback?code=mock-auth-code-999&state={state}"
                 try:
                     urllib.request.urlopen(callback_url, timeout=5)
@@ -704,8 +713,6 @@ class TestCLIOAuthFlow:
 
     def test_cli_flow_with_dcr(self):
         """CLI flow performs DCR when client_id is None."""
-        import threading
-        from urllib.parse import urlparse, parse_qs
 
         oauth = self._make_oauth_config(client_id=None, registration_endpoint="http://idp.test/register")
 
@@ -730,9 +737,7 @@ class TestCLIOAuthFlow:
             port = urlparse(redirect_uri).port
 
             def send_callback():
-                import time as _time
-                _time.sleep(0.3)
-                import urllib.request
+                time.sleep(0.3)
                 try:
                     urllib.request.urlopen(f"http://127.0.0.1:{port}/callback?code=dcr-code&state={state}", timeout=5)
                 except Exception:
@@ -750,8 +755,6 @@ class TestCLIOAuthFlow:
 
     def test_cli_flow_dcr_cache_key_consistency(self):
         """After DCR changes client_id, cache key should use the new client_id."""
-        import threading
-        from urllib.parse import urlparse, parse_qs
 
         oauth = self._make_oauth_config(client_id=None, registration_endpoint="http://idp.test/register")
         ctx = {"headers": {"X-Conversation-Id": "cli-conv"}}
@@ -777,9 +780,7 @@ class TestCLIOAuthFlow:
             port = urlparse(params["redirect_uri"][0]).port
 
             def send_callback():
-                import time as _time
-                _time.sleep(0.3)
-                import urllib.request
+                time.sleep(0.3)
                 try:
                     urllib.request.urlopen(f"http://127.0.0.1:{port}/callback?code=c&state={state}", timeout=5)
                 except Exception:
@@ -817,8 +818,6 @@ class TestCLIOAuthFlow:
 
     def test_cli_flow_token_exchange_failure(self):
         """CLI flow returns None when token exchange fails."""
-        import threading
-        from urllib.parse import urlparse, parse_qs
 
         oauth = self._make_oauth_config()
 
@@ -835,9 +834,7 @@ class TestCLIOAuthFlow:
             port = urlparse(params["redirect_uri"][0]).port
 
             def send_callback():
-                import time as _time
-                _time.sleep(0.3)
-                import urllib.request
+                time.sleep(0.3)
                 try:
                     urllib.request.urlopen(f"http://127.0.0.1:{port}/callback?code=bad&state={state}", timeout=5)
                 except Exception:
@@ -1027,7 +1024,6 @@ class TestDiskTokenStore:
 # ---------------------------------------------------------------------------
 class TestDBTokenEncryption:
     def test_roundtrip(self):
-        from holmes.plugins.toolsets.mcp.oauth_token_manager import OAuthTokenManager
         manager = OAuthTokenManager()
         manager.set_signing_key_getter(lambda: "test-signing-key-for-encryption")
 
@@ -1041,7 +1037,6 @@ class TestDBTokenEncryption:
         manager.shutdown()
 
     def test_wrong_signing_key_returns_none(self):
-        from holmes.plugins.toolsets.mcp.oauth_token_manager import OAuthTokenManager
         manager1 = OAuthTokenManager()
         manager1.set_signing_key_getter(lambda: "correct-key")
         token_data = {"access_token": "secret"}
@@ -1055,7 +1050,6 @@ class TestDBTokenEncryption:
         manager2.shutdown()
 
     def test_garbage_input_returns_none(self):
-        from holmes.plugins.toolsets.mcp.oauth_token_manager import OAuthTokenManager
         manager = OAuthTokenManager()
         manager.set_signing_key_getter(lambda: "some-key")
         result = manager._decrypt_token("not-valid-fernet-ciphertext")
@@ -1387,8 +1381,6 @@ class TestToolExecutorDynamicTools:
     """Tests for ToolExecutor._sync_dynamic_tools and prefix-stripping lookup."""
 
     def _make_tool(self, name: str, description: str = "test tool"):
-        from holmes.core.tools import Tool, ToolInvokeContext, StructuredToolResult
-
         class FakeTool(Tool):
             def _invoke(self, params: dict, context: ToolInvokeContext) -> StructuredToolResult:
                 return StructuredToolResult(status="success", data="ok", params=params, invocation=self.name)
@@ -1399,8 +1391,6 @@ class TestToolExecutorDynamicTools:
         return FakeTool(name=name, description=description, parameters={})
 
     def _make_toolset(self, name: str, tools: list):
-        from holmes.core.tools import Toolset, ToolsetStatusEnum, ToolsetTag
-
         class FakeToolset(Toolset):
             model_config = ConfigDict(extra="forbid")
 
@@ -1409,8 +1399,6 @@ class TestToolExecutorDynamicTools:
         return ts
 
     def test_prefix_stripping(self):
-        from holmes.core.tools_utils.tool_executor import ToolExecutor
-
         tool = self._make_tool("add_numbers")
         ts = self._make_toolset("my-mcp", [tool])
         executor = ToolExecutor([ts])
@@ -1420,8 +1408,6 @@ class TestToolExecutorDynamicTools:
         assert found is tool
 
     def test_unknown_tool_returns_none(self):
-        from holmes.core.tools_utils.tool_executor import ToolExecutor
-
         tool = self._make_tool("some_tool")
         ts = self._make_toolset("ts", [tool])
         executor = ToolExecutor([ts])
@@ -1429,8 +1415,6 @@ class TestToolExecutorDynamicTools:
         assert executor.get_tool_by_name("nonexistent") is None
 
     def test_dynamic_tool_registration(self):
-        from holmes.core.tools_utils.tool_executor import ToolExecutor
-
         tool1 = self._make_tool("initial_tool")
         ts = self._make_toolset("dynamic-ts", [tool1])
         executor = ToolExecutor([ts])
@@ -1445,8 +1429,6 @@ class TestToolExecutorDynamicTools:
         assert found is tool2
 
     def test_with_replaced_tools_replaces_placeholder(self):
-        from holmes.core.tools_utils.tool_executor import ToolExecutor
-
         placeholder = self._make_tool("my_mcp_connect")
         ts = self._make_toolset("my-mcp", [placeholder])
         executor = ToolExecutor([ts])
@@ -1467,8 +1449,6 @@ class TestToolExecutorDynamicTools:
         assert "real_tool_a" not in executor.tools_by_name
 
     def test_with_replaced_tools_preserves_other_toolsets(self):
-        from holmes.core.tools_utils.tool_executor import ToolExecutor
-
         placeholder = self._make_tool("mcp_connect")
         mcp_ts = self._make_toolset("my-mcp", [placeholder])
         other_tool = self._make_tool("kubectl_get")
@@ -1483,8 +1463,6 @@ class TestToolExecutorDynamicTools:
         assert augmented.tools_by_name["kubectl_get"] is other_tool
 
     def test_with_replaced_tools_unknown_toolset_is_noop(self):
-        from holmes.core.tools_utils.tool_executor import ToolExecutor
-
         tool = self._make_tool("some_tool")
         ts = self._make_toolset("my-ts", [tool])
         executor = ToolExecutor([ts])
@@ -1526,12 +1504,6 @@ class TestPreloadOAuthMCPTools:
 
     @patch("holmes.plugins.toolsets.mcp.toolset_mcp._token_manager")
     def test_preload_with_cached_token(self, mock_manager):
-        from holmes.plugins.toolsets.mcp.toolset_mcp import (
-            _mcp_tools_cache,
-            _mcp_tools_cache_lock,
-            preload_oauth_mcp_tools,
-        )
-
         mock_manager.has_token.return_value = True
 
         ts = self._make_oauth_toolset()
@@ -1559,8 +1531,6 @@ class TestPreloadOAuthMCPTools:
 
     @patch("holmes.plugins.toolsets.mcp.toolset_mcp._token_manager")
     def test_preload_no_token(self, mock_manager):
-        from holmes.plugins.toolsets.mcp.toolset_mcp import preload_oauth_mcp_tools
-
         mock_manager.has_token.return_value = False
         mock_manager.get_access_token.return_value = None
 
@@ -1572,8 +1542,6 @@ class TestPreloadOAuthMCPTools:
 
     @patch("holmes.plugins.toolsets.mcp.toolset_mcp._token_manager")
     def test_preload_server_error_graceful_fallback(self, mock_manager):
-        from holmes.plugins.toolsets.mcp.toolset_mcp import preload_oauth_mcp_tools
-
         mock_manager.has_token.return_value = True
 
         ts = self._make_oauth_toolset()
@@ -1588,13 +1556,6 @@ class TestPreloadOAuthMCPTools:
 
     @patch("holmes.plugins.toolsets.mcp.toolset_mcp._token_manager")
     def test_preload_uses_ttl_cache(self, mock_manager):
-        from holmes.plugins.toolsets.mcp.toolset_mcp import (
-            _LoadedToolsEntry,
-            _mcp_tools_cache,
-            _mcp_tools_cache_lock,
-            preload_oauth_mcp_tools,
-        )
-
         mock_manager.has_token.return_value = True
 
         ts = self._make_oauth_toolset()
@@ -1620,8 +1581,6 @@ class TestPreloadOAuthMCPTools:
                 _mcp_tools_cache.pop("user-4:test-mcp", None)
 
     def test_preload_skips_non_oauth_toolsets(self):
-        from holmes.plugins.toolsets.mcp.toolset_mcp import preload_oauth_mcp_tools
-
         ts = MagicMock(spec=RemoteMCPToolset)
         ts.name = "plain-mcp"
         ts._mcp_config = MagicMock(spec=MCPConfig)

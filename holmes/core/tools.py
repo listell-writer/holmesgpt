@@ -1116,6 +1116,7 @@ class ToolsetDBModel(BaseModel):
     description: Optional[str] = None
     docs_url: Optional[str] = None
     installation_instructions: Optional[str] = None
+    meta: Optional[dict] = None
     updated_at: str = Field(default_factory=datetime.now().isoformat)
 
 

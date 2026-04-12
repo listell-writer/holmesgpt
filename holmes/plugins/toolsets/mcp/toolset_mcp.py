@@ -4,12 +4,19 @@ import hashlib
 import json
 import logging
 import os
+import re
+import secrets
+import socket
 import threading
 import time
+import webbrowser
+import yaml as _yaml
 from contextlib import asynccontextmanager
 from dataclasses import dataclass, field
 from enum import Enum
+from http.server import BaseHTTPRequestHandler, HTTPServer
 from typing import Any, ClassVar, Dict, List, Optional, TextIO, Tuple, Type, Union
+from urllib.parse import parse_qs, urlencode, urlparse
 
 import httpx
 from mcp.client.session import ClientSession
@@ -20,6 +27,7 @@ from mcp.types import Tool as MCP_Tool
 from pydantic import AnyUrl, BaseModel, Field, model_validator
 
 from holmes.common.env_vars import SSE_READ_TIMEOUT
+from holmes.core.oauth_utils import OAuthTokenExchangeError, exchange_code_for_tokens
 from holmes.core.config import config_path_dir
 from holmes.core.tools import (
     ApprovalRequirement,
@@ -37,6 +45,7 @@ from holmes.plugins.toolsets.mcp.oauth_token_store import (
     OAuthTokenCache,
     _CachedToken,
 )
+from holmes.utils.definitions import RobustaConfig
 from holmes.utils.header_rendering import render_header_templates
 from holmes.utils.pydantic_utils import ToolsetConfig
 
@@ -129,14 +138,10 @@ class MCPOAuthConfig(BaseModel):
 
 def _get_signing_key() -> Optional[str]:
     """Load the signing_key from Robusta's global_config. Returns None in CLI mode."""
-    from holmes.utils.definitions import RobustaConfig
-
     config_file_path = os.environ.get("RUNNER_CONFIG_PATH", "/etc/robusta/config/active_playbooks.yaml")
     if not os.path.exists(config_file_path):
         return None
     try:
-        import yaml as _yaml
-
         with open(config_file_path) as f:
             yaml_content = _yaml.safe_load(f)
             config = RobustaConfig(**yaml_content)
@@ -152,9 +157,6 @@ def _generate_pkce() -> Tuple[str, str]:
 
     Returns (code_verifier, code_challenge).
     """
-    import hashlib
-    import secrets
-
     code_verifier = secrets.token_urlsafe(64)[:128]
     digest = hashlib.sha256(code_verifier.encode("ascii")).digest()
     code_challenge = base64.urlsafe_b64encode(digest).rstrip(b"=").decode("ascii")
@@ -287,12 +289,6 @@ def _cli_oauth_flow(oauth_config: MCPOAuthConfig, server_name: str) -> Optional[
     server to receive the callback, exchanges the auth code for a token.
     Returns the token data dict or None on failure.
     """
-    import secrets
-    import socket
-    import webbrowser
-    from http.server import BaseHTTPRequestHandler, HTTPServer
-    from urllib.parse import parse_qs, urlencode, urlparse
-
     if not oauth_config.authorization_url or not oauth_config.token_url:
         logger.warning("CLI OAuth %s: missing authorization_url or token_url", server_name)
         return None
@@ -420,25 +416,16 @@ def _cli_oauth_flow(oauth_config: MCPOAuthConfig, server_name: str) -> Optional[
             return None
 
         # Exchange code for token
-        token_response = httpx.post(
-            oauth_config.token_url,
-            data={
-                "grant_type": "authorization_code",
-                "code": result["code"],
-                "client_id": oauth_config.client_id,
-                "code_verifier": code_verifier,
-                "redirect_uri": redirect_uri,
-            },
-            headers={"Content-Type": "application/x-www-form-urlencoded"},
-            timeout=30,
-        )
-        if token_response.status_code != 200:
-            logger.warning("CLI OAuth %s: token exchange failed HTTP %d: %s", server_name, token_response.status_code, token_response.text[:300])
-            return None
-
-        token_data = token_response.json()
-        if "access_token" not in token_data:
-            logger.warning("CLI OAuth %s: no access_token in response", server_name)
+        try:
+            token_data = exchange_code_for_tokens(
+                token_url=oauth_config.token_url,
+                code=result["code"],
+                redirect_uri=redirect_uri,
+                client_id=oauth_config.client_id,
+                code_verifier=code_verifier,
+            )
+        except OAuthTokenExchangeError as e:
+            logger.warning("CLI OAuth %s: token exchange failed: %s", server_name, e)
             return None
 
         # Add expires_at for disk storage
@@ -659,30 +646,13 @@ def exchange_code_for_token(tool_call_id: str, payload_json: str, request_contex
         logger.warning("OAuth: exchanging code at token endpoint %s (client_id=%s)", pending.oauth_config.token_url, client_id)
 
         # Exchange auth code for access token at the IdP's token endpoint (server-side)
-        token_response = httpx.post(
-            pending.oauth_config.token_url,
-            data={
-                "grant_type": "authorization_code",
-                "code": auth_code,
-                "client_id": client_id,
-                "code_verifier": pending.code_verifier,
-                "redirect_uri": redirect_uri,
-            },
-            headers={"Content-Type": "application/x-www-form-urlencoded"},
-            timeout=30,
+        token_data = exchange_code_for_tokens(
+            token_url=pending.oauth_config.token_url,
+            code=auth_code,
+            redirect_uri=redirect_uri,
+            client_id=client_id,
+            code_verifier=pending.code_verifier,
         )
-        if token_response.status_code != 200:
-            logger.error(
-                "OAuth token exchange failed: HTTP %d from %s — response: %s",
-                token_response.status_code, pending.oauth_config.token_url, token_response.text[:500],
-            )
-            token_response.raise_for_status()
-
-        token_data = token_response.json()
-        access_token = token_data.get("access_token")
-        if not access_token:
-            logger.error("OAuth token exchange: response missing 'access_token' field. Keys: %s", list(token_data.keys()))
-            return
 
         # Store token via manager (cache + DB + schedule background refresh)
         _token_manager.store_token(pending.oauth_config, token_data, request_context)
@@ -692,8 +662,8 @@ def exchange_code_for_token(tool_call_id: str, payload_json: str, request_contex
         )
     except json.JSONDecodeError:
         logger.exception("OAuth token exchange: failed to parse JSON response from %s", pending.oauth_config.token_url)
-    except httpx.HTTPStatusError:
-        pass  # Already logged above
+    except OAuthTokenExchangeError:
+        logger.exception("OAuth token exchange failed at %s", pending.oauth_config.token_url)
     except Exception:
         logger.exception("OAuth token exchange failed (tool_call_id=%s, token_url=%s)", tool_call_id, pending.oauth_config.token_url)
 
@@ -1331,7 +1301,6 @@ class RemoteMCPToolset(Toolset):
 
         # Register a placeholder tool that will trigger OAuth on first call.
         # After auth succeeds, _invoke will load the real tools dynamically.
-        from mcp.types import Tool as MCP_Tool
         placeholder = MCP_Tool(
             name=f"{self.name}_connect",
             description=f"Connect to {self.name} (requires OAuth authentication). Call this tool to authenticate and discover available tools.",
@@ -1352,9 +1321,6 @@ class RemoteMCPToolset(Toolset):
 
         Returns True if discovery succeeded and oauth config is fully populated.
         """
-        import re
-        from urllib.parse import urlparse
-
         assert isinstance(self._mcp_config, MCPConfig) and self._mcp_config.oauth is not None
         oauth_config = self._mcp_config.oauth
         verify_ssl = self._mcp_config.verify_ssl
