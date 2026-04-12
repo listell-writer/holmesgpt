@@ -68,8 +68,16 @@ class ToolExecutor:
         if name in self.tools_by_name:
             return self.tools_by_name[name]
 
-        # LLMs sometimes prefix tool names with the toolset name (e.g. "my-mcp_add_numbers"
-        # instead of "add_numbers"). Try stripping known toolset prefixes.
+        stripped = self._try_strip_toolset_prefix(name)
+        if stripped:
+            return stripped
+
+        logging.warning(f"could not find tool {name}. skipping")
+        return None
+
+    def _try_strip_toolset_prefix(self, name: str) -> Optional[Tool]:
+        """LLMs sometimes prefix tool names with the toolset name (e.g. "my-mcp_add_numbers"
+        instead of "add_numbers"). Try stripping known toolset prefixes."""
         for ts_name in self._toolset_names:
             prefix = f"{ts_name}_"
             if name.startswith(prefix):
@@ -77,8 +85,6 @@ class ToolExecutor:
                 if stripped in self.tools_by_name:
                     logging.warning(f"Tool '{name}' not found, matched '{stripped}' after stripping prefix '{ts_name}_'")
                     return self.tools_by_name[stripped]
-
-        logging.warning(f"could not find tool {name}. skipping")
         return None
 
     def get_toolset_name(self, tool_name: str) -> Optional[str]:

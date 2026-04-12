@@ -19,7 +19,12 @@ from typing import List, Optional
 
 import colorlog
 import litellm
-from holmes.core.oauth_utils import OAuthTokenExchangeError, exchange_code_for_tokens
+from holmes.core.oauth_utils import (
+    OAuthConfigLookupError,
+    OAuthTokenExchangeError,
+    get_toolset_oauth_config,
+    process_oauth_callback,
+)
 import sentry_sdk
 import uvicorn
 from fastapi import FastAPI, HTTPException, Request
@@ -50,7 +55,6 @@ from holmes.core.models import (
     FollowUpAction,
     OAuthCallbackRequest,
     OAuthCallbackResponse,
-    StoreOAuthTokenRequest,
 )
 from holmes.core.prompt import PromptComponent
 from holmes.core.tools import ToolsetStatusEnum, ToolsetType
@@ -274,66 +278,18 @@ if LOG_PERFORMANCE:
 init_checks_app(app, config)
 
 
-def _get_toolset_oauth_config(toolset_name: str, client_id_override: Optional[str] = None):
-    """Look up a toolset's OAuth config from the in-memory tool executor.
-
-    Returns (oauth_config, client_id) or raises HTTPException.
-    """
-    tool_executor = config.create_tool_executor(dal=dal)
-    toolset = None
-    for ts in tool_executor.toolsets:
-        if ts.name == toolset_name:
-            toolset = ts
-            break
-
-    if not toolset:
-        raise HTTPException(status_code=404, detail=f"Toolset '{toolset_name}' not found")
-
-    mcp_config = getattr(toolset, "_mcp_config", None)
-    oauth = getattr(mcp_config, "oauth", None) if mcp_config else None
-    if not oauth or not oauth.enabled:
-        raise HTTPException(status_code=400, detail=f"Toolset '{toolset_name}' does not have OAuth enabled")
-
-    if not oauth.token_url:
-        raise HTTPException(status_code=400, detail=f"OAuth config for '{toolset_name}' missing token_url")
-
-    client_id = client_id_override or oauth.client_id
-    if not client_id:
-        raise HTTPException(status_code=400, detail=f"No client_id available for '{toolset_name}'")
-
-    return oauth, client_id, _token_manager
-
-
-def process_oauth_callback(request: OAuthCallbackRequest) -> OAuthCallbackResponse:
-    """Process an OAuth callback: exchange code for tokens and store via OAuthTokenManager."""
+@app.post("/api/oauth/callback")
+def oauth_callback(request: OAuthCallbackRequest) -> OAuthCallbackResponse:
     try:
-        oauth, client_id, token_manager = _get_toolset_oauth_config(request.toolset_name, request.client_id)
-
-        token_data = exchange_code_for_tokens(
-            token_url=oauth.token_url,
-            code=request.code,
-            redirect_uri=request.redirect_uri,
-            client_id=client_id,
-            code_verifier=request.code_verifier,
-        )
-
-        token_manager.store_token(oauth, token_data)
-
-        logging.info(f"OAuth tokens stored for toolset '{request.toolset_name}'")
-        return OAuthCallbackResponse(success=True)
-
-    except HTTPException:
-        raise
+        toolsets = config.create_tool_executor(dal=dal).toolsets
+        return process_oauth_callback(request, toolsets, _token_manager)
+    except OAuthConfigLookupError as e:
+        raise HTTPException(status_code=400, detail=e.detail)
     except OAuthTokenExchangeError as e:
         raise HTTPException(status_code=502, detail=str(e))
     except Exception as e:
         logging.error(f"OAuth callback failed for '{request.toolset_name}': {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=str(e))
-
-
-@app.post("/api/oauth/callback")
-def oauth_callback(request: OAuthCallbackRequest) -> OAuthCallbackResponse:
-    return process_oauth_callback(request)
 
 
 def already_answered(conversation_history: Optional[List[dict]]) -> bool:
@@ -520,27 +476,6 @@ def chat(chat_request: ChatRequest, http_request: Request):
 scheduled_prompts_executor = ScheduledPromptsExecutor(
     dal=dal, config=config, chat_function=chat
 )
-
-
-@app.post("/api/oauth")
-def store_oauth_token(request: StoreOAuthTokenRequest):
-    """Store an OAuth token from the frontend OAuth flow. Holmes encrypts and persists it."""
-    try:
-        oauth, _client_id, token_manager = _get_toolset_oauth_config(request.toolset_name)
-
-        request_context = {"user_id": request.user_id}
-        token_manager.store_token(
-            oauth_config=oauth,
-            token_data=request.token_data,
-            request_context=request_context,
-        )
-
-        return {"success": True, "toolset_name": request.toolset_name}
-    except HTTPException:
-        raise
-    except Exception as e:
-        logging.error(f"Error storing OAuth token: {e}", exc_info=True)
-        raise HTTPException(status_code=500, detail=str(e))
 
 
 @app.get("/api/model")

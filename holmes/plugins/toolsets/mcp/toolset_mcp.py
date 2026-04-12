@@ -163,9 +163,6 @@ def _generate_pkce() -> Tuple[str, str]:
     return code_verifier, code_challenge
 
 
-# _CachedToken, OAuthTokenCache, DiskTokenStore are now in oauth_token_store.py
-# _encrypt_token_for_db, _decrypt_token_from_db are now in oauth_token_store.py
-
 # Singleton token manager — the main interface for all token operations
 _token_manager = OAuthTokenManager()
 _token_manager.set_signing_key_getter(_get_signing_key)
@@ -465,32 +462,6 @@ def set_oauth_dal(dal: Any) -> None:
         logger.warning("OAuth: DAL initialized for cross-cluster token storage")
 
 
-def _get_signing_key_hash() -> Optional[str]:
-    """Get a SHA-256 hash of the signing_key for DB storage (never store the key itself)."""
-    signing_key = _get_signing_key()
-    if not signing_key:
-        return None
-    return hashlib.sha256(signing_key.encode()).hexdigest()
-
-
-def _encrypt_token_for_db(token_data: Dict[str, Any], signing_key: str) -> str:
-    """Encrypt token data — delegates to OAuthTokenManager."""
-    result = _token_manager._encrypt_token(token_data)
-    if result is None:
-        raise ValueError("Cannot encrypt token: no signing key available")
-    return result
-
-
-def _decrypt_token_from_db(encrypted: str, signing_key: str) -> Optional[Dict[str, Any]]:
-    """Decrypt token data — delegates to OAuthTokenManager."""
-    return _token_manager._decrypt_token(encrypted)
-
-
-def _store_token_to_db(oauth_config: MCPOAuthConfig, token_data: Dict[str, Any], context_id: str, user_id: Optional[str] = None) -> None:
-    """Store an OAuth token to the DB — delegates to OAuthTokenManager."""
-    _token_manager._store_to_db(oauth_config, token_data, user_id)
-
-
 # Import helpers from oauth_token_manager (canonical implementations)
 from holmes.plugins.toolsets.mcp.oauth_token_manager import _get_conversation_key, _get_user_id  # noqa: E402
 
@@ -667,9 +638,6 @@ def exchange_code_for_token(tool_call_id: str, payload_json: str, request_contex
     except Exception:
         logger.exception("OAuth token exchange failed (tool_call_id=%s, token_url=%s)", tool_call_id, pending.oauth_config.token_url)
 
-
-# Backwards-compat alias for callers still using the old name
-decrypt_code_and_exchange_for_token = exchange_code_for_token
 
 
 def _try_refresh_token(cache_key: str, oauth_config: MCPOAuthConfig, user_id: Optional[str] = None) -> Optional[str]:
