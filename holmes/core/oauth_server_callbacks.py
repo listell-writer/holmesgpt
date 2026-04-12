@@ -64,6 +64,7 @@ def process_oauth_callback(
         toolsets, request.toolset_name, token_manager, request.client_id,
     )
 
+    logger.info("OAuth exchange: token_url=%s client_id=%s", oauth.token_url, client_id)
     token_data = exchange_code_for_tokens(
         token_url=oauth.token_url,
         code=request.code,
