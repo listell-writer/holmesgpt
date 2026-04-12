@@ -2,9 +2,9 @@ toolsets:
   kubernetes/logs:
     enabled: false
   kubernetes/core:
-    enabled: true
+    enabled: false
   grafana/loki:
     enabled: true
     config:
-      api_url: http://localhost:3101
+      api_url: http://localhost:3100
       api_key: ""
