@@ -12,7 +12,7 @@ import threading
 import time
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
-from typing import Any, Callable, Dict, Optional, Tuple
+from typing import Any, Dict, Optional, Tuple
 
 import httpx
 from cryptography.fernet import Fernet
@@ -67,7 +67,6 @@ class OAuthTokenManager:
         self._cache = OAuthTokenCache()
         self._disk_store = DiskTokenStore()
         self._dal: Optional[Any] = None
-        self._signing_key_getter: Optional[Callable[[], Optional[str]]] = None
 
         # Background refresh state
         self._scheduled: Dict[str, _ScheduledRefresh] = {}
@@ -88,9 +87,6 @@ class OAuthTokenManager:
         if dal and dal.enabled:
             logger.info("OAuthTokenManager: DAL initialized for cross-cluster token storage")
 
-    def set_signing_key_getter(self, getter: Callable[[], Optional[str]]) -> None:
-        """Set the function used to retrieve the signing key (lazy, avoids import cycles)."""
-        self._signing_key_getter = getter
 
     # ── Public API ─────────────────────────────────────────────────────
 
@@ -362,9 +358,8 @@ class OAuthTokenManager:
     # ── DB operations ──────────────────────────────────────────────────
 
     def _get_signing_key(self) -> Optional[str]:
-        if self._signing_key_getter:
-            return self._signing_key_getter()
-        return None
+        from holmes.config import Config
+        return Config.get_robusta_global_config_value("signing_key")
 
     def _get_signing_key_hash(self) -> Optional[str]:
         key = self._get_signing_key()

@@ -26,33 +26,33 @@ from holmes.core.tools import (
     ToolsetTag,
 )
 from holmes.core.tools_utils.tool_executor import ToolExecutor
-from holmes.plugins.toolsets.mcp.oauth_token_manager import OAuthTokenManager
-from holmes.core.oauth_utils import (
+from holmes.core.oauth_config import (
+    MCPOAuthConfig,
     OAuthEndpoints,
+    OAuthExchangeManager,
+    _get_exchange_manager,
+)
+from holmes.core.oauth_utils import (
+    _get_token_manager,
     cli_oauth_flow,
     generate_pkce,
 )
+from holmes.plugins.toolsets.mcp.oauth_token_manager import OAuthTokenManager
 from holmes.plugins.toolsets.mcp.oauth_token_manager import _get_conversation_key, _get_user_id
 from holmes.plugins.toolsets.mcp.oauth_token_store import _CachedToken
+from holmes.plugins.toolsets.mcp.oauth_tools_cache import (
+    _LoadedToolsEntry,
+    _oauth_tools_cache,
+    load_authenticated_oauth_tools,
+)
 from holmes.plugins.toolsets.mcp.toolset_mcp import (
     DiskTokenStore,
     MCPConfig,
     MCPMode,
-    MCPOAuthConfig,
     OAuthTokenCache,
     RemoteMCPTool,
     RemoteMCPToolset,
-    _LoadedToolsEntry,
-    _exchanges_lock,
     _inject_oauth_token,
-    _mcp_tools_cache,
-    _mcp_tools_cache_lock,
-    _oauth_token_cache,
-    _PendingOAuthExchange,
-    _pending_exchanges,
-    _token_manager,
-    exchange_code_for_token,
-    load_authenticated_oauth_tools,
 )
 
 
@@ -184,7 +184,7 @@ class TestRequiresApproval:
         )
         tool = self._make_tool(oauth)
         context = self._make_context(conv_id="approval-test-1")
-        _oauth_token_cache._cache.pop("approval-test-1", None)
+        _get_token_manager().cache._cache.pop("approval-test-1", None)
 
         params = {"a": 1}
         result = tool.requires_approval(params, context)
@@ -214,8 +214,8 @@ class TestRequiresApproval:
         tool = self._make_tool(oauth)
         context = self._make_context(conv_id="cached-conv-2")
         # Cache using the real cache key (conv + idp hash)
-        cache_key = _token_manager.get_cache_key(oauth, context.request_context)
-        _oauth_token_cache.set(cache_key, "some-token")
+        cache_key = _get_token_manager().get_cache_key(oauth, context.request_context)
+        _get_token_manager().cache.set(cache_key, "some-token")
 
         result = tool.requires_approval({}, context)
         assert result is None
@@ -242,12 +242,11 @@ class TestExchangeCodeForToken:
         )
 
         # Register the pending exchange
-        with _exchanges_lock:
-            _pending_exchanges[tool_call_id] = _PendingOAuthExchange(
-                code_verifier=code_verifier,
-                oauth_config=oauth_config,
-                redirect_uri="",
-            )
+        _get_exchange_manager().register_pending(
+            tool_call_id=tool_call_id,
+            code_verifier=code_verifier,
+            oauth_config=oauth_config,
+        )
 
         # Frontend sends auth code as plaintext JSON
         payload_json = json.dumps({"code": "auth-code-xyz", "redirect_uri": "http://frontend/callback"})
@@ -265,7 +264,7 @@ class TestExchangeCodeForToken:
         request_context = {"headers": {"X-Conversation-Id": conv_id}}
 
         with patch("holmes.core.oauth_utils.httpx.post", return_value=mock_response) as mock_post:
-            exchange_code_for_token(tool_call_id, payload_json, request_context)
+            _get_exchange_manager().complete_exchange(tool_call_id, payload_json, request_context)
 
             # Verify token endpoint was called correctly
             mock_post.assert_called_once()
@@ -279,15 +278,15 @@ class TestExchangeCodeForToken:
             assert post_data["redirect_uri"] == "http://frontend/callback"
 
         # Verify token was cached using the real cache key
-        cache_key = _token_manager.get_cache_key(oauth_config, request_context)
-        assert _oauth_token_cache.get(cache_key) == "final-access-token-abc"
+        cache_key = _get_token_manager().get_cache_key(oauth_config, request_context)
+        assert _get_token_manager().cache.get(cache_key) == "final-access-token-abc"
 
         # Pending exchange should be consumed
-        assert tool_call_id not in _pending_exchanges
+        assert tool_call_id not in _get_exchange_manager()._pending
 
     def test_missing_exchange_does_not_crash(self):
         """Gracefully handle missing pending exchange."""
-        exchange_code_for_token("nonexistent-id", "garbage", None)
+        _get_exchange_manager().complete_exchange("nonexistent-id", "garbage", None)
         # Should log error but not raise
 
 
@@ -309,8 +308,8 @@ class TestOAuthCacheKeySharedIdP:
             client_id="holmes-client",
         )
         ctx = {"headers": {"X-Conversation-Id": "conv-shared"}}
-        key1 = _token_manager.get_cache_key(oauth1, ctx)
-        key2 = _token_manager.get_cache_key(oauth2, ctx)
+        key1 = _get_token_manager().get_cache_key(oauth1, ctx)
+        key2 = _get_token_manager().get_cache_key(oauth2, ctx)
         assert key1 == key2, "Same authorization_url + client_id should produce same cache key"
 
     def test_different_idp_different_cache_key(self):
@@ -328,8 +327,8 @@ class TestOAuthCacheKeySharedIdP:
             client_id="holmes-client",
         )
         ctx = {"headers": {"X-Conversation-Id": "conv-diff"}}
-        key1 = _token_manager.get_cache_key(oauth1, ctx)
-        key2 = _token_manager.get_cache_key(oauth2, ctx)
+        key1 = _get_token_manager().get_cache_key(oauth1, ctx)
+        key2 = _get_token_manager().get_cache_key(oauth2, ctx)
         assert key1 != key2, "Different authorization_urls should produce different cache keys"
 
     def test_different_client_id_different_cache_key(self):
@@ -347,8 +346,8 @@ class TestOAuthCacheKeySharedIdP:
             client_id="client-b",
         )
         ctx = {"headers": {"X-Conversation-Id": "conv-cid"}}
-        key1 = _token_manager.get_cache_key(oauth1, ctx)
-        key2 = _token_manager.get_cache_key(oauth2, ctx)
+        key1 = _get_token_manager().get_cache_key(oauth1, ctx)
+        key2 = _get_token_manager().get_cache_key(oauth2, ctx)
         assert key1 != key2, "Different client_ids should produce different cache keys"
 
     def test_different_conversation_different_cache_key(self):
@@ -361,8 +360,8 @@ class TestOAuthCacheKeySharedIdP:
         )
         ctx1 = {"headers": {"X-Conversation-Id": "conv-1"}}
         ctx2 = {"headers": {"X-Conversation-Id": "conv-2"}}
-        key1 = _token_manager.get_cache_key(oauth, ctx1)
-        key2 = _token_manager.get_cache_key(oauth, ctx2)
+        key1 = _get_token_manager().get_cache_key(oauth, ctx1)
+        key2 = _get_token_manager().get_cache_key(oauth, ctx2)
         assert key1 != key2, "Different conversations should produce different cache keys"
 
     def test_shared_token_across_mcp_servers(self):
@@ -382,12 +381,12 @@ class TestOAuthCacheKeySharedIdP:
         ctx = {"headers": {"X-Conversation-Id": "conv-share-test"}}
 
         # Cache token via first MCP server's config
-        cache_key1 = _token_manager.get_cache_key(oauth1, ctx)
-        _oauth_token_cache.set(cache_key1, "shared-token-xyz", expires_in=300)
+        cache_key1 = _get_token_manager().get_cache_key(oauth1, ctx)
+        _get_token_manager().cache.set(cache_key1, "shared-token-xyz", expires_in=300)
 
         # Second MCP server should find the same token
-        cache_key2 = _token_manager.get_cache_key(oauth2, ctx)
-        assert _oauth_token_cache.get(cache_key2) == "shared-token-xyz"
+        cache_key2 = _get_token_manager().get_cache_key(oauth2, ctx)
+        assert _get_token_manager().cache.get(cache_key2) == "shared-token-xyz"
 
 
 @pytest.mark.manual
@@ -750,7 +749,7 @@ class TestCLIOAuthFlow:
         ctx = {"headers": {"X-Conversation-Id": "cli-conv"}}
 
         # Cache key before DCR (client_id=None)
-        key_before = _token_manager.get_cache_key(oauth, ctx)
+        key_before = _get_token_manager().get_cache_key(oauth, ctx)
 
         def mock_post(url, **kwargs):
             if "register" in url:
@@ -783,7 +782,7 @@ class TestCLIOAuthFlow:
             cli_oauth_flow(oauth, "key-test")
 
         # Cache key after DCR (client_id="new-dcr-id")
-        key_after = _token_manager.get_cache_key(oauth, ctx)
+        key_after = _get_token_manager().get_cache_key(oauth, ctx)
 
         assert key_before != key_after, "Cache key should change after DCR sets client_id"
         assert oauth.client_id == "new-dcr-id"
@@ -1012,9 +1011,9 @@ class TestDiskTokenStore:
 # DB token encryption / decryption
 # ---------------------------------------------------------------------------
 class TestDBTokenEncryption:
-    def test_roundtrip(self):
+    @patch("holmes.config.Config.get_robusta_global_config_value", return_value="test-signing-key-for-encryption")
+    def test_roundtrip(self, _mock):
         manager = OAuthTokenManager()
-        manager.set_signing_key_getter(lambda: "test-signing-key-for-encryption")
 
         token_data = {"access_token": "abc123", "refresh_token": "ref456", "expires_in": 300}
         encrypted = manager._encrypt_token(token_data)
@@ -1027,20 +1026,20 @@ class TestDBTokenEncryption:
 
     def test_wrong_signing_key_returns_none(self):
         manager1 = OAuthTokenManager()
-        manager1.set_signing_key_getter(lambda: "correct-key")
-        token_data = {"access_token": "secret"}
-        encrypted = manager1._encrypt_token(token_data)
+        with patch("holmes.config.Config.get_robusta_global_config_value", return_value="correct-key"):
+            token_data = {"access_token": "secret"}
+            encrypted = manager1._encrypt_token(token_data)
         manager1.shutdown()
 
         manager2 = OAuthTokenManager()
-        manager2.set_signing_key_getter(lambda: "wrong-key")
-        result = manager2._decrypt_token(encrypted)
+        with patch("holmes.config.Config.get_robusta_global_config_value", return_value="wrong-key"):
+            result = manager2._decrypt_token(encrypted)
         assert result is None
         manager2.shutdown()
 
-    def test_garbage_input_returns_none(self):
+    @patch("holmes.config.Config.get_robusta_global_config_value", return_value="some-key")
+    def test_garbage_input_returns_none(self, _mock):
         manager = OAuthTokenManager()
-        manager.set_signing_key_getter(lambda: "some-key")
         result = manager._decrypt_token("not-valid-fernet-ciphertext")
         assert result is None
         manager.shutdown()
@@ -1068,8 +1067,8 @@ class TestInjectOAuthToken:
         )
         ts = self._make_toolset(oauth)
         ctx = {"headers": {"X-Conversation-Id": "inject-conv"}}
-        cache_key = _token_manager.get_cache_key(oauth, ctx)
-        _oauth_token_cache.set(cache_key, "my-bearer-token", expires_in=300)
+        cache_key = _get_token_manager().get_cache_key(oauth, ctx)
+        _get_token_manager().cache.set(cache_key, "my-bearer-token", expires_in=300)
 
         result = _inject_oauth_token(ts, ctx, {})
         assert result["Authorization"] == "Bearer my-bearer-token"
@@ -1083,8 +1082,8 @@ class TestInjectOAuthToken:
         )
         ts = self._make_toolset(oauth)
         ctx = {"headers": {"X-Conversation-Id": "inject-conv-2"}}
-        cache_key = _token_manager.get_cache_key(oauth, ctx)
-        _oauth_token_cache.set(cache_key, "tok", expires_in=300)
+        cache_key = _get_token_manager().get_cache_key(oauth, ctx)
+        _get_token_manager().cache.set(cache_key, "tok", expires_in=300)
 
         result = _inject_oauth_token(ts, ctx, {"X-Custom": "val"})
         assert result["Authorization"] == "Bearer tok"
@@ -1119,13 +1118,13 @@ class TestInjectOAuthToken:
         )
         ts = self._make_toolset(oauth)
         ctx = {"headers": {"X-Conversation-Id": "refresh-inject-conv"}}
-        cache_key = _token_manager.get_cache_key(oauth, ctx)
+        cache_key = _get_token_manager().get_cache_key(oauth, ctx)
 
-        _oauth_token_cache.set(cache_key, "old", expires_in=60, refresh_token="r", refresh_expires_in=3600)
-        _oauth_token_cache._cache[cache_key].expires_at = time.monotonic() - 1
+        _get_token_manager().cache.set(cache_key, "old", expires_in=60, refresh_token="r", refresh_expires_in=3600)
+        _get_token_manager().cache._cache[cache_key].expires_at = time.monotonic() - 1
 
         with patch.object(
-            type(_token_manager), "_refresh_token",
+            type(_get_token_manager()), "_refresh_token",
             return_value="refreshed-tok",
         ) as mock_refresh:
             result = _inject_oauth_token(ts, ctx, None)
@@ -1399,8 +1398,9 @@ class TestPreloadOAuthMCPTools:
         tool.inputSchema = {"type": "object", "properties": {}}
         return tool
 
-    @patch("holmes.plugins.toolsets.mcp.toolset_mcp._token_manager")
-    def test_preload_with_cached_token(self, mock_manager):
+    @patch("holmes.plugins.toolsets.mcp.oauth_tools_cache._get_token_manager")
+    def test_preload_with_cached_token(self, mock_get_manager):
+        mock_manager = mock_get_manager.return_value
         mock_manager.has_token.return_value = True
 
         ts = self._make_oauth_toolset()
@@ -1414,7 +1414,7 @@ class TestPreloadOAuthMCPTools:
         ts._get_server_tools_with_context = MagicMock(return_value=mock_tools_result)
 
         # Patch asyncio.run to just call the coroutine result
-        with patch("holmes.plugins.toolsets.mcp.toolset_mcp.asyncio") as mock_asyncio:
+        with patch("holmes.plugins.toolsets.mcp.oauth_tools_cache.asyncio") as mock_asyncio:
             mock_asyncio.run.return_value = mock_tools_result
             request_context = {"user_id": "user-1", "headers": {}}
             result = load_authenticated_oauth_tools([ts], request_context)
@@ -1423,11 +1423,12 @@ class TestPreloadOAuthMCPTools:
         assert len(result["test-mcp"]) == 2
 
         # Clean up cache
-        with _mcp_tools_cache_lock:
-            _mcp_tools_cache.pop("user-1:test-mcp", None)
+        with _oauth_tools_cache._lock:
+            _oauth_tools_cache._cache.pop("user-1:test-mcp", None)
 
-    @patch("holmes.plugins.toolsets.mcp.toolset_mcp._token_manager")
-    def test_preload_no_token(self, mock_manager):
+    @patch("holmes.plugins.toolsets.mcp.oauth_tools_cache._get_token_manager")
+    def test_preload_no_token(self, mock_get_manager):
+        mock_manager = mock_get_manager.return_value
         mock_manager.has_token.return_value = False
         mock_manager.get_access_token.return_value = None
 
@@ -1437,13 +1438,14 @@ class TestPreloadOAuthMCPTools:
 
         assert result == {}
 
-    @patch("holmes.plugins.toolsets.mcp.toolset_mcp._token_manager")
-    def test_preload_server_error_graceful_fallback(self, mock_manager):
+    @patch("holmes.plugins.toolsets.mcp.oauth_tools_cache._get_token_manager")
+    def test_preload_server_error_graceful_fallback(self, mock_get_manager):
+        mock_manager = mock_get_manager.return_value
         mock_manager.has_token.return_value = True
 
         ts = self._make_oauth_toolset()
 
-        with patch("holmes.plugins.toolsets.mcp.toolset_mcp.asyncio") as mock_asyncio:
+        with patch("holmes.plugins.toolsets.mcp.oauth_tools_cache.asyncio") as mock_asyncio:
             mock_asyncio.run.side_effect = ConnectionError("MCP server unreachable")
             request_context = {"user_id": "user-3", "headers": {}}
             result = load_authenticated_oauth_tools([ts], request_context)
@@ -1451,16 +1453,17 @@ class TestPreloadOAuthMCPTools:
         # Should return empty, not raise
         assert result == {}
 
-    @patch("holmes.plugins.toolsets.mcp.toolset_mcp._token_manager")
-    def test_preload_uses_ttl_cache(self, mock_manager):
+    @patch("holmes.plugins.toolsets.mcp.oauth_tools_cache._get_token_manager")
+    def test_preload_uses_ttl_cache(self, mock_get_manager):
+        mock_manager = mock_get_manager.return_value
         mock_manager.has_token.return_value = True
 
         ts = self._make_oauth_toolset()
         fake_tools = [MagicMock(), MagicMock()]
 
         # Pre-populate the cache
-        with _mcp_tools_cache_lock:
-            _mcp_tools_cache["user-4:test-mcp"] = _LoadedToolsEntry(
+        with _oauth_tools_cache._lock:
+            _oauth_tools_cache._cache["user-4:test-mcp"] = _LoadedToolsEntry(
                 tools=fake_tools,
                 toolset=ts,
                 loaded_at=time.monotonic(),
@@ -1474,8 +1477,8 @@ class TestPreloadOAuthMCPTools:
             assert "test-mcp" in result
             assert result["test-mcp"] is fake_tools
         finally:
-            with _mcp_tools_cache_lock:
-                _mcp_tools_cache.pop("user-4:test-mcp", None)
+            with _oauth_tools_cache._lock:
+                _oauth_tools_cache._cache.pop("user-4:test-mcp", None)
 
     def test_preload_skips_non_oauth_toolsets(self):
         ts = MagicMock(spec=RemoteMCPToolset)
