@@ -28,6 +28,7 @@ from holmes import get_version, is_official_release
 from holmes.common.env_vars import (
     DEVELOPMENT_MODE,
     ENABLE_CONNECTION_KEEPALIVE,
+    ENABLE_CONVERSATION_WORKER,
     ENABLE_TELEMETRY,
     ENABLED_SCHEDULED_PROMPTS,
     HOLMES_HOST,
@@ -144,6 +145,11 @@ def sync_before_server_start():
         scheduled_prompts_executor.start()
     except Exception:
         logging.error("Failed to start scheduled prompts executor", exc_info=True)
+    if conversation_worker:
+        try:
+            conversation_worker.start()
+        except Exception:
+            logging.error("Failed to start conversation worker", exc_info=True)
 
 
 def _has_failed_mcp_toolsets() -> bool:
@@ -537,6 +543,15 @@ def chat(chat_request: ChatRequest, http_request: Request):
 scheduled_prompts_executor = ScheduledPromptsExecutor(
     dal=dal, config=config, chat_function=chat
 )
+
+# Conversation worker (M2) — active conversation processing via Supabase
+conversation_worker = None
+if ENABLE_CONVERSATION_WORKER:
+    from holmes.core.conversations_worker import ConversationWorker
+
+    conversation_worker = ConversationWorker(
+        dal=dal, config=config, chat_function=chat
+    )
 
 
 @app.get("/api/model")

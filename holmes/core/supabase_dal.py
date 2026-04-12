@@ -899,6 +899,164 @@ class SupabaseDal:
             )
             return False
 
+    # ── Conversation Worker (M2) DAL Methods ──────────────────────────
+
+    def claim_conversations(self, holmes_id: str) -> List[Dict]:
+        """Atomically claim all pending conversations for this cluster.
+
+        Calls the ``claim_conversations`` RPC which uses
+        ``FOR UPDATE SKIP LOCKED`` to prevent double-processing.
+
+        Returns:
+            List of claimed Conversation rows (may be empty).
+        """
+        if not self.enabled:
+            return []
+
+        try:
+            res = self.client.rpc(
+                "claim_conversations",
+                {
+                    "_account_id": self.account_id,
+                    "_cluster_id": self.cluster,
+                    "_assignee": holmes_id,
+                },
+            ).execute()
+
+            if not res.data:
+                return []
+
+            rows = res.data if isinstance(res.data, list) else [res.data]
+            # Filter out empty placeholder rows returned by Supabase
+            return [r for r in rows if r.get("conversation_id")]
+        except Exception:
+            logging.exception(
+                "Supabase error while claiming conversations",
+                exc_info=True,
+            )
+            return []
+
+    def post_conversation_events(
+        self,
+        conversation_id: str,
+        holmes_id: str,
+        request_sequence: int,
+        events: list,
+        compact: bool = False,
+    ) -> Optional[int]:
+        """Post a batch of events to a running conversation.
+
+        Returns the assigned ``seq`` number, or ``None`` if the conversation
+        was reassigned (holmes_id / request_sequence mismatch).
+        """
+        if not self.enabled:
+            return None
+
+        try:
+            res = self.client.rpc(
+                "post_conversation_events",
+                {
+                    "_conversation_id": conversation_id,
+                    "_holmes_id": holmes_id,
+                    "_request_sequence": request_sequence,
+                    "_events": events,
+                    "_compact": compact,
+                },
+            ).execute()
+
+            if res.data is None:
+                return None
+            # RPC returns the assigned seq number as a scalar
+            return int(res.data) if not isinstance(res.data, dict) else res.data.get("post_conversation_events")
+        except Exception as exc:
+            error_msg = str(exc).lower()
+            # Mismatch errors from the RPC indicate the conversation was
+            # reassigned or stopped — treat as a non-fatal signal.
+            if "mismatch" in error_msg or "not running" in error_msg:
+                logging.warning(
+                    "post_conversation_events rejected for conversation %s: %s",
+                    conversation_id,
+                    exc,
+                )
+                return None
+            logging.exception(
+                "Supabase error while posting conversation events",
+                exc_info=True,
+            )
+            return None
+
+    def complete_conversation(
+        self,
+        conversation_id: str,
+        request_sequence: int,
+        holmes_id: str,
+        status: str,  # 'completed' or 'failed'
+    ) -> bool:
+        """Mark a conversation as completed or failed.
+
+        Returns True on success, False if the conversation was already
+        reassigned or in a non-running state.
+        """
+        if not self.enabled:
+            return False
+
+        try:
+            res = self.client.rpc(
+                "complete_conversation",
+                {
+                    "_conversation_id": conversation_id,
+                    "_request_sequence": request_sequence,
+                    "_holmes_id": holmes_id,
+                    "_status": status,
+                },
+            ).execute()
+
+            return bool(res.data)
+        except Exception as exc:
+            error_msg = str(exc).lower()
+            if "mismatch" in error_msg or "not running" in error_msg:
+                logging.warning(
+                    "complete_conversation rejected for conversation %s: %s",
+                    conversation_id,
+                    exc,
+                )
+                return False
+            logging.exception(
+                "Supabase error while completing conversation",
+                exc_info=True,
+            )
+            return False
+
+    def get_conversation_events(
+        self,
+        conversation_id: str,
+        min_seq: int = 0,
+    ) -> List[Dict]:
+        """Fetch ConversationEvents rows ordered by (request_sequence, seq).
+
+        Used for history reconstruction on follow-up messages.
+        """
+        if not self.enabled:
+            return []
+
+        try:
+            res = (
+                self.client.table("ConversationEvents")
+                .select("*")
+                .eq("conversation_id", conversation_id)
+                .gte("seq", min_seq)
+                .order("request_sequence", desc=False)
+                .order("seq", desc=False)
+                .execute()
+            )
+            return res.data or []
+        except Exception:
+            logging.exception(
+                "Supabase error while fetching conversation events",
+                exc_info=True,
+            )
+            return []
+
     def finish_scheduled_prompt_run(
         self,
         status: RunStatus,
