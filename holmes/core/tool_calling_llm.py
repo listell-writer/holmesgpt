@@ -243,11 +243,6 @@ class ToolCallingLLM:
             return messages, events
 
         # Create decision lookup
-        logging.warning(
-            "OAuth flow: received %d tool decisions: %s",
-            len(tool_decisions),
-            [(d.tool_call_id, d.approved, bool(d.decision)) for d in tool_decisions],
-        )
         decisions_by_tool_call_id = {
             decision.tool_call_id: decision for decision in tool_decisions
         }
@@ -272,10 +267,6 @@ class ToolCallingLLM:
                             )
                         )
 
-        logging.warning(
-            "OAuth flow: found %d pending tool calls with pending_approval flag",
-            len(pending_tool_calls),
-        )
         if not pending_tool_calls:
             error_message = f"Received {len(tool_decisions)} tool decisions but no pending approvals found in conversation history"
             logging.error(error_message)

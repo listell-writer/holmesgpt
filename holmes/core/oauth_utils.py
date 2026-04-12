@@ -77,24 +77,21 @@ def get_toolset_oauth_config(
     Returns ``(oauth_config, client_id, token_manager)``.
     Raises :class:`OAuthConfigLookupError` on failure.
     """
-    # OAuth placeholder tools are named {toolset_name}_connect
-    if toolset_name.endswith("_connect"):
-        toolset_name = toolset_name[: -len("_connect")]
+    from holmes.plugins.toolsets.mcp.toolset_mcp import RemoteMCPToolset
 
     toolset = None
     for ts in toolsets:
-        if ts.name == toolset_name:
+        if isinstance(ts, RemoteMCPToolset) and (ts.name == toolset_name or ts.connect_tool_name == toolset_name):
             toolset = ts
             break
 
     if not toolset:
         raise OAuthConfigLookupError(f"Toolset '{toolset_name}' not found")
 
-    mcp_config = getattr(toolset, "_mcp_config", None)
-    oauth = getattr(mcp_config, "oauth", None) if mcp_config else None
-    if not oauth or not oauth.enabled:
+    if not toolset.is_oauth_enabled:
         raise OAuthConfigLookupError(f"Toolset '{toolset_name}' does not have OAuth enabled")
 
+    oauth = toolset._mcp_config.oauth
     if not oauth.token_url:
         raise OAuthConfigLookupError(f"OAuth config for '{toolset_name}' missing token_url")
 
