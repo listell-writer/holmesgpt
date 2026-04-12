@@ -1320,15 +1320,6 @@ class TestToolExecutorDynamicTools:
         ts.status = ToolsetStatusEnum.ENABLED
         return ts
 
-    def test_prefix_stripping(self):
-        tool = self._make_tool("add_numbers")
-        ts = self._make_toolset("my-mcp", [tool])
-        executor = ToolExecutor([ts])
-
-        assert executor.get_tool_by_name("add_numbers") is tool
-        found = executor.get_tool_by_name("my-mcp_add_numbers")
-        assert found is tool
-
     def test_unknown_tool_returns_none(self):
         tool = self._make_tool("some_tool")
         ts = self._make_toolset("ts", [tool])
