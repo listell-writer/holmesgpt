@@ -4559,6 +4559,17 @@
 </li>
         
           <li class="md-nav__item">
+  <a href="#create_toolcalling_llm-create_tool_executor" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        create_toolcalling_llm() / create_tool_executor()
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
   <a href="#toolcallingllm" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -5040,6 +5051,17 @@
 </li>
         
           <li class="md-nav__item">
+  <a href="#create_toolcalling_llm-create_tool_executor" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        create_toolcalling_llm() / create_tool_executor()
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
   <a href="#toolcallingllm" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -5197,38 +5219,50 @@
 <div class="language-python highlight"><pre><span></span><code><span id="__span-0-1"><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="kn">import</span><span class="w"> </span><span class="nn">os</span>
 </span><span id="__span-0-2"><a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a><span class="kn">from</span><span class="w"> </span><span class="nn">holmes.config</span><span class="w"> </span><span class="kn">import</span> <span class="n">Config</span>
 </span><span id="__span-0-3"><a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a><span class="kn">from</span><span class="w"> </span><span class="nn">holmes.core.prompt</span><span class="w"> </span><span class="kn">import</span> <span class="n">build_initial_ask_messages</span>
-</span><span id="__span-0-4"><a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a>
-</span><span id="__span-0-5"><a id="__codelineno-0-5" name="__codelineno-0-5" href="#__codelineno-0-5"></a><span class="c1"># Create configuration</span>
-</span><span id="__span-0-6"><a id="__codelineno-0-6" name="__codelineno-0-6" href="#__codelineno-0-6"></a><span class="n">config</span> <span class="o">=</span> <span class="n">Config</span><span class="p">(</span>
-</span><span id="__span-0-7"><a id="__codelineno-0-7" name="__codelineno-0-7" href="#__codelineno-0-7"></a>    <span class="n">api_key</span><span class="o">=</span><span class="n">os</span><span class="o">.</span><span class="n">getenv</span><span class="p">(</span><span class="s2">&quot;ANTHROPIC_API_KEY&quot;</span><span class="p">),</span>
-</span><span id="__span-0-8"><a id="__codelineno-0-8" name="__codelineno-0-8" href="#__codelineno-0-8"></a>    <span class="n">model</span><span class="o">=</span><span class="s2">&quot;anthropic/claude-sonnet-4-5-20250929&quot;</span><span class="p">,</span>
-</span><span id="__span-0-9"><a id="__codelineno-0-9" name="__codelineno-0-9" href="#__codelineno-0-9"></a><span class="p">)</span>
-</span><span id="__span-0-10"><a id="__codelineno-0-10" name="__codelineno-0-10" href="#__codelineno-0-10"></a>
-</span><span id="__span-0-11"><a id="__codelineno-0-11" name="__codelineno-0-11" href="#__codelineno-0-11"></a><span class="c1"># Create AI instance</span>
-</span><span id="__span-0-12"><a id="__codelineno-0-12" name="__codelineno-0-12" href="#__codelineno-0-12"></a><span class="n">ai</span> <span class="o">=</span> <span class="n">config</span><span class="o">.</span><span class="n">create_console_toolcalling_llm</span><span class="p">()</span>
-</span><span id="__span-0-13"><a id="__codelineno-0-13" name="__codelineno-0-13" href="#__codelineno-0-13"></a>
-</span><span id="__span-0-14"><a id="__codelineno-0-14" name="__codelineno-0-14" href="#__codelineno-0-14"></a><span class="c1"># Ask a question</span>
-</span><span id="__span-0-15"><a id="__codelineno-0-15" name="__codelineno-0-15" href="#__codelineno-0-15"></a><span class="n">messages</span> <span class="o">=</span> <span class="n">build_initial_ask_messages</span><span class="p">(</span>
-</span><span id="__span-0-16"><a id="__codelineno-0-16" name="__codelineno-0-16" href="#__codelineno-0-16"></a>    <span class="n">initial_user_prompt</span><span class="o">=</span><span class="s2">&quot;what pods are failing in production?&quot;</span><span class="p">,</span>
-</span><span id="__span-0-17"><a id="__codelineno-0-17" name="__codelineno-0-17" href="#__codelineno-0-17"></a>    <span class="n">file_paths</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span>
-</span><span id="__span-0-18"><a id="__codelineno-0-18" name="__codelineno-0-18" href="#__codelineno-0-18"></a>    <span class="n">tool_executor</span><span class="o">=</span><span class="n">ai</span><span class="o">.</span><span class="n">tool_executor</span><span class="p">,</span>
-</span><span id="__span-0-19"><a id="__codelineno-0-19" name="__codelineno-0-19" href="#__codelineno-0-19"></a>    <span class="n">runbooks</span><span class="o">=</span><span class="n">config</span><span class="o">.</span><span class="n">get_runbook_catalog</span><span class="p">(),</span>
-</span><span id="__span-0-20"><a id="__codelineno-0-20" name="__codelineno-0-20" href="#__codelineno-0-20"></a>    <span class="n">system_prompt_additions</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span>
+</span><span id="__span-0-4"><a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a><span class="kn">from</span><span class="w"> </span><span class="nn">holmes.core.tools</span><span class="w"> </span><span class="kn">import</span> <span class="n">ToolsetTag</span>
+</span><span id="__span-0-5"><a id="__codelineno-0-5" name="__codelineno-0-5" href="#__codelineno-0-5"></a>
+</span><span id="__span-0-6"><a id="__codelineno-0-6" name="__codelineno-0-6" href="#__codelineno-0-6"></a><span class="c1"># Create configuration</span>
+</span><span id="__span-0-7"><a id="__codelineno-0-7" name="__codelineno-0-7" href="#__codelineno-0-7"></a><span class="n">config</span> <span class="o">=</span> <span class="n">Config</span><span class="p">(</span>
+</span><span id="__span-0-8"><a id="__codelineno-0-8" name="__codelineno-0-8" href="#__codelineno-0-8"></a>    <span class="n">api_key</span><span class="o">=</span><span class="n">os</span><span class="o">.</span><span class="n">getenv</span><span class="p">(</span><span class="s2">&quot;ANTHROPIC_API_KEY&quot;</span><span class="p">),</span>
+</span><span id="__span-0-9"><a id="__codelineno-0-9" name="__codelineno-0-9" href="#__codelineno-0-9"></a>    <span class="n">model</span><span class="o">=</span><span class="s2">&quot;anthropic/claude-sonnet-4-5-20250929&quot;</span><span class="p">,</span>
+</span><span id="__span-0-10"><a id="__codelineno-0-10" name="__codelineno-0-10" href="#__codelineno-0-10"></a><span class="p">)</span>
+</span><span id="__span-0-11"><a id="__codelineno-0-11" name="__codelineno-0-11" href="#__codelineno-0-11"></a>
+</span><span id="__span-0-12"><a id="__codelineno-0-12" name="__codelineno-0-12" href="#__codelineno-0-12"></a><span class="c1"># Create AI instance</span>
+</span><span id="__span-0-13"><a id="__codelineno-0-13" name="__codelineno-0-13" href="#__codelineno-0-13"></a><span class="n">ai</span> <span class="o">=</span> <span class="n">config</span><span class="o">.</span><span class="n">create_toolcalling_llm</span><span class="p">(</span>
+</span><span id="__span-0-14"><a id="__codelineno-0-14" name="__codelineno-0-14" href="#__codelineno-0-14"></a>    <span class="c1"># Only load toolsets tagged CORE or CLI (excludes server-only CLUSTER toolsets)</span>
+</span><span id="__span-0-15"><a id="__codelineno-0-15" name="__codelineno-0-15" href="#__codelineno-0-15"></a>    <span class="n">toolset_tag_filter</span><span class="o">=</span><span class="p">[</span><span class="n">ToolsetTag</span><span class="o">.</span><span class="n">CORE</span><span class="p">,</span> <span class="n">ToolsetTag</span><span class="o">.</span><span class="n">CLI</span><span class="p">],</span>
+</span><span id="__span-0-16"><a id="__codelineno-0-16" name="__codelineno-0-16" href="#__codelineno-0-16"></a>    <span class="c1"># Auto-enable every toolset that works without explicit config (e.g. kubectl on PATH)</span>
+</span><span id="__span-0-17"><a id="__codelineno-0-17" name="__codelineno-0-17" href="#__codelineno-0-17"></a>    <span class="n">enable_all_toolsets_possible</span><span class="o">=</span><span class="kc">True</span><span class="p">,</span>
+</span><span id="__span-0-18"><a id="__codelineno-0-18" name="__codelineno-0-18" href="#__codelineno-0-18"></a>    <span class="c1"># Remaining params use defaults:</span>
+</span><span id="__span-0-19"><a id="__codelineno-0-19" name="__codelineno-0-19" href="#__codelineno-0-19"></a>    <span class="c1">#   prerequisite_cache=PrerequisiteCacheMode.ENABLED — use cached health-check results</span>
+</span><span id="__span-0-20"><a id="__codelineno-0-20" name="__codelineno-0-20" href="#__codelineno-0-20"></a>    <span class="c1">#   reuse_executor=False       — create a fresh executor each call (fine for CLI)</span>
 </span><span id="__span-0-21"><a id="__codelineno-0-21" name="__codelineno-0-21" href="#__codelineno-0-21"></a><span class="p">)</span>
 </span><span id="__span-0-22"><a id="__codelineno-0-22" name="__codelineno-0-22" href="#__codelineno-0-22"></a>
-</span><span id="__span-0-23"><a id="__codelineno-0-23" name="__codelineno-0-23" href="#__codelineno-0-23"></a><span class="n">response</span> <span class="o">=</span> <span class="n">ai</span><span class="o">.</span><span class="n">call</span><span class="p">(</span><span class="n">messages</span><span class="p">)</span>
-</span><span id="__span-0-24"><a id="__codelineno-0-24" name="__codelineno-0-24" href="#__codelineno-0-24"></a><span class="nb">print</span><span class="p">(</span><span class="n">response</span><span class="o">.</span><span class="n">result</span><span class="p">)</span>
+</span><span id="__span-0-23"><a id="__codelineno-0-23" name="__codelineno-0-23" href="#__codelineno-0-23"></a><span class="c1"># Ask a question</span>
+</span><span id="__span-0-24"><a id="__codelineno-0-24" name="__codelineno-0-24" href="#__codelineno-0-24"></a><span class="n">messages</span> <span class="o">=</span> <span class="n">build_initial_ask_messages</span><span class="p">(</span>
+</span><span id="__span-0-25"><a id="__codelineno-0-25" name="__codelineno-0-25" href="#__codelineno-0-25"></a>    <span class="n">initial_user_prompt</span><span class="o">=</span><span class="s2">&quot;what pods are failing in production?&quot;</span><span class="p">,</span>
+</span><span id="__span-0-26"><a id="__codelineno-0-26" name="__codelineno-0-26" href="#__codelineno-0-26"></a>    <span class="n">file_paths</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span>
+</span><span id="__span-0-27"><a id="__codelineno-0-27" name="__codelineno-0-27" href="#__codelineno-0-27"></a>    <span class="n">tool_executor</span><span class="o">=</span><span class="n">ai</span><span class="o">.</span><span class="n">tool_executor</span><span class="p">,</span>
+</span><span id="__span-0-28"><a id="__codelineno-0-28" name="__codelineno-0-28" href="#__codelineno-0-28"></a>    <span class="n">runbooks</span><span class="o">=</span><span class="n">config</span><span class="o">.</span><span class="n">get_runbook_catalog</span><span class="p">(),</span>
+</span><span id="__span-0-29"><a id="__codelineno-0-29" name="__codelineno-0-29" href="#__codelineno-0-29"></a>    <span class="n">system_prompt_additions</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span>
+</span><span id="__span-0-30"><a id="__codelineno-0-30" name="__codelineno-0-30" href="#__codelineno-0-30"></a><span class="p">)</span>
+</span><span id="__span-0-31"><a id="__codelineno-0-31" name="__codelineno-0-31" href="#__codelineno-0-31"></a>
+</span><span id="__span-0-32"><a id="__codelineno-0-32" name="__codelineno-0-32" href="#__codelineno-0-32"></a><span class="n">response</span> <span class="o">=</span> <span class="n">ai</span><span class="o">.</span><span class="n">call</span><span class="p">(</span><span class="n">messages</span><span class="p">)</span>
+</span><span id="__span-0-33"><a id="__codelineno-0-33" name="__codelineno-0-33" href="#__codelineno-0-33"></a><span class="nb">print</span><span class="p">(</span><span class="n">response</span><span class="o">.</span><span class="n">result</span><span class="p">)</span>
 </span></code></pre></div>
 <h2 id="listing-available-tools">Listing Available Tools<a class="headerlink" href="#listing-available-tools" title="Permanent link">&para;</a></h2>
-<div class="language-python highlight"><pre><span></span><code><span id="__span-1-1"><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a><span class="n">ai</span> <span class="o">=</span> <span class="n">config</span><span class="o">.</span><span class="n">create_console_toolcalling_llm</span><span class="p">()</span>
-</span><span id="__span-1-2"><a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a>
-</span><span id="__span-1-3"><a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a><span class="c1"># List loaded toolsets and their status</span>
-</span><span id="__span-1-4"><a id="__codelineno-1-4" name="__codelineno-1-4" href="#__codelineno-1-4"></a><span class="k">for</span> <span class="n">toolset</span> <span class="ow">in</span> <span class="n">ai</span><span class="o">.</span><span class="n">tool_executor</span><span class="o">.</span><span class="n">toolsets</span><span class="p">:</span>
-</span><span id="__span-1-5"><a id="__codelineno-1-5" name="__codelineno-1-5" href="#__codelineno-1-5"></a>    <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;  </span><span class="si">{</span><span class="n">toolset</span><span class="o">.</span><span class="n">name</span><span class="si">}</span><span class="s2"> (</span><span class="si">{</span><span class="s1">&#39;enabled&#39;</span><span class="w"> </span><span class="k">if</span><span class="w"> </span><span class="n">toolset</span><span class="o">.</span><span class="n">enabled</span><span class="w"> </span><span class="k">else</span><span class="w"> </span><span class="s1">&#39;disabled&#39;</span><span class="si">}</span><span class="s2">)&quot;</span><span class="p">)</span>
-</span><span id="__span-1-6"><a id="__codelineno-1-6" name="__codelineno-1-6" href="#__codelineno-1-6"></a>
-</span><span id="__span-1-7"><a id="__codelineno-1-7" name="__codelineno-1-7" href="#__codelineno-1-7"></a><span class="c1"># List individual tools</span>
-</span><span id="__span-1-8"><a id="__codelineno-1-8" name="__codelineno-1-8" href="#__codelineno-1-8"></a><span class="k">for</span> <span class="n">tool_name</span> <span class="ow">in</span> <span class="nb">sorted</span><span class="p">(</span><span class="n">ai</span><span class="o">.</span><span class="n">tool_executor</span><span class="o">.</span><span class="n">tools_by_name</span><span class="o">.</span><span class="n">keys</span><span class="p">()):</span>
-</span><span id="__span-1-9"><a id="__codelineno-1-9" name="__codelineno-1-9" href="#__codelineno-1-9"></a>    <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;  </span><span class="si">{</span><span class="n">tool_name</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+<div class="language-python highlight"><pre><span></span><code><span id="__span-1-1"><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a><span class="n">ai</span> <span class="o">=</span> <span class="n">config</span><span class="o">.</span><span class="n">create_toolcalling_llm</span><span class="p">(</span>
+</span><span id="__span-1-2"><a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a>    <span class="n">toolset_tag_filter</span><span class="o">=</span><span class="p">[</span><span class="n">ToolsetTag</span><span class="o">.</span><span class="n">CORE</span><span class="p">,</span> <span class="n">ToolsetTag</span><span class="o">.</span><span class="n">CLI</span><span class="p">],</span>
+</span><span id="__span-1-3"><a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a>    <span class="n">enable_all_toolsets_possible</span><span class="o">=</span><span class="kc">True</span><span class="p">,</span>
+</span><span id="__span-1-4"><a id="__codelineno-1-4" name="__codelineno-1-4" href="#__codelineno-1-4"></a><span class="p">)</span>
+</span><span id="__span-1-5"><a id="__codelineno-1-5" name="__codelineno-1-5" href="#__codelineno-1-5"></a>
+</span><span id="__span-1-6"><a id="__codelineno-1-6" name="__codelineno-1-6" href="#__codelineno-1-6"></a><span class="c1"># List loaded toolsets and their status</span>
+</span><span id="__span-1-7"><a id="__codelineno-1-7" name="__codelineno-1-7" href="#__codelineno-1-7"></a><span class="k">for</span> <span class="n">toolset</span> <span class="ow">in</span> <span class="n">ai</span><span class="o">.</span><span class="n">tool_executor</span><span class="o">.</span><span class="n">toolsets</span><span class="p">:</span>
+</span><span id="__span-1-8"><a id="__codelineno-1-8" name="__codelineno-1-8" href="#__codelineno-1-8"></a>    <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;  </span><span class="si">{</span><span class="n">toolset</span><span class="o">.</span><span class="n">name</span><span class="si">}</span><span class="s2"> (</span><span class="si">{</span><span class="s1">&#39;enabled&#39;</span><span class="w"> </span><span class="k">if</span><span class="w"> </span><span class="n">toolset</span><span class="o">.</span><span class="n">enabled</span><span class="w"> </span><span class="k">else</span><span class="w"> </span><span class="s1">&#39;disabled&#39;</span><span class="si">}</span><span class="s2">)&quot;</span><span class="p">)</span>
+</span><span id="__span-1-9"><a id="__codelineno-1-9" name="__codelineno-1-9" href="#__codelineno-1-9"></a>
+</span><span id="__span-1-10"><a id="__codelineno-1-10" name="__codelineno-1-10" href="#__codelineno-1-10"></a><span class="c1"># List individual tools</span>
+</span><span id="__span-1-11"><a id="__codelineno-1-11" name="__codelineno-1-11" href="#__codelineno-1-11"></a><span class="k">for</span> <span class="n">tool_name</span> <span class="ow">in</span> <span class="nb">sorted</span><span class="p">(</span><span class="n">ai</span><span class="o">.</span><span class="n">tool_executor</span><span class="o">.</span><span class="n">tools_by_name</span><span class="o">.</span><span class="n">keys</span><span class="p">()):</span>
+</span><span id="__span-1-12"><a id="__codelineno-1-12" name="__codelineno-1-12" href="#__codelineno-1-12"></a>    <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;  </span><span class="si">{</span><span class="n">tool_name</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
 </span></code></pre></div>
 <h2 id="inspecting-tool-calls">Inspecting Tool Calls<a class="headerlink" href="#inspecting-tool-calls" title="Permanent link">&para;</a></h2>
 <p>After each response, you can see which tools Holmes called:</p>
@@ -5246,29 +5280,33 @@
 <div class="language-python highlight"><pre><span></span><code><span id="__span-3-1"><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a><span class="kn">import</span><span class="w"> </span><span class="nn">os</span>
 </span><span id="__span-3-2"><a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a><span class="kn">from</span><span class="w"> </span><span class="nn">holmes.config</span><span class="w"> </span><span class="kn">import</span> <span class="n">Config</span>
 </span><span id="__span-3-3"><a id="__codelineno-3-3" name="__codelineno-3-3" href="#__codelineno-3-3"></a><span class="kn">from</span><span class="w"> </span><span class="nn">holmes.core.prompt</span><span class="w"> </span><span class="kn">import</span> <span class="n">build_initial_ask_messages</span>
-</span><span id="__span-3-4"><a id="__codelineno-3-4" name="__codelineno-3-4" href="#__codelineno-3-4"></a>
-</span><span id="__span-3-5"><a id="__codelineno-3-5" name="__codelineno-3-5" href="#__codelineno-3-5"></a><span class="n">config</span> <span class="o">=</span> <span class="n">Config</span><span class="p">(</span>
-</span><span id="__span-3-6"><a id="__codelineno-3-6" name="__codelineno-3-6" href="#__codelineno-3-6"></a>    <span class="n">api_key</span><span class="o">=</span><span class="n">os</span><span class="o">.</span><span class="n">getenv</span><span class="p">(</span><span class="s2">&quot;ANTHROPIC_API_KEY&quot;</span><span class="p">),</span>
-</span><span id="__span-3-7"><a id="__codelineno-3-7" name="__codelineno-3-7" href="#__codelineno-3-7"></a>    <span class="n">model</span><span class="o">=</span><span class="s2">&quot;anthropic/claude-sonnet-4-5-20250929&quot;</span><span class="p">,</span>
-</span><span id="__span-3-8"><a id="__codelineno-3-8" name="__codelineno-3-8" href="#__codelineno-3-8"></a><span class="p">)</span>
-</span><span id="__span-3-9"><a id="__codelineno-3-9" name="__codelineno-3-9" href="#__codelineno-3-9"></a><span class="n">ai</span> <span class="o">=</span> <span class="n">config</span><span class="o">.</span><span class="n">create_console_toolcalling_llm</span><span class="p">()</span>
-</span><span id="__span-3-10"><a id="__codelineno-3-10" name="__codelineno-3-10" href="#__codelineno-3-10"></a>
-</span><span id="__span-3-11"><a id="__codelineno-3-11" name="__codelineno-3-11" href="#__codelineno-3-11"></a><span class="c1"># First question - build initial messages with system prompt</span>
-</span><span id="__span-3-12"><a id="__codelineno-3-12" name="__codelineno-3-12" href="#__codelineno-3-12"></a><span class="n">messages</span> <span class="o">=</span> <span class="n">build_initial_ask_messages</span><span class="p">(</span>
-</span><span id="__span-3-13"><a id="__codelineno-3-13" name="__codelineno-3-13" href="#__codelineno-3-13"></a>    <span class="n">initial_user_prompt</span><span class="o">=</span><span class="s2">&quot;what pods are failing in my cluster?&quot;</span><span class="p">,</span>
-</span><span id="__span-3-14"><a id="__codelineno-3-14" name="__codelineno-3-14" href="#__codelineno-3-14"></a>    <span class="n">file_paths</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span>
-</span><span id="__span-3-15"><a id="__codelineno-3-15" name="__codelineno-3-15" href="#__codelineno-3-15"></a>    <span class="n">tool_executor</span><span class="o">=</span><span class="n">ai</span><span class="o">.</span><span class="n">tool_executor</span><span class="p">,</span>
-</span><span id="__span-3-16"><a id="__codelineno-3-16" name="__codelineno-3-16" href="#__codelineno-3-16"></a>    <span class="n">runbooks</span><span class="o">=</span><span class="n">config</span><span class="o">.</span><span class="n">get_runbook_catalog</span><span class="p">(),</span>
-</span><span id="__span-3-17"><a id="__codelineno-3-17" name="__codelineno-3-17" href="#__codelineno-3-17"></a>    <span class="n">system_prompt_additions</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span>
-</span><span id="__span-3-18"><a id="__codelineno-3-18" name="__codelineno-3-18" href="#__codelineno-3-18"></a><span class="p">)</span>
-</span><span id="__span-3-19"><a id="__codelineno-3-19" name="__codelineno-3-19" href="#__codelineno-3-19"></a><span class="n">response</span> <span class="o">=</span> <span class="n">ai</span><span class="o">.</span><span class="n">call</span><span class="p">(</span><span class="n">messages</span><span class="p">)</span>
-</span><span id="__span-3-20"><a id="__codelineno-3-20" name="__codelineno-3-20" href="#__codelineno-3-20"></a><span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Holmes: </span><span class="si">{</span><span class="n">response</span><span class="o">.</span><span class="n">result</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
-</span><span id="__span-3-21"><a id="__codelineno-3-21" name="__codelineno-3-21" href="#__codelineno-3-21"></a>
-</span><span id="__span-3-22"><a id="__codelineno-3-22" name="__codelineno-3-22" href="#__codelineno-3-22"></a><span class="c1"># Follow-up - append to the returned message history</span>
-</span><span id="__span-3-23"><a id="__codelineno-3-23" name="__codelineno-3-23" href="#__codelineno-3-23"></a><span class="n">messages</span> <span class="o">=</span> <span class="n">response</span><span class="o">.</span><span class="n">messages</span>
-</span><span id="__span-3-24"><a id="__codelineno-3-24" name="__codelineno-3-24" href="#__codelineno-3-24"></a><span class="n">messages</span><span class="o">.</span><span class="n">append</span><span class="p">({</span><span class="s2">&quot;role&quot;</span><span class="p">:</span> <span class="s2">&quot;user&quot;</span><span class="p">,</span> <span class="s2">&quot;content&quot;</span><span class="p">:</span> <span class="s2">&quot;Can you show me the logs for those failing pods?&quot;</span><span class="p">})</span>
-</span><span id="__span-3-25"><a id="__codelineno-3-25" name="__codelineno-3-25" href="#__codelineno-3-25"></a><span class="n">response</span> <span class="o">=</span> <span class="n">ai</span><span class="o">.</span><span class="n">call</span><span class="p">(</span><span class="n">messages</span><span class="p">)</span>
-</span><span id="__span-3-26"><a id="__codelineno-3-26" name="__codelineno-3-26" href="#__codelineno-3-26"></a><span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Holmes: </span><span class="si">{</span><span class="n">response</span><span class="o">.</span><span class="n">result</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+</span><span id="__span-3-4"><a id="__codelineno-3-4" name="__codelineno-3-4" href="#__codelineno-3-4"></a><span class="kn">from</span><span class="w"> </span><span class="nn">holmes.core.tools</span><span class="w"> </span><span class="kn">import</span> <span class="n">ToolsetTag</span>
+</span><span id="__span-3-5"><a id="__codelineno-3-5" name="__codelineno-3-5" href="#__codelineno-3-5"></a>
+</span><span id="__span-3-6"><a id="__codelineno-3-6" name="__codelineno-3-6" href="#__codelineno-3-6"></a><span class="n">config</span> <span class="o">=</span> <span class="n">Config</span><span class="p">(</span>
+</span><span id="__span-3-7"><a id="__codelineno-3-7" name="__codelineno-3-7" href="#__codelineno-3-7"></a>    <span class="n">api_key</span><span class="o">=</span><span class="n">os</span><span class="o">.</span><span class="n">getenv</span><span class="p">(</span><span class="s2">&quot;ANTHROPIC_API_KEY&quot;</span><span class="p">),</span>
+</span><span id="__span-3-8"><a id="__codelineno-3-8" name="__codelineno-3-8" href="#__codelineno-3-8"></a>    <span class="n">model</span><span class="o">=</span><span class="s2">&quot;anthropic/claude-sonnet-4-5-20250929&quot;</span><span class="p">,</span>
+</span><span id="__span-3-9"><a id="__codelineno-3-9" name="__codelineno-3-9" href="#__codelineno-3-9"></a><span class="p">)</span>
+</span><span id="__span-3-10"><a id="__codelineno-3-10" name="__codelineno-3-10" href="#__codelineno-3-10"></a><span class="n">ai</span> <span class="o">=</span> <span class="n">config</span><span class="o">.</span><span class="n">create_toolcalling_llm</span><span class="p">(</span>
+</span><span id="__span-3-11"><a id="__codelineno-3-11" name="__codelineno-3-11" href="#__codelineno-3-11"></a>    <span class="n">toolset_tag_filter</span><span class="o">=</span><span class="p">[</span><span class="n">ToolsetTag</span><span class="o">.</span><span class="n">CORE</span><span class="p">,</span> <span class="n">ToolsetTag</span><span class="o">.</span><span class="n">CLI</span><span class="p">],</span>
+</span><span id="__span-3-12"><a id="__codelineno-3-12" name="__codelineno-3-12" href="#__codelineno-3-12"></a>    <span class="n">enable_all_toolsets_possible</span><span class="o">=</span><span class="kc">True</span><span class="p">,</span>
+</span><span id="__span-3-13"><a id="__codelineno-3-13" name="__codelineno-3-13" href="#__codelineno-3-13"></a><span class="p">)</span>
+</span><span id="__span-3-14"><a id="__codelineno-3-14" name="__codelineno-3-14" href="#__codelineno-3-14"></a>
+</span><span id="__span-3-15"><a id="__codelineno-3-15" name="__codelineno-3-15" href="#__codelineno-3-15"></a><span class="c1"># First question - build initial messages with system prompt</span>
+</span><span id="__span-3-16"><a id="__codelineno-3-16" name="__codelineno-3-16" href="#__codelineno-3-16"></a><span class="n">messages</span> <span class="o">=</span> <span class="n">build_initial_ask_messages</span><span class="p">(</span>
+</span><span id="__span-3-17"><a id="__codelineno-3-17" name="__codelineno-3-17" href="#__codelineno-3-17"></a>    <span class="n">initial_user_prompt</span><span class="o">=</span><span class="s2">&quot;what pods are failing in my cluster?&quot;</span><span class="p">,</span>
+</span><span id="__span-3-18"><a id="__codelineno-3-18" name="__codelineno-3-18" href="#__codelineno-3-18"></a>    <span class="n">file_paths</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span>
+</span><span id="__span-3-19"><a id="__codelineno-3-19" name="__codelineno-3-19" href="#__codelineno-3-19"></a>    <span class="n">tool_executor</span><span class="o">=</span><span class="n">ai</span><span class="o">.</span><span class="n">tool_executor</span><span class="p">,</span>
+</span><span id="__span-3-20"><a id="__codelineno-3-20" name="__codelineno-3-20" href="#__codelineno-3-20"></a>    <span class="n">runbooks</span><span class="o">=</span><span class="n">config</span><span class="o">.</span><span class="n">get_runbook_catalog</span><span class="p">(),</span>
+</span><span id="__span-3-21"><a id="__codelineno-3-21" name="__codelineno-3-21" href="#__codelineno-3-21"></a>    <span class="n">system_prompt_additions</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span>
+</span><span id="__span-3-22"><a id="__codelineno-3-22" name="__codelineno-3-22" href="#__codelineno-3-22"></a><span class="p">)</span>
+</span><span id="__span-3-23"><a id="__codelineno-3-23" name="__codelineno-3-23" href="#__codelineno-3-23"></a><span class="n">response</span> <span class="o">=</span> <span class="n">ai</span><span class="o">.</span><span class="n">call</span><span class="p">(</span><span class="n">messages</span><span class="p">)</span>
+</span><span id="__span-3-24"><a id="__codelineno-3-24" name="__codelineno-3-24" href="#__codelineno-3-24"></a><span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Holmes: </span><span class="si">{</span><span class="n">response</span><span class="o">.</span><span class="n">result</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+</span><span id="__span-3-25"><a id="__codelineno-3-25" name="__codelineno-3-25" href="#__codelineno-3-25"></a>
+</span><span id="__span-3-26"><a id="__codelineno-3-26" name="__codelineno-3-26" href="#__codelineno-3-26"></a><span class="c1"># Follow-up - append to the returned message history</span>
+</span><span id="__span-3-27"><a id="__codelineno-3-27" name="__codelineno-3-27" href="#__codelineno-3-27"></a><span class="n">messages</span> <span class="o">=</span> <span class="n">response</span><span class="o">.</span><span class="n">messages</span>
+</span><span id="__span-3-28"><a id="__codelineno-3-28" name="__codelineno-3-28" href="#__codelineno-3-28"></a><span class="n">messages</span><span class="o">.</span><span class="n">append</span><span class="p">({</span><span class="s2">&quot;role&quot;</span><span class="p">:</span> <span class="s2">&quot;user&quot;</span><span class="p">,</span> <span class="s2">&quot;content&quot;</span><span class="p">:</span> <span class="s2">&quot;Can you show me the logs for those failing pods?&quot;</span><span class="p">})</span>
+</span><span id="__span-3-29"><a id="__codelineno-3-29" name="__codelineno-3-29" href="#__codelineno-3-29"></a><span class="n">response</span> <span class="o">=</span> <span class="n">ai</span><span class="o">.</span><span class="n">call</span><span class="p">(</span><span class="n">messages</span><span class="p">)</span>
+</span><span id="__span-3-30"><a id="__codelineno-3-30" name="__codelineno-3-30" href="#__codelineno-3-30"></a><span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Holmes: </span><span class="si">{</span><span class="n">response</span><span class="o">.</span><span class="n">result</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
 </span></code></pre></div>
 <h2 id="loading-custom-yaml-toolsets">Loading Custom YAML Toolsets<a class="headerlink" href="#loading-custom-yaml-toolsets" title="Permanent link">&para;</a></h2>
 <p>Pass custom toolset file paths via the <code>custom_toolsets</code> parameter:</p>
@@ -5392,17 +5430,20 @@
 </span><span id="__span-6-85"><a id="__codelineno-6-85" name="__codelineno-6-85" href="#__codelineno-6-85"></a>    <span class="n">additional_toolsets</span><span class="o">=</span><span class="p">[</span><span class="n">HttpBinToolset</span><span class="p">()],</span>
 </span><span id="__span-6-86"><a id="__codelineno-6-86" name="__codelineno-6-86" href="#__codelineno-6-86"></a><span class="p">)</span>
 </span><span id="__span-6-87"><a id="__codelineno-6-87" name="__codelineno-6-87" href="#__codelineno-6-87"></a>
-</span><span id="__span-6-88"><a id="__codelineno-6-88" name="__codelineno-6-88" href="#__codelineno-6-88"></a><span class="n">ai</span> <span class="o">=</span> <span class="n">config</span><span class="o">.</span><span class="n">create_console_toolcalling_llm</span><span class="p">()</span>
-</span><span id="__span-6-89"><a id="__codelineno-6-89" name="__codelineno-6-89" href="#__codelineno-6-89"></a>
-</span><span id="__span-6-90"><a id="__codelineno-6-90" name="__codelineno-6-90" href="#__codelineno-6-90"></a><span class="n">messages</span> <span class="o">=</span> <span class="n">build_initial_ask_messages</span><span class="p">(</span>
-</span><span id="__span-6-91"><a id="__codelineno-6-91" name="__codelineno-6-91" href="#__codelineno-6-91"></a>    <span class="n">initial_user_prompt</span><span class="o">=</span><span class="s2">&quot;What is my public IP address?&quot;</span><span class="p">,</span>
-</span><span id="__span-6-92"><a id="__codelineno-6-92" name="__codelineno-6-92" href="#__codelineno-6-92"></a>    <span class="n">file_paths</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span>
-</span><span id="__span-6-93"><a id="__codelineno-6-93" name="__codelineno-6-93" href="#__codelineno-6-93"></a>    <span class="n">tool_executor</span><span class="o">=</span><span class="n">ai</span><span class="o">.</span><span class="n">tool_executor</span><span class="p">,</span>
-</span><span id="__span-6-94"><a id="__codelineno-6-94" name="__codelineno-6-94" href="#__codelineno-6-94"></a>    <span class="n">runbooks</span><span class="o">=</span><span class="n">config</span><span class="o">.</span><span class="n">get_runbook_catalog</span><span class="p">(),</span>
-</span><span id="__span-6-95"><a id="__codelineno-6-95" name="__codelineno-6-95" href="#__codelineno-6-95"></a>    <span class="n">system_prompt_additions</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span>
-</span><span id="__span-6-96"><a id="__codelineno-6-96" name="__codelineno-6-96" href="#__codelineno-6-96"></a><span class="p">)</span>
-</span><span id="__span-6-97"><a id="__codelineno-6-97" name="__codelineno-6-97" href="#__codelineno-6-97"></a><span class="n">response</span> <span class="o">=</span> <span class="n">ai</span><span class="o">.</span><span class="n">call</span><span class="p">(</span><span class="n">messages</span><span class="p">)</span>
-</span><span id="__span-6-98"><a id="__codelineno-6-98" name="__codelineno-6-98" href="#__codelineno-6-98"></a><span class="nb">print</span><span class="p">(</span><span class="n">response</span><span class="o">.</span><span class="n">result</span><span class="p">)</span>
+</span><span id="__span-6-88"><a id="__codelineno-6-88" name="__codelineno-6-88" href="#__codelineno-6-88"></a><span class="n">ai</span> <span class="o">=</span> <span class="n">config</span><span class="o">.</span><span class="n">create_toolcalling_llm</span><span class="p">(</span>
+</span><span id="__span-6-89"><a id="__codelineno-6-89" name="__codelineno-6-89" href="#__codelineno-6-89"></a>    <span class="n">toolset_tag_filter</span><span class="o">=</span><span class="p">[</span><span class="n">ToolsetTag</span><span class="o">.</span><span class="n">CORE</span><span class="p">,</span> <span class="n">ToolsetTag</span><span class="o">.</span><span class="n">CLI</span><span class="p">],</span>
+</span><span id="__span-6-90"><a id="__codelineno-6-90" name="__codelineno-6-90" href="#__codelineno-6-90"></a>    <span class="n">enable_all_toolsets_possible</span><span class="o">=</span><span class="kc">True</span><span class="p">,</span>
+</span><span id="__span-6-91"><a id="__codelineno-6-91" name="__codelineno-6-91" href="#__codelineno-6-91"></a><span class="p">)</span>
+</span><span id="__span-6-92"><a id="__codelineno-6-92" name="__codelineno-6-92" href="#__codelineno-6-92"></a>
+</span><span id="__span-6-93"><a id="__codelineno-6-93" name="__codelineno-6-93" href="#__codelineno-6-93"></a><span class="n">messages</span> <span class="o">=</span> <span class="n">build_initial_ask_messages</span><span class="p">(</span>
+</span><span id="__span-6-94"><a id="__codelineno-6-94" name="__codelineno-6-94" href="#__codelineno-6-94"></a>    <span class="n">initial_user_prompt</span><span class="o">=</span><span class="s2">&quot;What is my public IP address?&quot;</span><span class="p">,</span>
+</span><span id="__span-6-95"><a id="__codelineno-6-95" name="__codelineno-6-95" href="#__codelineno-6-95"></a>    <span class="n">file_paths</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span>
+</span><span id="__span-6-96"><a id="__codelineno-6-96" name="__codelineno-6-96" href="#__codelineno-6-96"></a>    <span class="n">tool_executor</span><span class="o">=</span><span class="n">ai</span><span class="o">.</span><span class="n">tool_executor</span><span class="p">,</span>
+</span><span id="__span-6-97"><a id="__codelineno-6-97" name="__codelineno-6-97" href="#__codelineno-6-97"></a>    <span class="n">runbooks</span><span class="o">=</span><span class="n">config</span><span class="o">.</span><span class="n">get_runbook_catalog</span><span class="p">(),</span>
+</span><span id="__span-6-98"><a id="__codelineno-6-98" name="__codelineno-6-98" href="#__codelineno-6-98"></a>    <span class="n">system_prompt_additions</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span>
+</span><span id="__span-6-99"><a id="__codelineno-6-99" name="__codelineno-6-99" href="#__codelineno-6-99"></a><span class="p">)</span>
+</span><span id="__span-6-100"><a id="__codelineno-6-100" name="__codelineno-6-100" href="#__codelineno-6-100"></a><span class="n">response</span> <span class="o">=</span> <span class="n">ai</span><span class="o">.</span><span class="n">call</span><span class="p">(</span><span class="n">messages</span><span class="p">)</span>
+</span><span id="__span-6-101"><a id="__codelineno-6-101" name="__codelineno-6-101" href="#__codelineno-6-101"></a><span class="nb">print</span><span class="p">(</span><span class="n">response</span><span class="o">.</span><span class="n">result</span><span class="p">)</span>
 </span></code></pre></div>
 <p><strong>Key patterns:</strong></p>
 <ul>
@@ -5486,9 +5527,14 @@
 <td>Load configuration from environment variables.</td>
 </tr>
 <tr>
-<td><code>create_console_toolcalling_llm()</code></td>
+<td><code>create_toolcalling_llm(...)</code></td>
 <td><code>ToolCallingLLM</code></td>
-<td>Create an AI instance for asking questions and investigating alerts.</td>
+<td>Create an AI instance. See parameters below.</td>
+</tr>
+<tr>
+<td><code>create_tool_executor(...)</code></td>
+<td><code>ToolExecutor</code></td>
+<td>Create a tool executor without an LLM. Same toolset parameters as <code>create_toolcalling_llm</code>.</td>
 </tr>
 <tr>
 <td><code>get_runbook_catalog()</code></td>
@@ -5497,6 +5543,65 @@
 </tr>
 </tbody>
 </table>
+<h3 id="create_toolcalling_llm-create_tool_executor"><code>create_toolcalling_llm()</code> / <code>create_tool_executor()</code><a class="headerlink" href="#create_toolcalling_llm-create_tool_executor" title="Permanent link">&para;</a></h3>
+<p>Both methods accept the same toolset parameters. <code>create_toolcalling_llm</code> additionally accepts <code>model</code>, <code>tracer</code>, and <code>tool_results_dir</code>.</p>
+<table>
+<thead>
+<tr>
+<th>Parameter</th>
+<th>Type</th>
+<th>Default</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>toolset_tag_filter</code></td>
+<td><code>list[ToolsetTag]</code></td>
+<td><code>[CORE]</code></td>
+<td>Only include toolsets whose tags overlap with this list. Toolsets that don't match are excluded entirely — they won't be loaded, checked, or returned. This filter runs first, before <code>enable_all_toolsets_possible</code> decides which of the remaining toolsets to enable.</td>
+</tr>
+<tr>
+<td><code>enable_all_toolsets_possible</code></td>
+<td><code>bool</code></td>
+<td><code>True</code></td>
+<td>When <code>True</code>, automatically enable every toolset (that passed the tag filter) that can work without explicit configuration. When <code>False</code>, only toolsets explicitly enabled in config are loaded.</td>
+</tr>
+<tr>
+<td><code>prerequisite_cache</code></td>
+<td><code>PrerequisiteCacheMode</code></td>
+<td><code>ENABLED</code></td>
+<td>Controls prerequisite check caching. <code>DISABLED</code> — run full checks eagerly, no disk caching. <code>ENABLED</code> — use cached results when available. <code>FORCE_REFRESH</code> — re-run all checks and update the cache.</td>
+</tr>
+<tr>
+<td><code>reuse_executor</code></td>
+<td><code>bool</code></td>
+<td><code>False</code></td>
+<td>When <code>True</code>, the created executor is cached in memory on the <code>Config</code> instance. Subsequent calls return the same executor without reloading toolsets. Useful for long-lived server processes.</td>
+</tr>
+<tr>
+<td><code>model</code></td>
+<td><code>str</code></td>
+<td><em>None</em></td>
+<td>Model override for this LLM instance.</td>
+</tr>
+</tbody>
+</table>
+<p><strong><code>ToolsetTag</code> values</strong> (<code>holmes.core.tools.ToolsetTag</code>):</p>
+<ul>
+<li><code>ToolsetTag.CORE</code> — Foundational toolsets (Kubernetes, etc.)</li>
+<li><code>ToolsetTag.CLI</code> — Tools for interactive CLI use (filesystem, local commands)</li>
+<li><code>ToolsetTag.CLUSTER</code> — Tools for server/cluster deployments (cluster-wide monitoring)</li>
+</ul>
+<p><strong>How <code>toolset_tag_filter</code> and <code>enable_all_toolsets_possible</code> interact:</strong></p>
+<p>These are independent, sequential steps. First, <code>toolset_tag_filter</code> narrows down <em>which</em> toolsets are even considered. Then, <code>enable_all_toolsets_possible</code> decides which of those remaining toolsets get enabled:</p>
+<ol>
+<li>Load all toolsets (built-in + config + custom)</li>
+<li>Filter by <code>toolset_tag_filter</code> → remove toolsets that don't match any tag</li>
+<li><code>enable_all_toolsets_possible=True</code> → auto-enable toolsets that don't need explicit config</li>
+<li>Check prerequisites on enabled toolsets</li>
+<li>Return matching toolsets</li>
+</ol>
 <h3 id="toolcallingllm"><code>ToolCallingLLM</code><a class="headerlink" href="#toolcallingllm" title="Permanent link">&para;</a></h3>
 <p>Core AI engine for tool-calling interactions (<code>holmes.core.tool_calling_llm.ToolCallingLLM</code>).</p>
 <table>
