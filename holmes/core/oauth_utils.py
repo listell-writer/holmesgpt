@@ -71,6 +71,7 @@ def exchange_code_for_tokens(
     redirect_uri: str,
     client_id: str,
     code_verifier: Optional[str] = None,
+    client_secret: Optional[str] = None,
 ) -> dict:
     """Exchange an OAuth authorization code for tokens at the IdP's token endpoint.
 
@@ -85,6 +86,8 @@ def exchange_code_for_tokens(
     }
     if code_verifier:
         data["code_verifier"] = code_verifier
+    if client_secret:
+        data["client_secret"] = client_secret
 
     resp = httpx.post(
         token_url,
@@ -93,13 +96,13 @@ def exchange_code_for_tokens(
         timeout=30,
     )
 
-    if resp.status_code != 200:
+    if not resp.is_success:
         detail = resp.text[:300] if resp.text else "Unknown error"
         raise OAuthTokenExchangeError(resp.status_code, detail)
 
     token_data = resp.json()
     if "access_token" not in token_data:
-        raise OAuthTokenExchangeError(200, f"Response missing 'access_token'. Keys: {list(token_data.keys())}")
+        raise OAuthTokenExchangeError(resp.status_code, f"Response missing 'access_token'. Keys: {list(token_data.keys())}")
 
     return token_data
 
@@ -417,6 +420,7 @@ def process_oauth_callback(
         redirect_uri=request.redirect_uri,
         client_id=client_id,
         code_verifier=request.code_verifier,
+        client_secret=request.client_secret,
     )
 
     request_context = {"user_id": request.user_id} if request.user_id else None
