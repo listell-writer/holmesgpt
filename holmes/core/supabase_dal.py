@@ -899,6 +899,159 @@ class SupabaseDal:
             )
             return False
 
+    # ── Conversation Worker RPCs (M2) ──────────────────────────────────
+
+    def claim_conversations(self, holmes_id: str) -> List[Dict]:
+        """Atomically claim all pending conversations for this cluster.
+
+        Calls the ``claim_conversations`` SECURITY DEFINER RPC which uses
+        ``FOR UPDATE SKIP LOCKED`` to prevent double-processing.
+
+        Returns a list of claimed Conversation rows (may be empty).
+        """
+        if not self.enabled:
+            return []
+
+        try:
+            res = self.client.rpc(
+                "claim_conversations",
+                {
+                    "_account_id": self.account_id,
+                    "_cluster_id": self.cluster,
+                    "_assignee": holmes_id,
+                },
+            ).execute()
+
+            if not res.data:
+                return []
+
+            rows = res.data if isinstance(res.data, list) else [res.data]
+            return [r for r in rows if r.get("conversation_id")]
+        except Exception:
+            logging.exception(
+                "Supabase error while claiming conversations", exc_info=True
+            )
+            return []
+
+    def post_conversation_events(
+        self,
+        conversation_id: str,
+        holmes_id: str,
+        request_sequence: int,
+        events: list,
+        compact: bool = False,
+    ) -> Optional[int]:
+        """Post a batch of events for a running conversation.
+
+        Returns the assigned seq number, or ``None`` when the
+        holmes_id / request_sequence no longer match (conversation was
+        reassigned or stopped).
+        """
+        if not self.enabled:
+            return None
+
+        try:
+            res = self.client.rpc(
+                "post_conversation_events",
+                {
+                    "_conversation_id": conversation_id,
+                    "_holmes_id": holmes_id,
+                    "_request_sequence": request_sequence,
+                    "_events": events,
+                    "_compact": compact,
+                },
+            ).execute()
+
+            if res.data is None:
+                return None
+            # RPC returns a single integer (the new seq number)
+            if isinstance(res.data, int):
+                return res.data
+            if isinstance(res.data, list) and res.data:
+                return res.data[0]
+            return res.data
+        except Exception:
+            logging.exception(
+                "Supabase error while posting conversation events for %s",
+                conversation_id,
+                exc_info=True,
+            )
+            return None
+
+    def complete_conversation(
+        self,
+        conversation_id: str,
+        request_sequence: int,
+        holmes_id: str,
+        status: str,
+    ) -> bool:
+        """Mark a conversation as completed or failed.
+
+        ``status`` must be ``'completed'`` or ``'failed'``.
+        Returns True on success.
+        """
+        if not self.enabled:
+            return False
+
+        try:
+            res = self.client.rpc(
+                "complete_conversation",
+                {
+                    "_conversation_id": conversation_id,
+                    "_request_sequence": request_sequence,
+                    "_holmes_id": holmes_id,
+                    "_status": status,
+                },
+            ).execute()
+
+            return bool(res.data)
+        except Exception:
+            logging.exception(
+                "Supabase error while completing conversation %s",
+                conversation_id,
+                exc_info=True,
+            )
+            return False
+
+    def get_conversation_events(
+        self,
+        conversation_id: str,
+        holmes_id: str,
+        min_seq: int = 0,
+    ) -> List[Dict]:
+        """Fetch ConversationEvents rows for history reconstruction.
+
+        Uses a SECURITY DEFINER RPC because Holmes cannot SELECT
+        ConversationEvents through RLS directly.
+        """
+        if not self.enabled:
+            return []
+
+        try:
+            res = self.client.rpc(
+                "get_conversation_events",
+                {
+                    "_conversation_id": conversation_id,
+                    "_account_id": self.account_id,
+                    "_holmes_id": holmes_id,
+                    "_min_seq": min_seq,
+                },
+            ).execute()
+
+            if not res.data:
+                return []
+
+            return res.data if isinstance(res.data, list) else [res.data]
+        except Exception:
+            logging.exception(
+                "Supabase error while fetching conversation events for %s",
+                conversation_id,
+                exc_info=True,
+            )
+            return []
+
+    # ── End Conversation Worker RPCs ─────────────────────────────────
+
     def finish_scheduled_prompt_run(
         self,
         status: RunStatus,
