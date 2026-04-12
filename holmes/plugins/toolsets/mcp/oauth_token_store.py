@@ -15,11 +15,26 @@ logger = logging.getLogger(__name__)
 class _CachedToken:
     """Holds an access token, its expiry, and an optional refresh token."""
 
-    def __init__(self, access_token: str, expires_at: float, refresh_token: Optional[str] = None, refresh_expires_at: Optional[float] = None) -> None:
+    def __init__(
+        self,
+        access_token: str,
+        expires_at: float,
+        refresh_token: Optional[str] = None,
+        refresh_expires_at: Optional[float] = None,
+        token_url: Optional[str] = None,
+        client_id: Optional[str] = None,
+        authorization_url: Optional[str] = None,
+        user_id: Optional[str] = None,
+    ) -> None:
         self.access_token = access_token
         self.expires_at = expires_at
         self.refresh_token = refresh_token
         self.refresh_expires_at = refresh_expires_at
+        # Metadata for background refresh sweep
+        self.token_url = token_url
+        self.client_id = client_id
+        self.authorization_url = authorization_url
+        self.user_id = user_id
 
     @property
     def access_expired(self) -> bool:
@@ -39,32 +54,41 @@ class OAuthTokenCache:
         self._cache: Dict[str, _CachedToken] = {}
         self._lock = threading.Lock()
 
-    def get(self, key: str) -> Optional[str]:
-        """Return a valid access token, or None if expired and not refreshable."""
+    def get_valid_access_token(self, key: str) -> Optional[str]:
+        """Return a valid (non-expired) access token, or None if expired or missing."""
         with self._lock:
             entry = self._cache.get(key)
             if entry is None:
                 return None
             if not entry.access_expired:
                 return entry.access_token
-            # Access token expired — caller must try refresh
-            if not entry.refresh_expired:
-                return None  # Has refresh token but access expired — caller should refresh
-            # Both expired
+            # Access expired — keep entry if refresh token exists (caller should try refresh)
+            if entry.refresh_token:
+                return None
+            # No refresh token, evict
             del self._cache[key]
             return None
 
     def get_refresh_token(self, key: str) -> Optional[str]:
-        """Return the refresh token if it hasn't expired, even if the access token has."""
+        """Return the refresh token even if expired — some IdPs accept expired refresh tokens to issue new ones."""
         with self._lock:
             entry = self._cache.get(key)
             if entry is None:
                 return None
-            if not entry.refresh_expired:
-                return entry.refresh_token
-            return None
+            return entry.refresh_token
 
-    def set(self, key: str, access_token: str, expires_in: int = 300, refresh_token: Optional[str] = None, refresh_expires_in: Optional[int] = None) -> None:
+    def set(
+        self,
+        key: str,
+        access_token: str,
+        expires_in: int = 300,
+        refresh_token: Optional[str] = None,
+        refresh_expires_in: Optional[int] = None,
+        token_url: Optional[str] = None,
+        client_id: Optional[str] = None,
+        authorization_url: Optional[str] = None,
+        user_id: Optional[str] = None,
+    ) -> None:
         now = time.monotonic()
         # Subtract a small buffer so we refresh before actual expiry
         access_expires_at = now + max(expires_in - 30, 10)
@@ -74,17 +98,35 @@ class OAuthTokenCache:
             refresh_ttl = refresh_expires_in if refresh_expires_in else 86400
             refresh_expires_at = now + max(refresh_ttl - 30, 10)
         with self._lock:
-            self._cache[key] = _CachedToken(access_token, access_expires_at, refresh_token, refresh_expires_at)
+            self._cache[key] = _CachedToken(
+                access_token, access_expires_at, refresh_token, refresh_expires_at,
+                token_url=token_url, client_id=client_id,
+                authorization_url=authorization_url, user_id=user_id,
+            )
 
-    def has(self, key: str) -> bool:
-        """True if there is a valid access token OR a valid refresh token."""
+    def evict(self, key: str) -> None:
+        """Remove an entry from the cache (e.g. after a failed refresh)."""
+        with self._lock:
+            self._cache.pop(key, None)
+
+    def get_expiring_entries(self, within_seconds: int) -> list[tuple[str, "_CachedToken"]]:
+        """Return (key, entry) pairs for tokens whose access expires within the given window."""
+        threshold = time.monotonic() + within_seconds
+        with self._lock:
+            return [
+                (key, entry) for key, entry in self._cache.items()
+                if entry.expires_at <= threshold
+            ]
+
+    def has_token_or_refresh(self, key: str) -> bool:
+        """True if there is a valid access token or any refresh token (even expired — IdP decides validity)."""
         with self._lock:
             entry = self._cache.get(key)
             if entry is None:
                 return False
             if not entry.access_expired:
                 return True
-            if not entry.refresh_expired:
+            if entry.refresh_token:
                 return True
             del self._cache[key]
             return False
