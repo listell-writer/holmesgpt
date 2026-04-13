@@ -37,11 +37,11 @@ def replace_env_vars_values(values: dict[str, Any]) -> dict[str, Any]:
     for key, value in values.items():
         if isinstance(value, str):
             env_var_value = get_env_replacement(value)
-            if env_var_value:
+            if env_var_value is not None:
                 values[key] = env_var_value
         elif isinstance(value, SecretStr):
             env_var_value = get_env_replacement(value.get_secret_value())
-            if env_var_value:
+            if env_var_value is not None:
                 values[key] = SecretStr(env_var_value)
         elif isinstance(value, dict):
             replace_env_vars_values(value)
