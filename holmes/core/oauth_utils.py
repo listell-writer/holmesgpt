@@ -124,20 +124,6 @@ def generate_pkce() -> Tuple[str, str]:
 # ── CLI OAuth flow helpers ────────────────────────────────────────────────
 
 
-def find_available_port(start: int = 18900, end: int = 18920) -> int:
-    """Find an available TCP port in the given range. Returns 0 if none found."""
-    for port in range(start, end):
-        try:
-            s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-            s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-            s.bind(("127.0.0.1", port))
-            s.close()
-            return port
-        except socket.error:
-            continue
-    return 0
-
-
 def perform_dcr(
     registration_endpoint: str,
     redirect_uri: str,
@@ -169,11 +155,16 @@ def perform_dcr(
     return None
 
 
-def wait_for_oauth_callback(port: int, timeout: int = 300) -> Dict[str, Any]:
-    """Start a local HTTP server and wait for an OAuth callback.
+class _ReusableHTTPServer(HTTPServer):
+    """HTTPServer with SO_REUSEADDR set before binding (avoids TIME_WAIT conflicts)."""
+    allow_reuse_address = True
 
-    Returns a dict with 'code' on success, or 'error'/'error_description' on failure.
-    Empty dict on timeout.
+
+def start_oauth_callback_server(port: int = 0) -> Tuple[Any, Dict[str, Any], threading.Event, int]:
+    """Start a local HTTP server to receive the OAuth callback.
+
+    If port=0, the OS picks a free port. Returns (server, result_dict, event, actual_port).
+    Caller must call wait_for_oauth_callback_event() then server.shutdown()/server_close().
     """
     result: Dict[str, Any] = {}
     callback_event = threading.Event()
@@ -200,14 +191,24 @@ def wait_for_oauth_callback(port: int, timeout: int = 300) -> Dict[str, Any]:
         def log_message(self, format, *args):
             pass
 
-    server = HTTPServer(("127.0.0.1", port), CallbackHandler)
-    server.socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-    server_thread = threading.Thread(target=server.serve_forever, daemon=True)
-    server_thread.start()
+    server = _ReusableHTTPServer(("127.0.0.1", port), CallbackHandler)
+    actual_port = server.server_address[1]
+    threading.Thread(target=server.serve_forever, daemon=True).start()
+    return server, result, callback_event, actual_port
+
+
+def wait_for_oauth_callback(port: int, timeout: int = 300) -> Dict[str, Any]:
+    """Start a local HTTP server and wait for an OAuth callback.
+
+    Returns a dict with 'code' on success, or 'error'/'error_description' on failure.
+    Empty dict on timeout.
+    """
+    server, result, callback_event, _ = start_oauth_callback_server(port)
     try:
         callback_event.wait(timeout=timeout)
     finally:
         server.shutdown()
+        server.server_close()
     return result
 
 
@@ -246,37 +247,44 @@ def cli_oauth_flow(oauth: OAuthEndpoints, server_name: str) -> Optional[Dict[str
         logger.warning("CLI OAuth %s: no client_id and no registration_endpoint", server_name)
         return None
 
-    callback_port = find_available_port()
-    if callback_port == 0:
-        logger.warning("CLI OAuth %s: could not find available port for callback server", server_name)
+    # Start the callback server first (port=0 → OS picks free port, no race condition)
+    try:
+        server, result_dict, callback_event, callback_port = start_oauth_callback_server(port=0)
+    except OSError as e:
+        logger.warning("CLI OAuth %s: failed to start callback server: %s", server_name, e)
         return None
 
-    redirect_uri = f"http://127.0.0.1:{callback_port}/callback"
+    try:
+        redirect_uri = f"http://127.0.0.1:{callback_port}/callback"
 
-    # Perform DCR if needed (now that we know the redirect_uri)
-    if oauth.registration_endpoint:
-        dcr_client_id = perform_dcr(oauth.registration_endpoint, redirect_uri, server_name)
-        if dcr_client_id:
-            oauth.client_id = dcr_client_id
-        elif not oauth.client_id:
+        # Perform DCR if needed (now that we know the redirect_uri)
+        if oauth.registration_endpoint:
+            dcr_client_id = perform_dcr(oauth.registration_endpoint, redirect_uri, server_name)
+            if dcr_client_id:
+                oauth.client_id = dcr_client_id
+            elif not oauth.client_id:
+                return None
+
+        if not oauth.client_id:
+            logger.warning("CLI OAuth %s: no client_id after DCR attempt", server_name)
             return None
 
-    if not oauth.client_id:
-        logger.warning("CLI OAuth %s: no client_id after DCR attempt", server_name)
-        return None
+        code_verifier, code_challenge = generate_pkce()
+        state = secrets.token_urlsafe(32)
+        auth_url = build_authorization_url(
+            oauth.authorization_url, oauth.client_id, redirect_uri, code_challenge, state, oauth.scopes,
+        )
 
-    code_verifier, code_challenge = generate_pkce()
-    state = secrets.token_urlsafe(32)
-    auth_url = build_authorization_url(
-        oauth.authorization_url, oauth.client_id, redirect_uri, code_challenge, state, oauth.scopes,
-    )
+        logger.info("CLI OAuth %s: opening browser for authentication", server_name)
+        print(f"\nOpening browser for OAuth authentication to {server_name}...")
+        print(f"If browser doesn't open, visit: {auth_url}\n")
+        webbrowser.open(auth_url)
 
-    logger.info("CLI OAuth %s: opening browser for authentication", server_name)
-    print(f"\nOpening browser for OAuth authentication to {server_name}...")
-    print(f"If browser doesn't open, visit: {auth_url}\n")
-    webbrowser.open(auth_url)
-
-    result = wait_for_oauth_callback(callback_port)
+        callback_event.wait(timeout=300)
+        result = result_dict
+    finally:
+        server.shutdown()
+        server.server_close()
 
     if "error" in result:
         logger.warning("CLI OAuth %s: OAuth error: %s - %s", server_name, result["error"], result.get("error_description", ""))
