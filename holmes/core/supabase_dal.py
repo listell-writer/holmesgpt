@@ -934,20 +934,18 @@ class SupabaseDal:
     def post_conversation_events(
         self,
         conversation_id: str,
-        holmes_id: str,
+        assignee: str,
         request_sequence: int,
         events: list,
         compact: bool = False,
     ) -> Optional[int]:
         """
         Post a batch of events. Returns assigned seq number on success.
-        Raises an exception on errors including holmes_id / request_sequence mismatch.
+        Raises an exception on errors including assignee / request_sequence mismatch.
 
         When ``compact=True``, the ``post_conversation_events`` RPC marks all
-        previous events in the same ``request_sequence`` as ``compacted=true``.
-        ConversationEvents has no UPDATE RLS policy for the authenticated user,
-        so the marking must happen inside the RPC (SECURITY DEFINER) — we only
-        pass the flag through.
+        previous events in the conversation with seq < new_seq as compacted=true
+        (global per conversation, not scoped to request_sequence).
         """
         if not self.enabled:
             return None
@@ -957,7 +955,7 @@ class SupabaseDal:
                 "post_conversation_events",
                 {
                     "_conversation_id": conversation_id,
-                    "_holmes_id": holmes_id,
+                    "_assignee": assignee,
                     "_request_sequence": request_sequence,
                     "_events": events,
                     "_compact": compact,
@@ -982,7 +980,7 @@ class SupabaseDal:
         self,
         conversation_id: str,
         request_sequence: int,
-        holmes_id: str,
+        assignee: str,
         status: str,
     ) -> bool:
         """
@@ -1001,7 +999,7 @@ class SupabaseDal:
                 {
                     "_conversation_id": conversation_id,
                     "_request_sequence": request_sequence,
-                    "_holmes_id": holmes_id,
+                    "_assignee": assignee,
                     "_status": status,
                 },
             ).execute()
@@ -1013,28 +1011,39 @@ class SupabaseDal:
             return False
 
     def get_conversation_events(
-        self, conversation_id: str, include_compacted: bool = False
+        self,
+        conversation_id: str,
+        include_compacted: bool = False,
+        min_seq: int = 1,
     ) -> List[Dict]:
         """
-        Fetch ConversationEvents rows ordered by (request_sequence, seq).
+        Fetch conversation events as a flat chronological list.
 
-        By default, rows marked compacted=true are filtered out. A compacted row's
-        data has been superseded by a later conversation_history_compacted event
-        whose messages array already reflects the consolidated history, so it is
-        redundant for history reconstruction and UI rendering.
+        Calls the ``get_conversation_events`` RPC, which flattens all events
+        from all matching rows into a single array ordered by ``(seq, ord)``.
+        Each element is an event dict ``{"event": ..., "data": ..., "ts": ...}``.
+
+        When ``include_compacted=False`` (default), events from rows marked
+        ``compacted=true`` are excluded — those have been superseded by a later
+        ``conversation_history_compacted`` event whose ``messages`` array already
+        reflects the consolidated state.
+
+        Holmes does not have direct SELECT/UPDATE on ConversationEvents under
+        RLS — all reads go through this SECURITY DEFINER RPC.
         """
         if not self.enabled:
             return []
 
         try:
-            query = (
-                self.client.table(CONVERSATION_EVENTS_TABLE)
-                .select("*")
-                .eq("conversation_id", conversation_id)
-            )
-            if not include_compacted:
-                query = query.eq("compacted", False)
-            res = query.order("request_sequence").order("seq").execute()
+            res = self.client.rpc(
+                "get_conversation_events",
+                {
+                    "_account_id": self.account_id,
+                    "_conversation_id": conversation_id,
+                    "_include_compacted": include_compacted,
+                    "_min_seq": min_seq,
+                },
+            ).execute()
             return res.data or []
         except Exception:
             logging.exception(

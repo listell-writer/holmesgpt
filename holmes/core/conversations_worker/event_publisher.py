@@ -29,13 +29,13 @@ class ConversationEventPublisher:
         self,
         dal: "SupabaseDal",
         conversation_id: str,
-        holmes_id: str,
+        assignee: str,
         request_sequence: int,
         batch_interval_seconds: float = 0.5,
     ):
         self.dal = dal
         self.conversation_id = conversation_id
-        self.holmes_id = holmes_id
+        self.assignee = assignee
         self.request_sequence = request_sequence
         self.batch_interval_seconds = batch_interval_seconds
 
@@ -100,7 +100,7 @@ class ConversationEventPublisher:
         try:
             seq = self.dal.post_conversation_events(
                 conversation_id=self.conversation_id,
-                holmes_id=self.holmes_id,
+                assignee=self.assignee,
                 request_sequence=self.request_sequence,
                 events=events_to_flush,
                 compact=compact,

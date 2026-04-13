@@ -21,7 +21,7 @@ class _FakeDal:
     def post_conversation_events(
         self,
         conversation_id: str,
-        holmes_id: str,
+        assignee: str,
         request_sequence: int,
         events: list,
         compact: bool = False,
@@ -29,7 +29,7 @@ class _FakeDal:
         self.calls.append(
             {
                 "conversation_id": conversation_id,
-                "holmes_id": holmes_id,
+                "assignee": assignee,
                 "request_sequence": request_sequence,
                 "events": events,
                 "compact": compact,
@@ -51,7 +51,7 @@ def test_publisher_flushes_on_terminal_answer_end():
     pub = ConversationEventPublisher(
         dal=dal,
         conversation_id="c1",
-        holmes_id="h1",
+        assignee="h1",
         request_sequence=1,
         batch_interval_seconds=60.0,  # long — no interval flush
     )
@@ -77,7 +77,7 @@ def test_publisher_flushes_on_approval_required():
     pub = ConversationEventPublisher(
         dal=dal,
         conversation_id="c1",
-        holmes_id="h1",
+        assignee="h1",
         request_sequence=1,
         batch_interval_seconds=60.0,
     )
@@ -102,7 +102,7 @@ def test_publisher_compact_flag_on_compacted_event():
     pub = ConversationEventPublisher(
         dal=dal,
         conversation_id="c1",
-        holmes_id="h1",
+        assignee="h1",
         request_sequence=1,
         batch_interval_seconds=60.0,
     )
@@ -149,7 +149,7 @@ def test_publisher_compaction_start_does_not_trigger_compact_flag():
     pub = ConversationEventPublisher(
         dal=dal,
         conversation_id="c1",
-        holmes_id="h1",
+        assignee="h1",
         request_sequence=1,
         batch_interval_seconds=60.0,
     )
@@ -175,7 +175,7 @@ def test_publisher_no_compaction_events_never_sets_compact_flag():
     pub = ConversationEventPublisher(
         dal=dal,
         conversation_id="c1",
-        holmes_id="h1",
+        assignee="h1",
         request_sequence=1,
         batch_interval_seconds=60.0,
     )
@@ -200,7 +200,7 @@ def test_publisher_raises_on_reassignment():
     pub = ConversationEventPublisher(
         dal=dal,
         conversation_id="c1",
-        holmes_id="h1",
+        assignee="h1",
         request_sequence=1,
     )
     with pytest.raises(ConversationReassignedError):
@@ -219,7 +219,7 @@ def test_publisher_flushes_on_error_event():
     pub = ConversationEventPublisher(
         dal=dal,
         conversation_id="c1",
-        holmes_id="h1",
+        assignee="h1",
         request_sequence=1,
         batch_interval_seconds=60.0,
     )
@@ -246,7 +246,7 @@ def test_publisher_covers_all_stream_event_types():
     pub = ConversationEventPublisher(
         dal=dal,
         conversation_id="c1",
-        holmes_id="h1",
+        assignee="h1",
         request_sequence=1,
         batch_interval_seconds=60.0,
     )
@@ -266,7 +266,7 @@ def test_publisher_batches_intermediate_events():
     pub = ConversationEventPublisher(
         dal=dal,
         conversation_id="c1",
-        holmes_id="h1",
+        assignee="h1",
         request_sequence=1,
         batch_interval_seconds=60.0,  # very large — no interval flush
     )

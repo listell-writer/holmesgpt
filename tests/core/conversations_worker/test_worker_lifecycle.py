@@ -115,7 +115,7 @@ def test_process_conversation_safe_marks_failed_on_exception():
     w.dal.complete_conversation.assert_called_once_with(
         conversation_id="c1",
         request_sequence=1,
-        holmes_id="h-test",
+        assignee="h-test",
         status="failed",
     )
     # active conversation cleared

@@ -231,7 +231,7 @@ class ConversationWorker:
                 self.dal.complete_conversation(
                     conversation_id=task.conversation_id,
                     request_sequence=task.request_sequence,
-                    holmes_id=self.holmes_id,
+                    assignee=self.holmes_id,
                     status="failed",
                 )
             except Exception:
@@ -296,7 +296,7 @@ class ConversationWorker:
             self.dal.complete_conversation(
                 conversation_id=task.conversation_id,
                 request_sequence=task.request_sequence,
-                holmes_id=self.holmes_id,
+                assignee=self.holmes_id,
                 status="failed",
             )
             return
@@ -304,7 +304,7 @@ class ConversationWorker:
         publisher = ConversationEventPublisher(
             dal=self.dal,
             conversation_id=task.conversation_id,
-            holmes_id=self.holmes_id,
+            assignee=self.holmes_id,
             request_sequence=task.request_sequence,
             batch_interval_seconds=CONVERSATION_WORKER_EVENT_BATCH_INTERVAL_SECONDS,
         )
@@ -337,58 +337,65 @@ class ConversationWorker:
         """
         Extract the latest user ask + model/additional_system_prompt/etc.
         Also reconstruct conversation_history from the previous terminal event.
+
+        ``events`` is the flat chronological event list returned by
+        ``get_conversation_events`` RPC: ``[{event, data, ts}, ...]`` sorted by
+        ``(seq, ord)``. Turn boundaries are detected by the ``user_message``
+        event itself. Algorithm:
+         1. Find the index of the LATEST ``user_message`` event — that's the
+            current turn's request.
+         2. Among events with index < that, find the latest terminal event
+            (``ai_answer_end`` or ``approval_required``). Its ``messages``
+            array is the conversation history the LLM should resume from.
+         3. Extract the current turn's ask / tool_decisions / etc. from the
+            latest ``user_message``'s data.
         """
-        last_answer_messages: Optional[list] = None
-        last_request_seq_before_current = 0
+        current_user_msg: Optional[Dict[str, Any]] = None
+        current_user_idx: int = -1
+        last_terminal_messages: Optional[list] = None
+        last_terminal_idx: int = -1
 
-        for row in events:
-            row_request_seq = row.get("request_sequence", 1)
-            row_events = row.get("events", []) or []
-            if row_request_seq < task.request_sequence:
-                # Scan for last answer/approval to get conversation_history
-                for ev in row_events:
-                    if ev.get("event") in (
-                        "ai_answer_end",
-                        "approval_required",
-                    ):
-                        messages = (ev.get("data") or {}).get("messages")
-                        if messages:
-                            last_answer_messages = messages
-                            last_request_seq_before_current = row_request_seq
-            elif row_request_seq == task.request_sequence:
-                # Current request turn — extract user_message for the ask
-                for ev in row_events:
-                    if ev.get("event") == EVENT_USER_MESSAGE:
-                        data = ev.get("data") or {}
-                        if data.get("ask"):
-                            task.ask = data["ask"]
-                        if data.get("images"):
-                            task.images = data["images"]
-                        if data.get("model"):
-                            task.model = data["model"]
-                        if data.get("additional_system_prompt"):
-                            task.additional_system_prompt = data[
-                                "additional_system_prompt"
-                            ]
-                        if data.get("tool_decisions"):
-                            task.tool_decisions = data["tool_decisions"]
-                            task.enable_tool_approval = True
-                        if data.get("frontend_tool_results"):
-                            task.frontend_tool_results = data["frontend_tool_results"]
-                        if "bash_enabled" in data:
-                            task.bash_enabled = data["bash_enabled"]
-                        if "fast_mode" in data:
-                            task.fast_mode = data["fast_mode"]
-                        if "enable_tool_approval" in data:
-                            task.enable_tool_approval = bool(
-                                data["enable_tool_approval"]
-                            )
+        for idx, ev in enumerate(events):
+            if ev.get("event") == EVENT_USER_MESSAGE:
+                current_user_idx = idx
+                current_user_msg = ev
 
-        if last_answer_messages is not None:
-            task.conversation_history = last_answer_messages
+        upper = current_user_idx if current_user_idx >= 0 else len(events)
+        for idx in range(upper):
+            ev = events[idx]
+            if ev.get("event") in ("ai_answer_end", "approval_required"):
+                messages = (ev.get("data") or {}).get("messages")
+                if messages:
+                    last_terminal_idx = idx
+                    last_terminal_messages = messages
+
+        if current_user_msg is not None:
+            data = current_user_msg.get("data") or {}
+            if data.get("ask"):
+                task.ask = data["ask"]
+            if data.get("images"):
+                task.images = data["images"]
+            if data.get("model"):
+                task.model = data["model"]
+            if data.get("additional_system_prompt"):
+                task.additional_system_prompt = data["additional_system_prompt"]
+            if data.get("tool_decisions"):
+                task.tool_decisions = data["tool_decisions"]
+                task.enable_tool_approval = True
+            if data.get("frontend_tool_results"):
+                task.frontend_tool_results = data["frontend_tool_results"]
+            if "bash_enabled" in data:
+                task.bash_enabled = data["bash_enabled"]
+            if "fast_mode" in data:
+                task.fast_mode = data["fast_mode"]
+            if "enable_tool_approval" in data:
+                task.enable_tool_approval = bool(data["enable_tool_approval"])
+
+        if last_terminal_messages is not None:
+            task.conversation_history = last_terminal_messages
             logging.debug(
-                "Reconstructed conversation history from request_sequence=%d for conv %s",
-                last_request_seq_before_current,
+                "Reconstructed conversation history from event index=%d for conv %s",
+                last_terminal_idx,
                 task.conversation_id,
             )
 
@@ -509,7 +516,7 @@ class ConversationWorker:
                     ok = self.dal.complete_conversation(
                         conversation_id=task.conversation_id,
                         request_sequence=task.request_sequence,
-                        holmes_id=self.holmes_id,
+                        assignee=self.holmes_id,
                         status=status,
                     )
                     if not ok:
@@ -526,7 +533,7 @@ class ConversationWorker:
                     self.dal.complete_conversation(
                         conversation_id=task.conversation_id,
                         request_sequence=task.request_sequence,
-                        holmes_id=self.holmes_id,
+                        assignee=self.holmes_id,
                         status="completed",
                     )
                 else:
@@ -537,7 +544,7 @@ class ConversationWorker:
                     self.dal.complete_conversation(
                         conversation_id=task.conversation_id,
                         request_sequence=task.request_sequence,
-                        holmes_id=self.holmes_id,
+                        assignee=self.holmes_id,
                         status="failed",
                     )
             finally:
