@@ -141,10 +141,18 @@ class RealtimeManager:
             )
 
     def leave_conversation_presence(self, conversation_id: str) -> None:
-        if self._loop and self._loop.is_running():
-            asyncio.run_coroutine_threadsafe(
-                self._leave_conversation_channel(conversation_id), self._loop
+        if not (self._loop and self._loop.is_running()):
+            logging.warning(
+                "leave_conversation_presence called but loop is not running (conv=%s)",
+                conversation_id,
             )
+            return
+        logging.info(
+            "Scheduling leave_conversation_presence for %s", conversation_id
+        )
+        asyncio.run_coroutine_threadsafe(
+            self._leave_conversation_channel(conversation_id), self._loop
+        )
 
     # ---- thread entry point ----
 
@@ -197,7 +205,15 @@ class RealtimeManager:
 
         # 1. Cluster-level Presence
         topic = f"holmes:cluster:{self.dal.account_id}:{self.dal.cluster}"
-        self._cluster_channel = self._client.channel(topic)
+        self._cluster_channel = self._client.channel(
+            topic,
+            {
+                "config": {
+                    "presence": {"enabled": True, "key": self.holmes_id},
+                    "private": False,
+                }
+            },
+        )
 
         def _on_pg_change(payload: Dict[str, Any]) -> None:
             try:
@@ -223,12 +239,15 @@ class RealtimeManager:
             callback=_on_pg_change,
         )
 
+        subscribed = asyncio.Event()
+
         def _on_subscribe_cb(status, err=None) -> None:
             logging.info(
                 "RealtimeManager subscribe status=%s err=%s",
                 status,
                 err,
             )
+            subscribed.set()
             # Trigger a claim to cover any missed events during subscription setup
             try:
                 self.on_new_pending()
@@ -236,15 +255,27 @@ class RealtimeManager:
                 pass
 
         await self._cluster_channel.subscribe(_on_subscribe_cb)
+        # Wait for SUBSCRIBED before tracking presence — otherwise the track
+        # message is dropped by the server (silently).
+        try:
+            await asyncio.wait_for(subscribed.wait(), timeout=5)
+        except asyncio.TimeoutError:
+            logging.warning("Timed out waiting for cluster presence subscribe ack")
 
         # Advertise presence
         presence_state = {
             "holmes_id": self.holmes_id,
             "version": get_version(),
             "started_at": datetime.now(timezone.utc).isoformat(),
+            "active_conversations": 0,
         }
         try:
             await self._cluster_channel.track(presence_state)
+            logging.info(
+                "Advertised cluster presence: holmes_id=%s on %s",
+                self.holmes_id,
+                topic,
+            )
         except Exception:
             logging.exception("Failed to track presence state", exc_info=True)
 
@@ -257,31 +288,87 @@ class RealtimeManager:
             return
         try:
             topic = f"holmes:conversation:{conversation_id}"
-            ch = self._client.channel(topic)
-            await ch.subscribe()
+            ch = self._client.channel(
+                topic,
+                {
+                    "config": {
+                        "presence": {"enabled": True, "key": self.holmes_id},
+                        "private": False,
+                    }
+                },
+            )
+            subscribed = asyncio.Event()
+
+            def _on_sub(status, err=None):
+                logging.debug(
+                    "Conversation presence subscribe status=%s err=%s conv=%s",
+                    status,
+                    err,
+                    conversation_id,
+                )
+                subscribed.set()
+
+            await ch.subscribe(_on_sub)
+            # Wait briefly for subscribe ack before tracking presence
+            try:
+                await asyncio.wait_for(subscribed.wait(), timeout=5)
+            except asyncio.TimeoutError:
+                pass
             await ch.track(
                 {
                     "holmes_id": self.holmes_id,
                     "version": get_version(),
                     "started_at": datetime.now(timezone.utc).isoformat(),
+                    "conversation_id": conversation_id,
                 }
+            )
+            logging.info(
+                "Joined conversation presence channel for %s", conversation_id
             )
         except Exception:
             logging.exception(
-                "Failed to join conversation presence %s", conversation_id, exc_info=True
+                "Failed to join conversation presence %s",
+                conversation_id,
+                exc_info=True,
             )
 
     async def _leave_conversation_channel(self, conversation_id: str) -> None:
+        logging.info(
+            "_leave_conversation_channel invoked for %s", conversation_id
+        )
         if not self._client:
             return
         topic = f"holmes:conversation:{conversation_id}"
-        for ch in list(self._client.channels):  # type: ignore[attr-defined]
+        # realtime-py prefixes the channel topic with "realtime:" internally
+        ch = self._client.channels.get(topic) or self._client.channels.get(  # type: ignore[attr-defined]
+            f"realtime:{topic}"
+        )
+        if ch is None:
+            logging.warning(
+                "No conversation presence channel to leave for %s (channels=%s)",
+                conversation_id,
+                list(self._client.channels.keys()),  # type: ignore[attr-defined]
+            )
+            return
+        try:
+            # untrack removes our presence entry; unsubscribe leaves the channel
             try:
-                if getattr(ch, "topic", None) == topic:
-                    await ch.unsubscribe()
-                    break
+                await ch.untrack()
             except Exception:
-                pass
+                logging.exception(
+                    "Error calling untrack on conv presence %s", conversation_id,
+                    exc_info=True,
+                )
+            await self._client.remove_channel(ch)
+            logging.info(
+                "Left conversation presence channel for %s", conversation_id
+            )
+        except Exception:
+            logging.exception(
+                "Failed to leave conversation presence %s",
+                conversation_id,
+                exc_info=True,
+            )
 
     async def _shutdown_async(self) -> None:
         try:

@@ -219,10 +219,36 @@ class ConversationWorker:
                     exc_info=True,
                 )
         finally:
+            # Leave the conversation Presence channel regardless of outcome
+            if self._realtime_manager is not None:
+                try:
+                    self._realtime_manager.leave_conversation_presence(
+                        task.conversation_id
+                    )
+                except Exception:
+                    logging.exception(
+                        "Failed to leave conversation presence for %s",
+                        task.conversation_id,
+                        exc_info=True,
+                    )
             with self._active_lock:
                 self._active_conversation_ids.discard(task.conversation_id)
 
     def _process_conversation(self, task: ConversationTask) -> None:
+        # Join per-conversation Presence channel so external observers (Relay)
+        # can see that this conversation has a live Holmes working on it.
+        if self._realtime_manager is not None:
+            try:
+                self._realtime_manager.join_conversation_presence(
+                    task.conversation_id
+                )
+            except Exception:
+                logging.exception(
+                    "Failed to join conversation presence for %s",
+                    task.conversation_id,
+                    exc_info=True,
+                )
+
         # Load events and extract the user ask + conversation history
         events = self.dal.get_conversation_events(task.conversation_id)
         self._hydrate_task_from_events(task, events)
