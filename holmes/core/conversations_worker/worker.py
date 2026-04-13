@@ -1,0 +1,473 @@
+import logging
+import os
+import threading
+import time
+from concurrent.futures import ThreadPoolExecutor
+from datetime import datetime, timezone
+from typing import Any, Callable, Dict, List, Optional, TYPE_CHECKING, Union
+
+from starlette.requests import Request
+
+from holmes.common.env_vars import (
+    CONVERSATION_WORKER_EVENT_BATCH_INTERVAL_SECONDS,
+    CONVERSATION_WORKER_MAX_CONCURRENT,
+    CONVERSATION_WORKER_POLL_INTERVAL_SECONDS,
+    CONVERSATION_WORKER_REALTIME_ENABLED,
+)
+from holmes.core.conversations_worker.event_publisher import (
+    ConversationEventPublisher,
+)
+from holmes.core.conversations_worker.models import (
+    EVENT_USER_MESSAGE,
+    ConversationReassignedError,
+    ConversationTask,
+)
+from holmes.core.models import ChatRequest
+
+if TYPE_CHECKING:
+    from fastapi.responses import StreamingResponse
+    from holmes.config import Config
+    from holmes.core.models import ChatResponse
+    from holmes.core.supabase_dal import SupabaseDal
+
+ChatFunction = Callable[
+    [ChatRequest, Request], Union["ChatResponse", "StreamingResponse"]
+]
+
+
+class ConversationWorker:
+    """
+    M2 Conversation Worker.
+
+    Active participant that picks up pending Conversation rows from Supabase,
+    runs them through the existing /api/chat pipeline (via chat_function),
+    and writes results back as ConversationEvents in real-time.
+    """
+
+    def __init__(
+        self,
+        dal: "SupabaseDal",
+        config: "Config",
+        chat_function: ChatFunction,
+    ):
+        self.dal = dal
+        self.config = config
+        self.chat_function = chat_function
+        self.holmes_id = os.environ.get("HOSTNAME") or str(os.getpid())
+
+        self._running = False
+        self._claim_thread: Optional[threading.Thread] = None
+        self._notify_event = threading.Event()
+        self._executor: Optional[ThreadPoolExecutor] = None
+        self._active_conversation_ids: set = set()
+        self._active_lock = threading.Lock()
+
+        self._realtime_manager = None  # optional
+
+    def start(self) -> None:
+        if not self.dal.enabled:
+            logging.info(
+                "ConversationWorker not started - Supabase DAL not enabled"
+            )
+            return
+        if self._running:
+            logging.warning("ConversationWorker is already running")
+            return
+
+        self._running = True
+        self._executor = ThreadPoolExecutor(
+            max_workers=CONVERSATION_WORKER_MAX_CONCURRENT,
+            thread_name_prefix="conversation-worker",
+        )
+
+        if CONVERSATION_WORKER_REALTIME_ENABLED:
+            try:
+                from holmes.core.conversations_worker.realtime_manager import (
+                    RealtimeManager,
+                )
+
+                self._realtime_manager = RealtimeManager(
+                    dal=self.dal,
+                    holmes_id=self.holmes_id,
+                    on_new_pending=self._notify_event.set,
+                )
+                self._realtime_manager.start()
+            except Exception:
+                logging.exception(
+                    "Failed to start Realtime manager; continuing with polling only",
+                    exc_info=True,
+                )
+                self._realtime_manager = None
+
+        self._claim_thread = threading.Thread(
+            target=self._claim_loop,
+            daemon=True,
+            name="conversation-claim-loop",
+        )
+        self._claim_thread.start()
+        logging.info(
+            "ConversationWorker started (holmes_id=%s, account=%s, cluster=%s, realtime=%s)",
+            self.holmes_id,
+            self.dal.account_id,
+            self.dal.cluster,
+            self._realtime_manager is not None,
+        )
+
+    def stop(self) -> None:
+        logging.info("Stopping ConversationWorker...")
+        self._running = False
+        self._notify_event.set()
+        if self._realtime_manager:
+            try:
+                self._realtime_manager.stop()
+            except Exception:
+                logging.exception("Error stopping realtime manager", exc_info=True)
+        if self._executor:
+            self._executor.shutdown(wait=False)
+        if self._claim_thread:
+            self._claim_thread.join(timeout=5)
+        logging.info("ConversationWorker stopped")
+
+    # ---- claim loop ----
+
+    def _claim_loop(self) -> None:
+        # Initial claim on startup to pick up any pending missed during downtime
+        self._try_claim_and_dispatch()
+
+        while self._running:
+            # Wait for a notification OR poll interval timeout
+            triggered = self._notify_event.wait(
+                timeout=CONVERSATION_WORKER_POLL_INTERVAL_SECONDS
+            )
+            if not self._running:
+                break
+            self._notify_event.clear()
+            try:
+                self._try_claim_and_dispatch()
+            except Exception:
+                logging.exception(
+                    "Error in ConversationWorker claim loop (triggered=%s)",
+                    triggered,
+                    exc_info=True,
+                )
+
+    def _try_claim_and_dispatch(self) -> None:
+        # Respect max concurrency: if we're at capacity, skip claiming
+        with self._active_lock:
+            active = len(self._active_conversation_ids)
+        if active >= CONVERSATION_WORKER_MAX_CONCURRENT:
+            logging.debug(
+                "At max concurrency (%d), skipping claim", active
+            )
+            return
+
+        claimed = self.dal.claim_conversations(self.holmes_id)
+        if not claimed:
+            return
+        logging.info("Claimed %d conversation(s)", len(claimed))
+        for conv in claimed:
+            task = self._build_task_from_conversation_row(conv)
+            if task is None:
+                continue
+            with self._active_lock:
+                self._active_conversation_ids.add(task.conversation_id)
+            self._executor.submit(self._process_conversation_safe, task)
+
+    def _build_task_from_conversation_row(
+        self, conv: Dict[str, Any]
+    ) -> Optional[ConversationTask]:
+        try:
+            return ConversationTask(
+                conversation_id=conv["conversation_id"],
+                account_id=conv["account_id"],
+                cluster_id=conv["cluster_id"],
+                origin=conv.get("origin", "chat"),
+                request_sequence=int(conv.get("request_sequence", 1)),
+                metadata=conv.get("metadata") or {},
+                title=conv.get("title"),
+            )
+        except Exception:
+            logging.exception(
+                "Failed to build conversation task from row: %s", conv, exc_info=True
+            )
+            return None
+
+    # ---- per-conversation processing ----
+
+    def _process_conversation_safe(self, task: ConversationTask) -> None:
+        try:
+            self._process_conversation(task)
+        except Exception as e:
+            logging.exception(
+                "Error processing conversation %s: %s",
+                task.conversation_id,
+                e,
+                exc_info=True,
+            )
+            # Attempt to mark as failed
+            try:
+                self.dal.complete_conversation(
+                    conversation_id=task.conversation_id,
+                    request_sequence=task.request_sequence,
+                    holmes_id=self.holmes_id,
+                    status="failed",
+                )
+            except Exception:
+                logging.exception(
+                    "Failed to mark conversation %s as failed",
+                    task.conversation_id,
+                    exc_info=True,
+                )
+        finally:
+            with self._active_lock:
+                self._active_conversation_ids.discard(task.conversation_id)
+
+    def _process_conversation(self, task: ConversationTask) -> None:
+        # Load events and extract the user ask + conversation history
+        events = self.dal.get_conversation_events(task.conversation_id)
+        self._hydrate_task_from_events(task, events)
+
+        if not task.ask:
+            logging.warning(
+                "Conversation %s has no user question, marking as failed",
+                task.conversation_id,
+            )
+            self.dal.complete_conversation(
+                conversation_id=task.conversation_id,
+                request_sequence=task.request_sequence,
+                holmes_id=self.holmes_id,
+                status="failed",
+            )
+            return
+
+        publisher = ConversationEventPublisher(
+            dal=self.dal,
+            conversation_id=task.conversation_id,
+            holmes_id=self.holmes_id,
+            request_sequence=task.request_sequence,
+            batch_interval_seconds=CONVERSATION_WORKER_EVENT_BATCH_INTERVAL_SECONDS,
+        )
+
+        # Build ChatRequest
+        chat_request = ChatRequest(
+            ask=task.ask,
+            images=task.images,
+            model=task.model,
+            conversation_history=task.conversation_history,
+            stream=True,
+            additional_system_prompt=task.additional_system_prompt,
+            enable_tool_approval=task.enable_tool_approval,
+            tool_decisions=task.tool_decisions,  # type: ignore[arg-type]
+            frontend_tool_results=task.frontend_tool_results,  # type: ignore[arg-type]
+        )
+
+        # Call the chat function to get a StreamingResponse — we need the raw
+        # StreamMessage generator not the SSE-wrapped one, so we need a different
+        # path. The cleanest way is to build the LLM call directly.
+        self._run_chat_and_publish(task, chat_request, publisher)
+
+    def _hydrate_task_from_events(
+        self, task: ConversationTask, events: List[Dict[str, Any]]
+    ) -> None:
+        """
+        Extract the latest user ask + model/additional_system_prompt/etc.
+        Also reconstruct conversation_history from the previous terminal event.
+        """
+        last_answer_messages: Optional[list] = None
+        last_request_seq_before_current = 0
+
+        for row in events:
+            row_request_seq = row.get("request_sequence", 1)
+            row_events = row.get("events", []) or []
+            if row_request_seq < task.request_sequence:
+                # Scan for last answer/approval to get conversation_history
+                for ev in row_events:
+                    if ev.get("event") in (
+                        "ai_answer_end",
+                        "approval_required",
+                    ):
+                        messages = (ev.get("data") or {}).get("messages")
+                        if messages:
+                            last_answer_messages = messages
+                            last_request_seq_before_current = row_request_seq
+            elif row_request_seq == task.request_sequence:
+                # Current request turn — extract user_message for the ask
+                for ev in row_events:
+                    if ev.get("event") == EVENT_USER_MESSAGE:
+                        data = ev.get("data") or {}
+                        if data.get("ask"):
+                            task.ask = data["ask"]
+                        if data.get("images"):
+                            task.images = data["images"]
+                        if data.get("model"):
+                            task.model = data["model"]
+                        if data.get("additional_system_prompt"):
+                            task.additional_system_prompt = data[
+                                "additional_system_prompt"
+                            ]
+                        if data.get("tool_decisions"):
+                            task.tool_decisions = data["tool_decisions"]
+                            task.enable_tool_approval = True
+                        if data.get("frontend_tool_results"):
+                            task.frontend_tool_results = data["frontend_tool_results"]
+                        if "bash_enabled" in data:
+                            task.bash_enabled = data["bash_enabled"]
+                        if "fast_mode" in data:
+                            task.fast_mode = data["fast_mode"]
+                        if "enable_tool_approval" in data:
+                            task.enable_tool_approval = bool(
+                                data["enable_tool_approval"]
+                            )
+
+        if last_answer_messages is not None:
+            task.conversation_history = last_answer_messages
+            logging.debug(
+                "Reconstructed conversation history from request_sequence=%d for conv %s",
+                last_request_seq_before_current,
+                task.conversation_id,
+            )
+
+    def _run_chat_and_publish(
+        self,
+        task: ConversationTask,
+        chat_request: ChatRequest,
+        publisher: ConversationEventPublisher,
+    ) -> None:
+        """
+        Run Holmes on the chat_request and stream StreamMessages into the publisher.
+        Mirrors server.py::chat() for the streaming path but hands raw StreamMessages
+        to the publisher instead of SSE-wrapping.
+        """
+        # Imports here to avoid circular deps at module load time
+        from holmes.core.prompt import PromptComponent
+        from holmes.core.tools import PrerequisiteCacheMode, ToolsetTag
+        from holmes.core.tools_utils.filesystem_result_storage import (
+            tool_result_storage,
+        )
+        from holmes.core.conversations import build_chat_messages
+        from holmes.core.tracing import TracingFactory
+
+        server_tracer = TracingFactory.create_tracer(
+            trace_type=os.environ.get("HOLMES_TRACE_BACKEND")
+        )
+
+        runbooks = self.config.get_runbook_catalog()
+
+        prompt_component_overrides = None
+        behavior_controls = {}
+        if task.bash_enabled is not None:
+            behavior_controls["bash_enabled"] = task.bash_enabled
+        if task.fast_mode is not None:
+            behavior_controls["fast_mode"] = task.fast_mode
+        if behavior_controls:
+            prompt_component_overrides = {}
+            for k, v in behavior_controls.items():
+                try:
+                    prompt_component_overrides[PromptComponent(k.lower())] = v
+                except ValueError:
+                    pass
+
+        storage = tool_result_storage()
+        tool_results_dir = storage.__enter__()
+        try:
+            ai = self.config.create_toolcalling_llm(
+                dal=self.dal,
+                toolset_tag_filter=[ToolsetTag.CORE, ToolsetTag.CLUSTER],
+                enable_all_toolsets_possible=False,
+                prerequisite_cache=PrerequisiteCacheMode.DISABLED,
+                reuse_executor=True,
+                model=chat_request.model,
+                tracer=server_tracer,
+                tool_results_dir=tool_results_dir,
+            )
+
+            global_instructions = self.dal.get_global_instructions_for_account()
+            messages = build_chat_messages(
+                chat_request.ask,
+                chat_request.conversation_history,
+                ai=ai,
+                config=self.config,
+                global_instructions=global_instructions,
+                additional_system_prompt=chat_request.additional_system_prompt,
+                runbooks=runbooks,
+                images=chat_request.images,
+                prompt_component_overrides=prompt_component_overrides,
+            )
+
+            # Write an initial ai_message event (optional) - skip; call_stream will emit events
+            trace_span = server_tracer.start_trace("holmesgpt.investigation")
+            trace_span.log(
+                metadata={
+                    "holmesgpt.investigation.question": chat_request.ask[:1024],
+                    "holmesgpt.investigation.stream": True,
+                    "holmesgpt.conversation_id": task.conversation_id,
+                }
+            )
+
+            try:
+                stream = ai.call_stream(
+                    msgs=messages,
+                    enable_tool_approval=chat_request.enable_tool_approval or False,
+                    tool_decisions=chat_request.tool_decisions,
+                    frontend_tool_results=chat_request.frontend_tool_results,
+                    response_format=chat_request.response_format,
+                    trace_span=trace_span,
+                )
+
+                terminal = publisher.consume(stream)
+                status = self._terminal_to_status(terminal)
+                if status == "completed" or status == "failed":
+                    ok = self.dal.complete_conversation(
+                        conversation_id=task.conversation_id,
+                        request_sequence=task.request_sequence,
+                        holmes_id=self.holmes_id,
+                        status=status,
+                    )
+                    if not ok:
+                        logging.warning(
+                            "Failed to mark conversation %s complete (status=%s)",
+                            task.conversation_id,
+                            status,
+                        )
+                elif status == "awaiting_approval":
+                    # Leave the conversation in 'running' state — actually approvals
+                    # per spec should mark the current request as complete so the
+                    # follow-up can re-pend it. We treat approval_required as completed
+                    # for the current request_sequence.
+                    self.dal.complete_conversation(
+                        conversation_id=task.conversation_id,
+                        request_sequence=task.request_sequence,
+                        holmes_id=self.holmes_id,
+                        status="completed",
+                    )
+                else:
+                    logging.warning(
+                        "Conversation %s ended without a terminal event",
+                        task.conversation_id,
+                    )
+                    self.dal.complete_conversation(
+                        conversation_id=task.conversation_id,
+                        request_sequence=task.request_sequence,
+                        holmes_id=self.holmes_id,
+                        status="failed",
+                    )
+            finally:
+                trace_span.end()
+        except ConversationReassignedError as e:
+            logging.warning(
+                "Conversation %s was reassigned: %s", task.conversation_id, e
+            )
+        finally:
+            storage.__exit__(None, None, None)
+
+    @staticmethod
+    def _terminal_to_status(terminal) -> str:
+        from holmes.utils.stream import StreamEvents
+
+        if terminal == StreamEvents.ANSWER_END:
+            return "completed"
+        if terminal == StreamEvents.ERROR:
+            return "failed"
+        if terminal == StreamEvents.APPROVAL_REQUIRED:
+            return "awaiting_approval"
+        return "unknown"

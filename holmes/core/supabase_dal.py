@@ -60,6 +60,8 @@ SCANS_META_TABLE = "ScansMeta"
 SCANS_RESULTS_TABLE = "ScansResults"
 SCHEDULED_PROMPTS_RUNS_TABLE = "ScheduledPromptsRuns"
 HOLMES_RESULTS_TABLE = "HolmesResults"
+CONVERSATIONS_TABLE = "Conversations"
+CONVERSATION_EVENTS_TABLE = "ConversationEvents"
 
 ENRICHMENT_BLACKLIST = ["text_file", "graph", "ai_analysis", "holmes"]
 ENRICHMENT_BLACKLIST_SET = set(ENRICHMENT_BLACKLIST)
@@ -898,6 +900,159 @@ class SupabaseDal:
                 f"Error updating scheduled prompt run status: {e}", exc_info=True
             )
             return False
+
+    # ---- M2: Conversations worker DAL methods ----
+
+    def claim_conversations(self, holmes_id: str) -> List[Dict]:
+        """
+        Atomically claim all pending conversations for this cluster.
+        Returns a list of claimed Conversation rows (status='running', assignee=holmes_id).
+        """
+        if not self.enabled:
+            return []
+
+        try:
+            res = self.client.rpc(
+                "claim_conversations",
+                {
+                    "_account_id": self.account_id,
+                    "_cluster_id": self.cluster,
+                    "_assignee": holmes_id,
+                },
+            ).execute()
+            if not res.data:
+                return []
+            if isinstance(res.data, list):
+                return res.data
+            return [res.data]
+        except Exception:
+            logging.exception(
+                "Supabase error while claiming conversations", exc_info=True
+            )
+            return []
+
+    def post_conversation_events(
+        self,
+        conversation_id: str,
+        holmes_id: str,
+        request_sequence: int,
+        events: list,
+        compact: bool = False,
+    ) -> Optional[int]:
+        """
+        Post a batch of events. Returns assigned seq number on success.
+        Raises an exception on errors including holmes_id / request_sequence mismatch.
+        """
+        if not self.enabled:
+            return None
+
+        try:
+            res = self.client.rpc(
+                "post_conversation_events",
+                {
+                    "_conversation_id": conversation_id,
+                    "_holmes_id": holmes_id,
+                    "_request_sequence": request_sequence,
+                    "_events": events,
+                    "_compact": compact,
+                },
+            ).execute()
+            if res.data is None:
+                return None
+            if isinstance(res.data, list):
+                if not res.data:
+                    return None
+                return int(res.data[0]) if not isinstance(res.data[0], dict) else None
+            return int(res.data)
+        except Exception:
+            logging.exception(
+                "Supabase error while posting conversation events", exc_info=True
+            )
+            raise
+
+    def complete_conversation(
+        self,
+        conversation_id: str,
+        request_sequence: int,
+        holmes_id: str,
+        status: str,
+    ) -> bool:
+        """
+        Mark conversation as completed or failed.
+        """
+        if not self.enabled:
+            return False
+
+        if status not in ("completed", "failed"):
+            logging.error("complete_conversation received invalid status %s", status)
+            return False
+
+        try:
+            res = self.client.rpc(
+                "complete_conversation",
+                {
+                    "_conversation_id": conversation_id,
+                    "_request_sequence": request_sequence,
+                    "_holmes_id": holmes_id,
+                    "_status": status,
+                },
+            ).execute()
+            return bool(res.data)
+        except Exception:
+            logging.exception(
+                "Supabase error while completing conversation", exc_info=True
+            )
+            return False
+
+    def get_conversation_events(
+        self, conversation_id: str, min_seq: int = 0
+    ) -> List[Dict]:
+        """
+        Fetch ConversationEvents rows ordered by (request_sequence, seq).
+        """
+        if not self.enabled:
+            return []
+
+        try:
+            res = (
+                self.client.table(CONVERSATION_EVENTS_TABLE)
+                .select("*")
+                .eq("conversation_id", conversation_id)
+                .gt("seq", min_seq)
+                .order("request_sequence")
+                .order("seq")
+                .execute()
+            )
+            return res.data or []
+        except Exception:
+            logging.exception(
+                "Supabase error while fetching conversation events", exc_info=True
+            )
+            return []
+
+    def get_pending_conversations(self) -> List[Dict]:
+        """
+        Polling fallback: fetch all pending conversations for this cluster directly.
+        """
+        if not self.enabled:
+            return []
+
+        try:
+            res = (
+                self.client.table(CONVERSATIONS_TABLE)
+                .select("*")
+                .eq("account_id", self.account_id)
+                .eq("cluster_id", self.cluster)
+                .eq("status", "pending")
+                .order("created_at")
+                .execute()
+            )
+            return res.data or []
+        except Exception:
+            logging.exception(
+                "Supabase error while fetching pending conversations", exc_info=True
+            )
+            return []
 
     def finish_scheduled_prompt_run(
         self,
