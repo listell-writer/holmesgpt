@@ -54,7 +54,7 @@ from holmes.core.models import (
     OAuthCallbackResponse,
 )
 from holmes.core.prompt import PromptComponent
-from holmes.core.tools import ToolsetStatusEnum, ToolsetType
+from holmes.core.tools import PrerequisiteCacheMode, ToolsetStatusEnum, ToolsetTag, ToolsetType
 from holmes.core.scheduled_prompts import ScheduledPromptsExecutor
 from holmes.utils.connection_utils import patch_socket_create_connection
 from holmes.utils.holmes_status import update_holmes_status_in_db
@@ -63,6 +63,9 @@ from holmes.utils.log import EndpointFilter
 from holmes.checks.checks_api import init_checks_app
 from holmes.core.tools_utils.filesystem_result_storage import tool_result_storage
 from holmes.plugins.toolsets.mcp.oauth_tools_cache import load_authenticated_oauth_tools
+from holmes.core.models import FrontendToolMode
+from holmes.core.tools_utils.frontend_tools import build_frontend_noop_tool, build_frontend_pause_tool
+from holmes.core.tracing import TracingFactory
 from holmes.utils.stream import stream_chat_formatter
 
 
@@ -94,6 +97,9 @@ def init_logging():
 
 
 init_logging()
+
+# Initialize tracer — auto-detects OTel if OTEL_EXPORTER_OTLP_ENDPOINT is set
+server_tracer = TracingFactory.create_tracer(trace_type=os.environ.get("HOLMES_TRACE_BACKEND"))
 
 if ENABLE_CONNECTION_KEEPALIVE:
     patch_socket_create_connection()
@@ -147,7 +153,7 @@ def sync_before_server_start():
 
 def _has_failed_mcp_toolsets() -> bool:
     """Check if any MCP toolsets are in FAILED state."""
-    executor = config._server_tool_executor
+    executor = config.cached_tool_executor  # thread-safe property
     if not executor:
         return False
     return any(
@@ -195,7 +201,11 @@ def _toolset_status_refresh_loop():
 
             time.sleep(sleep_time)
             try:
-                changes = config.refresh_server_tool_executor(dal)
+                changes = config.refresh_tool_executor(
+                    dal,
+                    toolset_tag_filter=[ToolsetTag.CORE, ToolsetTag.CLUSTER],
+                    enable_all_toolsets_possible=False,
+                )
                 if changes:
                     for toolset_name, old_status, new_status in changes:
                         logging.info(
@@ -337,6 +347,21 @@ def _stream_with_storage_cleanup(storage, stream_generator, req_info):
         storage.__exit__(None, None, None)
 
 
+def _stream_with_trace_cleanup(storage, stream_generator, req_info, trace_span):
+    """Wrap a stream generator with both storage cleanup and OTel span lifecycle.
+
+    The investigation span stays active throughout all yields so that httpx
+    auto-instrumented calls made during streaming become children of it.
+    The span is ended in the finally block so it always closes, even on error.
+    """
+    try:
+        yield from stream_generator
+    finally:
+        logging.info(f"Stream request end: {req_info}")
+        trace_span.end()
+        storage.__exit__(None, None, None)
+
+
 @app.post("/api/chat")
 def chat(chat_request: ChatRequest, http_request: Request):
     try:
@@ -395,18 +420,22 @@ def chat(chat_request: ChatRequest, http_request: Request):
         storage = tool_result_storage()
         tool_results_dir = storage.__enter__()
 
-        tool_executor = None
-        if chat_request.user_id and config._has_oauth_toolsets:
-            base_executor = config.create_tool_executor(dal)
-            # loads tools by user who authenticated
-            authenticated_tools = load_authenticated_oauth_tools(base_executor.toolsets, request_context)
-            if authenticated_tools:
-                tool_executor = base_executor.with_oauth_tools(authenticated_tools)
-
         ai = config.create_toolcalling_llm(
-            dal=dal, model=chat_request.model, tool_results_dir=tool_results_dir,
-            tool_executor=tool_executor,
+            dal=dal,
+            toolset_tag_filter=[ToolsetTag.CORE, ToolsetTag.CLUSTER],
+            enable_all_toolsets_possible=False,
+            prerequisite_cache=PrerequisiteCacheMode.DISABLED,
+            reuse_executor=True,
+            model=chat_request.model,
+            tracer=server_tracer,
+            tool_results_dir=tool_results_dir,
         )
+
+        # Inject authenticated OAuth tools if the user has cached tokens
+        if chat_request.user_id and config._has_oauth_toolsets:
+            authenticated_tools = load_authenticated_oauth_tools(ai.tool_executor.toolsets, request_context)
+            if authenticated_tools:
+                ai = ai.with_executor(ai.tool_executor.with_oauth_tools(authenticated_tools))
         global_instructions = dal.get_global_instructions_for_account()
         messages = build_chat_messages(
             chat_request.ask,
@@ -420,39 +449,117 @@ def chat(chat_request: ChatRequest, http_request: Request):
             prompt_component_overrides=prompt_component_overrides,
         )
 
+        # Build a per-request AI instance with frontend tools injected into the executor
+        request_ai = ai
+        has_pause_tools = False
+        if chat_request.frontend_tools:
+            # Validate no name collisions with backend tools
+            backend_tool_names = set(ai.tool_executor.tools_by_name.keys())
+            frontend_tool_instances = []
+            for ft in chat_request.frontend_tools:
+                if ft.name in backend_tool_names:
+                    raise HTTPException(
+                        status_code=400,
+                        detail=f"Frontend tool name '{ft.name}' conflicts with a built-in Holmes tool. Use a different name.",
+                    )
+                if ft.mode == FrontendToolMode.NOOP:
+                    frontend_tool_instances.append(
+                        build_frontend_noop_tool(
+                            name=ft.name,
+                            description=ft.description,
+                            parameters=ft.parameters,
+                            canned_response=ft.noop_response,
+                        )
+                    )
+                else:
+                    has_pause_tools = True
+                    frontend_tool_instances.append(
+                        build_frontend_pause_tool(
+                            name=ft.name,
+                            description=ft.description,
+                            parameters=ft.parameters,
+                        )
+                    )
+
+            # Pause-mode tools require streaming (the pause/resume flow needs SSE)
+            if has_pause_tools and not chat_request.stream:
+                raise HTTPException(
+                    status_code=400,
+                    detail="frontend_tools with mode='pause' requires stream=true (the pause/resume flow needs SSE)",
+                )
+
+            cloned_executor = ai.tool_executor.clone_with_extra_tools(frontend_tool_instances)
+            request_ai = ai.with_executor(cloned_executor)
+
         if chat_request.stream:
+            # Create root investigation span for streaming (same as non-streaming)
+            trace_span = server_tracer.start_trace("holmesgpt.investigation")
+            trace_span.log(metadata={
+                "holmesgpt.investigation.question": chat_request.ask[:1024],
+                "holmesgpt.investigation.stream": True,
+            })
+            otel_metrics = TracingFactory.get_metrics()
+            if otel_metrics:
+                inv_attrs = {"gen_ai_request_model": chat_request.model or config.model or "unknown"}
+                otel_metrics.investigation_count.add(1, inv_attrs)
+
             stream = stream_chat_formatter(
-                ai.call_stream(
+                request_ai.call_stream(
                     msgs=messages,
                     enable_tool_approval=chat_request.enable_tool_approval or False,
                     tool_decisions=chat_request.tool_decisions,
+                    frontend_tool_results=chat_request.frontend_tool_results,
                     response_format=chat_request.response_format,
                     request_context=request_context,
+                    trace_span=trace_span,
                 ),
                 [f.model_dump() for f in follow_up_actions],
             )
             return StreamingResponse(
-                _stream_with_storage_cleanup(storage, stream, req_info),
+                _stream_with_trace_cleanup(storage, stream, req_info, trace_span),
                 media_type="text/event-stream",
             )
         else:
             try:
+                # Use provided trace_span or create a root investigation span
+                trace_span = chat_request.trace_span
+                if trace_span is None:
+                    trace_span = server_tracer.start_trace(
+                        "holmesgpt.investigation",
+                    )
+                    trace_span.log(metadata={
+                        "holmesgpt.investigation.question": chat_request.ask[:1024],
+                    })
+
+                _inv_start = time.time()
                 llm_call = ai.call(
                     messages=messages,
-                    trace_span=chat_request.trace_span,
+                    trace_span=trace_span,
                     response_format=chat_request.response_format,
                     request_context=request_context,
                 )
 
+                # Record investigation metrics
+                otel_metrics = TracingFactory.get_metrics()
+                if otel_metrics:
+                    inv_attrs = {"gen_ai_request_model": chat_request.model or config.model or "unknown"}
+                    otel_metrics.investigation_count.add(1, inv_attrs)
+                    otel_metrics.investigation_duration.record(time.time() - _inv_start, inv_attrs)
+                    if hasattr(llm_call, "num_llm_calls") and llm_call.num_llm_calls:
+                        otel_metrics.investigation_iterations.record(llm_call.num_llm_calls, inv_attrs)
+
                 logging.info(f"Completed {req_info}")
-                return ChatResponse(
+                response = ChatResponse(
                     analysis=llm_call.result,
                     tool_calls=llm_call.tool_calls,
                     conversation_history=llm_call.messages,
                     follow_up_actions=follow_up_actions,
                     metadata=llm_call.metadata,
                 )
+                return response
             finally:
+                if trace_span is not None:
+                    trace_span.end()
                 storage.__exit__(None, None, None)
     except AuthenticationError as e:
         raise HTTPException(status_code=401, detail=e.message)
