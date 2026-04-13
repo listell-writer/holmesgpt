@@ -45,11 +45,10 @@ from holmes.plugins.toolsets.mcp.oauth_tools_cache import (
     _oauth_tools_cache,
     load_authenticated_oauth_tools,
 )
+from holmes.plugins.toolsets.mcp.oauth_token_store import DiskTokenStore, OAuthTokenCache
 from holmes.plugins.toolsets.mcp.toolset_mcp import (
-    DiskTokenStore,
     MCPConfig,
     MCPMode,
-    OAuthTokenCache,
     RemoteMCPTool,
     RemoteMCPToolset,
     _inject_oauth_token,
@@ -957,17 +956,6 @@ class TestDiskTokenStore:
         token_data = {"access_token": "old", "expires_at": time.time() - 10}
         store.set("expired", token_data)
         assert store.get("expired") is None
-
-    def test_has(self, tmp_path):
-        store = DiskTokenStore.__new__(DiskTokenStore)
-        store._path = tmp_path / "auth" / "mcp_tokens.json"
-        store._enabled = True
-        store._lock = threading.Lock()
-        store._path.parent.mkdir(parents=True, exist_ok=True)
-
-        assert store.has("missing") is False
-        store.set("present", {"access_token": "t", "expires_at": time.time() + 3600})
-        assert store.has("present") is True
 
     def test_disabled_store(self, tmp_path):
         store = DiskTokenStore.__new__(DiskTokenStore)

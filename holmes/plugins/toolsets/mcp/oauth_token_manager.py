@@ -204,10 +204,6 @@ class OAuthTokenManager:
     def cache(self) -> OAuthTokenCache:
         return self._cache
 
-    @property
-    def disk_store(self) -> DiskTokenStore:
-        return self._disk_store
-
     def get_cache_key(self, oauth_config: Any, request_context: Optional[Dict[str, Any]] = None) -> str:
         """Public accessor for the cache key (needed by inject_oauth_token and requires_approval)."""
         return self._get_cache_key(oauth_config, request_context)
