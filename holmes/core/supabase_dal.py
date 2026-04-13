@@ -985,7 +985,7 @@ class SupabaseDal:
         try:
             row = {
                 "account_id": self.account_id,
-                "cluster_name": self.cluster or "unknown",
+                "origin_cluster_id": self.cluster or "unknown",
                 "provider_name": provider_name,
                 "encrypted_token": encrypted_token,
                 "signing_key_hash": signing_key_hash,
