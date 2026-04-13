@@ -954,6 +954,7 @@ class SupabaseDal:
             res = self.client.rpc(
                 "post_conversation_events",
                 {
+                    "_account_id": self.account_id,
                     "_conversation_id": conversation_id,
                     "_assignee": assignee,
                     "_request_sequence": request_sequence,
@@ -997,6 +998,7 @@ class SupabaseDal:
             res = self.client.rpc(
                 "complete_conversation",
                 {
+                    "_account_id": self.account_id,
                     "_conversation_id": conversation_id,
                     "_request_sequence": request_sequence,
                     "_assignee": assignee,

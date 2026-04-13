@@ -41,6 +41,7 @@ def test_post_conversation_events_forwards_compact_flag():
     args, _ = dal.client.rpc.call_args
     assert args[0] == "post_conversation_events"
     params = args[1]
+    assert params["_account_id"] == "acc-1"
     assert params["_compact"] is True
     assert params["_conversation_id"] == "c"
     assert params["_assignee"] == "h"
@@ -134,6 +135,7 @@ def test_complete_conversation_uses_assignee_param():
     args, _ = dal.client.rpc.call_args
     assert args[0] == "complete_conversation"
     params = args[1]
+    assert params["_account_id"] == "acc-1"
     assert params["_conversation_id"] == "c"
     assert params["_request_sequence"] == 2
     assert params["_assignee"] == "my-pod-1"
