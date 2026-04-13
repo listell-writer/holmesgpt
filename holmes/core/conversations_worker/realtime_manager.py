@@ -230,12 +230,28 @@ class RealtimeManager:
 
         def _on_pg_change(payload: Dict[str, Any]) -> None:
             try:
-                logging.info("RealtimeManager: Postgres change notification: %s", payload.get("data", {}).get("type"))
+                change = payload.get("data", {}) or {}
+                logging.info(
+                    "RealtimeManager: Postgres change notification: %s",
+                    change.get("type"),
+                )
+                # Supabase Realtime only supports a single-column filter per
+                # subscription, so we filter by account_id on the server and
+                # narrow to our cluster + pending rows here. For an UPDATE
+                # payload the new row is under "record"; for INSERT it's also
+                # "record". Older realtime payload shapes used "new".
+                row = change.get("record") or change.get("new") or {}
+                if row.get("cluster_id") != self.dal.cluster:
+                    return
+                if row.get("status") != "pending":
+                    return
                 self.on_new_pending()
             except Exception:
                 logging.exception("Error in realtime pg change callback", exc_info=True)
 
-        # Subscribe to Postgres Changes on Conversations for this cluster
+        # Subscribe to Postgres Changes on Conversations for this cluster.
+        # Realtime filters only allow a single operation, so we filter on
+        # account_id here and do the cluster/status check in _on_pg_change.
         account_id_filter = f"account_id=eq.{self.dal.account_id}"
         self._cluster_channel.on_postgres_changes(
             event="INSERT",

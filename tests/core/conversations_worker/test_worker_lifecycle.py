@@ -143,6 +143,14 @@ def test_process_conversation_safe_joins_and_leaves_presence():
 
 
 def test_process_conversation_safe_always_leaves_presence_on_error():
+    """On ConversationReassignedError the worker must:
+     - leave the per-conversation presence channel (finally)
+     - NOT call complete_conversation — the conversation's state is already
+       being handled by whoever reassigned it (e.g. stop_conversation bumped
+       request_sequence, or another Holmes took over). A stale
+       complete_conversation call would either fail the RPC's status guard or
+       race with the new owner.
+    """
     w = _bare_worker()
     rt = MagicMock()
     w._realtime_manager = rt
@@ -160,8 +168,10 @@ def test_process_conversation_safe_always_leaves_presence_on_error():
     with patch.object(ConversationWorker, "_process_conversation", boom):
         w._process_conversation_safe(task)
 
-    # leave must run in the finally even after an error
+    # leave must run in the finally even after a reassignment
     rt.leave_conversation_presence.assert_called_once_with("c1")
+    # Critically: we must NOT mark a reassigned conversation as failed
+    w.dal.complete_conversation.assert_not_called()
 
 
 def test_notify_event_wakes_claim_loop():

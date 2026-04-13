@@ -219,6 +219,17 @@ class ConversationWorker:
     def _process_conversation_safe(self, task: ConversationTask) -> None:
         try:
             self._process_conversation(task)
+        except ConversationReassignedError as e:
+            # Another worker claimed this conversation or the initiator bumped
+            # request_sequence (e.g. stop_conversation) while we were working.
+            # The DB already reflects the new state — do NOT call
+            # complete_conversation, which would either fail (status guard) or
+            # race with the new owner.
+            logging.warning(
+                "Conversation %s was reassigned mid-process: %s",
+                task.conversation_id,
+                e,
+            )
         except Exception as e:
             logging.exception(
                 "Error processing conversation %s: %s",
@@ -401,19 +412,27 @@ class ConversationWorker:
 
     @staticmethod
     def _extract_last_user_ask(history: Optional[list]) -> Optional[str]:
-        """Pull the most recent user message text from an OpenAI-format history."""
+        """Pull the most recent user message text from an OpenAI-format history.
+
+        Tolerates malformed (non-dict) entries by skipping them.
+        """
         if not history:
             return None
         for msg in reversed(history):
-            if msg.get("role") == "user":
-                content = msg.get("content")
-                if isinstance(content, str):
-                    return content
-                if isinstance(content, list):
-                    # Vision message: find the first text part
-                    for part in content:
-                        if isinstance(part, dict) and part.get("type") == "text":
-                            return part.get("text")
+            if not isinstance(msg, dict):
+                continue
+            if msg.get("role") != "user":
+                continue
+            content = msg.get("content")
+            if isinstance(content, str) and content:
+                return content
+            if isinstance(content, list):
+                # Vision message: find the first text part
+                for part in content:
+                    if isinstance(part, dict) and part.get("type") == "text":
+                        text = part.get("text")
+                        if isinstance(text, str) and text:
+                            return text
         return None
 
     def _run_chat_and_publish(

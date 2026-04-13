@@ -26,7 +26,7 @@ class ConversationTask(BaseModel):
     # Extracted from ConversationEvents after claim
     ask: Optional[str] = None
     images: Optional[List[Any]] = None
-    conversation_history: Optional[list] = None
+    conversation_history: Optional[List[Dict[str, Any]]] = None
     model: Optional[str] = None
     additional_system_prompt: Optional[str] = None
     tool_decisions: Optional[List[Dict[str, Any]]] = None
