@@ -15,7 +15,10 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import os
+import ssl
 import threading
+import urllib.parse
 from datetime import datetime, timezone
 from typing import Any, Callable, Dict, Optional, TYPE_CHECKING
 
@@ -23,6 +26,70 @@ from holmes import get_version
 
 if TYPE_CHECKING:
     from holmes.core.supabase_dal import SupabaseDal
+
+
+def _install_proxy_patch_if_needed() -> None:
+    """
+    If an ``https_proxy`` env var is set, monkey-patch ``realtime._async.client.connect``
+    so the WebSocket connection is tunneled through the HTTP CONNECT proxy. This
+    is needed in sandboxed environments that require all egress to go through a
+    proxy (and direct DNS/TCP are blocked).
+
+    Idempotent — only patches once.
+    """
+    proxy_url = os.environ.get("https_proxy") or os.environ.get("HTTPS_PROXY")
+    if not proxy_url:
+        return
+
+    import realtime._async.client as rt_client
+
+    if getattr(rt_client, "_holmes_proxy_patched", False):
+        return
+
+    try:
+        from python_socks.async_.asyncio import Proxy  # type: ignore
+    except ImportError:
+        logging.warning(
+            "https_proxy is set but python-socks is not installed; "
+            "Realtime WebSocket will attempt direct connection and likely fail. "
+            "Install python-socks to tunnel WS through the proxy."
+        )
+        return
+
+    from websockets.asyncio.client import connect as ws_connect  # noqa: F401
+
+    p = urllib.parse.urlparse(proxy_url)
+    if p.username:
+        proxy_connect_url = (
+            f"http://{p.username}:{p.password}@{p.hostname}:{p.port}"
+        )
+    else:
+        proxy_connect_url = f"http://{p.hostname}:{p.port}"
+
+    async def _proxied_connect(url: str, *args, **kwargs):
+        parsed = urllib.parse.urlparse(url)
+        if parsed.scheme not in ("ws", "wss"):
+            return await ws_connect(url, *args, **kwargs)
+
+        # skip proxy for localhost targets
+        if parsed.hostname in ("localhost", "127.0.0.1"):
+            return await ws_connect(url, *args, **kwargs)
+
+        port = parsed.port or (443 if parsed.scheme == "wss" else 80)
+        proxy = Proxy.from_url(proxy_connect_url)
+        sock = await proxy.connect(dest_host=parsed.hostname, dest_port=port)
+        kwargs.setdefault("server_hostname", parsed.hostname)
+        if parsed.scheme == "wss" and "ssl" not in kwargs:
+            kwargs["ssl"] = ssl.create_default_context()
+        return await ws_connect(url, sock=sock, *args, **kwargs)
+
+    rt_client.connect = _proxied_connect  # type: ignore[attr-defined]
+    rt_client._holmes_proxy_patched = True  # type: ignore[attr-defined]
+    logging.info(
+        "Installed WebSocket proxy patch for realtime client (proxy=%s:%s)",
+        p.hostname,
+        p.port,
+    )
 
 
 class RealtimeManager:
@@ -98,6 +165,7 @@ class RealtimeManager:
             logging.exception("Error in realtime manager main loop", exc_info=True)
 
     async def _connect_and_subscribe(self) -> None:
+        _install_proxy_patch_if_needed()
         from realtime._async.client import AsyncRealtimeClient
 
         # Supabase Realtime URL: sp.stg.robusta.dev -> wss://sp.stg.robusta.dev/realtime/v1/websocket
@@ -110,15 +178,22 @@ class RealtimeManager:
             ws_url = store_url
         ws_url = f"{ws_url}/realtime/v1/websocket"
 
-        # Use the user's JWT for auth. SupabaseDal stored it via set_session.
-        token = self.dal.client.auth.get_session().access_token  # type: ignore[attr-defined]
+        # For Supabase Realtime, the initial connection is authenticated via the
+        # anon apikey in the URL. RLS is then enforced by passing the user's JWT
+        # via set_auth() after connecting.
+        apikey = self.dal.api_key
+        user_jwt = self.dal.client.auth.get_session().access_token  # type: ignore[attr-defined]
 
         self._client = AsyncRealtimeClient(
             url=ws_url,
-            token=token,
+            token=apikey,
             auto_reconnect=True,
         )
         await self._client.connect()
+        try:
+            await self._client.set_auth(user_jwt)
+        except Exception:
+            logging.exception("Failed to set_auth on realtime client", exc_info=True)
 
         # 1. Cluster-level Presence
         topic = f"holmes:cluster:{self.dal.account_id}:{self.dal.cluster}"
