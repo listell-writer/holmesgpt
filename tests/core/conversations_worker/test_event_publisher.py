@@ -97,6 +97,7 @@ def test_publisher_flushes_on_approval_required():
 
 
 def test_publisher_compact_flag_on_compacted_event():
+    """Only the CONVERSATION_HISTORY_COMPACTED event triggers compact=True."""
     dal = _FakeDal()
     pub = ConversationEventPublisher(
         dal=dal,
@@ -120,16 +121,78 @@ def test_publisher_compact_flag_on_compacted_event():
             ]
         )
     )
-    # The compacted event triggers a flush with compact=True. Then the ANSWER_END
-    # event is flushed separately.
-    assert any(c["compact"] is True for c in dal.calls)
-    # Each event appears exactly once
-    all_event_types = [
-        e["event"] for c in dal.calls for e in c["events"]
+    # Exactly one flush with compact=True (the one containing the compacted event).
+    compact_calls = [c for c in dal.calls if c["compact"] is True]
+    assert len(compact_calls) == 1, f"expected 1 compact=True call, got {len(compact_calls)}"
+    # The compact=True call must carry the compacted event.
+    compact_event_types = [e["event"] for e in compact_calls[0]["events"]]
+    assert "conversation_history_compacted" in compact_event_types
+
+    # The ANSWER_END flush must NOT have compact=True.
+    answer_calls = [
+        c for c in dal.calls
+        if any(e["event"] == "ai_answer_end" for e in c["events"])
     ]
+    assert len(answer_calls) == 1
+    assert answer_calls[0]["compact"] is False
+
+    # Every event appears exactly once across all calls (no double-posting).
+    all_event_types = [e["event"] for c in dal.calls for e in c["events"]]
     assert all_event_types.count("conversation_history_compacted") == 1
     assert all_event_types.count("conversation_history_compaction_start") == 1
     assert all_event_types.count("ai_answer_end") == 1
+
+
+def test_publisher_compaction_start_does_not_trigger_compact_flag():
+    """Only CONVERSATION_HISTORY_COMPACTED triggers compact=True, never START."""
+    dal = _FakeDal()
+    pub = ConversationEventPublisher(
+        dal=dal,
+        conversation_id="c1",
+        holmes_id="h1",
+        request_sequence=1,
+        batch_interval_seconds=60.0,
+    )
+    pub.consume(
+        _stream(
+            [
+                StreamMessage(
+                    event=StreamEvents.CONVERSATION_HISTORY_COMPACTION_START,
+                    data={"content": "compacting"},
+                ),
+                # Compaction aborted/unfinished — no COMPACTED event ever fires
+                StreamMessage(event=StreamEvents.ANSWER_END, data={"content": "done"}),
+            ]
+        )
+    )
+    # No compact=True should have been set since COMPACTED never arrived
+    assert not any(c["compact"] is True for c in dal.calls)
+
+
+def test_publisher_no_compaction_events_never_sets_compact_flag():
+    """Normal flows must never set compact=True."""
+    dal = _FakeDal()
+    pub = ConversationEventPublisher(
+        dal=dal,
+        conversation_id="c1",
+        holmes_id="h1",
+        request_sequence=1,
+        batch_interval_seconds=60.0,
+    )
+    pub.consume(
+        _stream(
+            [
+                StreamMessage(event=StreamEvents.START_TOOL, data={"tool_name": "t"}),
+                StreamMessage(event=StreamEvents.TOOL_RESULT, data={"tool_call_id": "t"}),
+                StreamMessage(event=StreamEvents.AI_MESSAGE, data={"content": "thinking"}),
+                StreamMessage(event=StreamEvents.TOKEN_COUNT, data={}),
+                StreamMessage(event=StreamEvents.ANSWER_END, data={"content": "final"}),
+            ]
+        )
+    )
+    assert all(c["compact"] is False for c in dal.calls), (
+        f"unexpected compact=True: {dal.calls}"
+    )
 
 
 def test_publisher_raises_on_reassignment():

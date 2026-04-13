@@ -11,9 +11,14 @@ from starlette.requests import Request
 from holmes.common.env_vars import (
     CONVERSATION_WORKER_EVENT_BATCH_INTERVAL_SECONDS,
     CONVERSATION_WORKER_MAX_CONCURRENT,
-    CONVERSATION_WORKER_POLL_INTERVAL_SECONDS,
+    CONVERSATION_WORKER_POLL_INTERVAL_SECONDS_WITHOUT_REALTIME,
     CONVERSATION_WORKER_REALTIME_ENABLED,
 )
+
+# When Realtime is connected we do not poll at all — Postgres Changes events
+# drive claims. A large safety-net sleep value is used so the loop simply
+# blocks until the realtime manager signals activity (e.g. reconnect).
+_REALTIME_CONNECTED_IDLE_SECONDS = 3600
 from holmes.core.conversations_worker.event_publisher import (
     ConversationEventPublisher,
 )
@@ -135,10 +140,19 @@ class ConversationWorker:
         self._try_claim_and_dispatch()
 
         while self._running:
-            # Wait for a notification OR poll interval timeout
-            triggered = self._notify_event.wait(
-                timeout=CONVERSATION_WORKER_POLL_INTERVAL_SECONDS
-            )
+            # Timeout depends on realtime state:
+            #  - Realtime not enabled: poll at WITHOUT_REALTIME interval
+            #  - Realtime enabled but not connected: poll at same interval as a
+            #    fallback while the realtime manager retries its WebSocket
+            #  - Realtime enabled and connected: don't poll; Postgres Changes
+            #    notifications set the event. A very large safety sleep keeps
+            #    the loop responsive to shutdown.
+            if self._realtime_connected():
+                timeout = _REALTIME_CONNECTED_IDLE_SECONDS
+            else:
+                timeout = CONVERSATION_WORKER_POLL_INTERVAL_SECONDS_WITHOUT_REALTIME
+
+            triggered = self._notify_event.wait(timeout=timeout)
             if not self._running:
                 break
             self._notify_event.clear()
@@ -150,6 +164,14 @@ class ConversationWorker:
                     triggered,
                     exc_info=True,
                 )
+
+    def _realtime_connected(self) -> bool:
+        if self._realtime_manager is None:
+            return False
+        try:
+            return bool(self._realtime_manager.is_connected())
+        except Exception:
+            return False
 
     def _try_claim_and_dispatch(self) -> None:
         # Respect max concurrency: if we're at capacity, skip claiming

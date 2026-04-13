@@ -108,8 +108,14 @@ class RealtimeManager:
         self._started = threading.Event()
         self._client = None
         self._cluster_channel = None
+        # True once the cluster channel is SUBSCRIBED; flips to False if the
+        # realtime thread crashes or the channel reports ERROR/CLOSED.
+        self._connected = False
 
     # ---- public ----
+
+    def is_connected(self) -> bool:
+        return self._connected
 
     def start(self) -> None:
         if self._thread and self._thread.is_alive():
@@ -171,6 +177,13 @@ class RealtimeManager:
                 await asyncio.sleep(1)
         except Exception:
             logging.exception("Error in realtime manager main loop", exc_info=True)
+        finally:
+            self._connected = False
+            # Wake the worker so it falls back to polling
+            try:
+                self.on_new_pending()
+            except Exception:
+                pass
 
     async def _connect_and_subscribe(self) -> None:
         _install_proxy_patch_if_needed()
@@ -247,13 +260,29 @@ class RealtimeManager:
                 status,
                 err,
             )
-            subscribed.set()
-            # Trigger a claim to cover any missed events during subscription setup
-            try:
-                self.on_new_pending()
-            except Exception:
-                pass
+            status_str = str(status).upper()
+            if "SUBSCRIBED" in status_str:
+                self._connected = True
+                subscribed.set()
+                # Trigger a claim to cover any missed events during subscription
+                # setup or reconnects
+                try:
+                    self.on_new_pending()
+                except Exception:
+                    pass
+            elif any(
+                s in status_str for s in ("CHANNEL_ERROR", "CLOSED", "TIMED_OUT")
+            ):
+                self._connected = False
+                # Wake up the claim loop so it falls back to polling
+                try:
+                    self.on_new_pending()
+                except Exception:
+                    pass
 
+        # Channel state changes (CHANNEL_ERROR, CLOSED, SUBSCRIBED) are surfaced
+        # via the subscribe callback above. realtime-py's on_error / on_close
+        # are internal lifecycle methods, not callback registration points.
         await self._cluster_channel.subscribe(_on_subscribe_cb)
         # Wait for SUBSCRIBED before tracking presence — otherwise the track
         # message is dropped by the server (silently).
@@ -371,6 +400,7 @@ class RealtimeManager:
             )
 
     async def _shutdown_async(self) -> None:
+        self._connected = False
         try:
             if self._client:
                 await self._client.close()

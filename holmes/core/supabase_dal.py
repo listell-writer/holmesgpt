@@ -942,6 +942,12 @@ class SupabaseDal:
         """
         Post a batch of events. Returns assigned seq number on success.
         Raises an exception on errors including holmes_id / request_sequence mismatch.
+
+        When ``compact=True``, the ``post_conversation_events`` RPC marks all
+        previous events in the same ``request_sequence`` as ``compacted=true``.
+        ConversationEvents has no UPDATE RLS policy for the authenticated user,
+        so the marking must happen inside the RPC (SECURITY DEFINER) — we only
+        pass the flag through.
         """
         if not self.enabled:
             return None
@@ -962,7 +968,9 @@ class SupabaseDal:
             if isinstance(res.data, list):
                 if not res.data:
                     return None
-                return int(res.data[0]) if not isinstance(res.data[0], dict) else None
+                return (
+                    int(res.data[0]) if not isinstance(res.data[0], dict) else None
+                )
             return int(res.data)
         except Exception:
             logging.exception(
@@ -1005,52 +1013,32 @@ class SupabaseDal:
             return False
 
     def get_conversation_events(
-        self, conversation_id: str, min_seq: int = 0
+        self, conversation_id: str, include_compacted: bool = False
     ) -> List[Dict]:
         """
         Fetch ConversationEvents rows ordered by (request_sequence, seq).
+
+        By default, rows marked compacted=true are filtered out. A compacted row's
+        data has been superseded by a later conversation_history_compacted event
+        whose messages array already reflects the consolidated history, so it is
+        redundant for history reconstruction and UI rendering.
         """
         if not self.enabled:
             return []
 
         try:
-            res = (
+            query = (
                 self.client.table(CONVERSATION_EVENTS_TABLE)
                 .select("*")
                 .eq("conversation_id", conversation_id)
-                .gt("seq", min_seq)
-                .order("request_sequence")
-                .order("seq")
-                .execute()
             )
+            if not include_compacted:
+                query = query.eq("compacted", False)
+            res = query.order("request_sequence").order("seq").execute()
             return res.data or []
         except Exception:
             logging.exception(
                 "Supabase error while fetching conversation events", exc_info=True
-            )
-            return []
-
-    def get_pending_conversations(self) -> List[Dict]:
-        """
-        Polling fallback: fetch all pending conversations for this cluster directly.
-        """
-        if not self.enabled:
-            return []
-
-        try:
-            res = (
-                self.client.table(CONVERSATIONS_TABLE)
-                .select("*")
-                .eq("account_id", self.account_id)
-                .eq("cluster_id", self.cluster)
-                .eq("status", "pending")
-                .order("created_at")
-                .execute()
-            )
-            return res.data or []
-        except Exception:
-            logging.exception(
-                "Supabase error while fetching pending conversations", exc_info=True
             )
             return []
 
