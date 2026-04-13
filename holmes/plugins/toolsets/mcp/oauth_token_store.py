@@ -165,9 +165,6 @@ class DiskTokenStore:
             with open(self._path, "w") as f:
                 json.dump(data, f, indent=2)
 
-    def has(self, key: str) -> bool:
-        return self.get(key) is not None
-
     def _load(self) -> Dict[str, Any]:
         if not self._path.exists():
             return {}
