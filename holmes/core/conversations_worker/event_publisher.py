@@ -48,7 +48,7 @@ class ConversationEventPublisher:
     def consume(
         self,
         stream: Generator[StreamMessage, None, None],
-    ) -> StreamEvents:
+    ) -> Optional[StreamEvents]:
         """
         Drain the stream generator, batching events and writing them to the DB.
         Returns the terminal StreamEvents value observed, or None if the stream ended
@@ -74,7 +74,7 @@ class ConversationEventPublisher:
             # final drain of any remaining events
             self._flush(compact=False)
 
-        return self._last_terminal_event  # type: ignore[return-value]
+        return self._last_terminal_event
 
     def _append_event(self, message: StreamMessage) -> None:
         with self._lock:
@@ -90,11 +90,9 @@ class ConversationEventPublisher:
         with self._lock:
             events_to_flush = self._pending_events
             self._pending_events = []
-        if not events_to_flush and not compact:
-            return
-        if not events_to_flush and compact:
-            # Nothing new to post but compact requested — safe to ignore; compact is
-            # only meaningful alongside a new event batch.
+        if not events_to_flush:
+            # Nothing to post. A compact=True with no events is a no-op — compact
+            # only applies alongside a new event batch.
             return
 
         try:
@@ -120,12 +118,9 @@ class ConversationEventPublisher:
         except ConversationReassignedError:
             raise
         except Exception as e:
-            # Detect mismatch errors from the RPC via message content
-            msg = str(e).lower()
-            if (
-                "assignee mismatch" in msg
-                or "request sequence mismatch" in msg
-                or "is not running" in msg
-            ):
+            # The RPCs prefix mismatch errors (status / assignee / request_sequence)
+            # with "MISMATCH " — promote those to ConversationReassignedError so
+            # the worker can exit the processing loop cleanly.
+            if "mismatch" in str(e).lower():
                 raise ConversationReassignedError(str(e)) from e
             raise

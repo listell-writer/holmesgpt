@@ -22,6 +22,18 @@ import urllib.parse
 from datetime import datetime, timezone
 from typing import Any, Callable, Dict, Optional, TYPE_CHECKING
 
+import realtime._async.client as rt_client
+from realtime._async.client import AsyncRealtimeClient
+from websockets.asyncio.client import connect as ws_connect
+
+try:
+    # python-socks is only required when an HTTP CONNECT proxy is in use
+    # (sandboxed environments, enterprise egress). Normal deployments don't
+    # need it.
+    from python_socks.async_.asyncio import Proxy as _SocksProxy
+except ImportError:  # pragma: no cover — optional dependency
+    _SocksProxy = None  # type: ignore[assignment]
+
 from holmes import get_version
 
 if TYPE_CHECKING:
@@ -41,22 +53,16 @@ def _install_proxy_patch_if_needed() -> None:
     if not proxy_url:
         return
 
-    import realtime._async.client as rt_client
-
     if getattr(rt_client, "_holmes_proxy_patched", False):
         return
 
-    try:
-        from python_socks.async_.asyncio import Proxy  # type: ignore
-    except ImportError:
+    if _SocksProxy is None:
         logging.warning(
             "https_proxy is set but python-socks is not installed; "
             "Realtime WebSocket will attempt direct connection and likely fail. "
             "Install python-socks to tunnel WS through the proxy."
         )
         return
-
-    from websockets.asyncio.client import connect as ws_connect  # noqa: F401
 
     p = urllib.parse.urlparse(proxy_url)
     if p.username:
@@ -66,7 +72,7 @@ def _install_proxy_patch_if_needed() -> None:
     else:
         proxy_connect_url = f"http://{p.hostname}:{p.port}"
 
-    async def _proxied_connect(url: str, *args, **kwargs):
+    async def _proxied_connect(url: str, *args: Any, **kwargs: Any) -> Any:
         parsed = urllib.parse.urlparse(url)
         if parsed.scheme not in ("ws", "wss"):
             return await ws_connect(url, *args, **kwargs)
@@ -76,7 +82,7 @@ def _install_proxy_patch_if_needed() -> None:
             return await ws_connect(url, *args, **kwargs)
 
         port = parsed.port or (443 if parsed.scheme == "wss" else 80)
-        proxy = Proxy.from_url(proxy_connect_url)
+        proxy = _SocksProxy.from_url(proxy_connect_url)
         sock = await proxy.connect(dest_host=parsed.hostname, dest_port=port)
         kwargs.setdefault("server_hostname", parsed.hostname)
         if parsed.scheme == "wss" and "ssl" not in kwargs:
@@ -120,6 +126,13 @@ class RealtimeManager:
     def start(self) -> None:
         if self._thread and self._thread.is_alive():
             return
+        # Clear lifecycle events so a restart (after stop()) runs cleanly.
+        self._stop_event.clear()
+        self._started.clear()
+        self._loop = None
+        self._client = None
+        self._cluster_channel = None
+        self._connected = False
         self._thread = threading.Thread(
             target=self._thread_entry,
             daemon=True,
@@ -187,7 +200,6 @@ class RealtimeManager:
 
     async def _connect_and_subscribe(self) -> None:
         _install_proxy_patch_if_needed()
-        from realtime._async.client import AsyncRealtimeClient
 
         # Supabase Realtime URL: sp.stg.robusta.dev -> wss://sp.stg.robusta.dev/realtime/v1/websocket
         store_url = self.dal.url.rstrip("/")
@@ -270,7 +282,7 @@ class RealtimeManager:
 
         subscribed = asyncio.Event()
 
-        def _on_subscribe_cb(status, err=None) -> None:
+        def _on_subscribe_cb(status: Any, err: Optional[Exception] = None) -> None:
             logging.info(
                 "RealtimeManager subscribe status=%s err=%s",
                 status,
@@ -344,7 +356,7 @@ class RealtimeManager:
             )
             subscribed = asyncio.Event()
 
-            def _on_sub(status, err=None):
+            def _on_sub(status: Any, err: Optional[Exception] = None) -> None:
                 logging.debug(
                     "Conversation presence subscribe status=%s err=%s conv=%s",
                     status,

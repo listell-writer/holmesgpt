@@ -2,8 +2,8 @@ import logging
 import os
 import threading
 import time
+import uuid
 from concurrent.futures import ThreadPoolExecutor
-from datetime import datetime, timezone
 from typing import Any, Callable, Dict, List, Optional, TYPE_CHECKING, Union
 
 from starlette.requests import Request
@@ -14,11 +14,7 @@ from holmes.common.env_vars import (
     CONVERSATION_WORKER_POLL_INTERVAL_SECONDS_WITHOUT_REALTIME,
     CONVERSATION_WORKER_REALTIME_ENABLED,
 )
-
-# When Realtime is connected we do not poll at all — Postgres Changes events
-# drive claims. A large safety-net sleep value is used so the loop simply
-# blocks until the realtime manager signals activity (e.g. reconnect).
-_REALTIME_CONNECTED_IDLE_SECONDS = 3600
+from holmes.core.conversations import build_chat_messages
 from holmes.core.conversations_worker.event_publisher import (
     ConversationEventPublisher,
 )
@@ -27,7 +23,15 @@ from holmes.core.conversations_worker.models import (
     ConversationReassignedError,
     ConversationTask,
 )
+from holmes.core.conversations_worker.realtime_manager import RealtimeManager
 from holmes.core.models import ChatRequest
+from holmes.core.prompt import PromptComponent
+from holmes.core.tools import PrerequisiteCacheMode, ToolsetTag
+from holmes.core.tools_utils.filesystem_result_storage import (
+    tool_result_storage,
+)
+from holmes.core.tracing import TracingFactory
+from holmes.utils.stream import StreamEvents
 
 if TYPE_CHECKING:
     from fastapi.responses import StreamingResponse
@@ -38,6 +42,11 @@ if TYPE_CHECKING:
 ChatFunction = Callable[
     [ChatRequest, Request], Union["ChatResponse", "StreamingResponse"]
 ]
+
+# When Realtime is connected we do not poll at all — Postgres Changes events
+# drive claims. A large safety-net sleep value is used so the loop simply
+# blocks until the realtime manager signals activity (e.g. reconnect).
+_REALTIME_CONNECTED_IDLE_SECONDS = 3600
 
 
 class ConversationWorker:
@@ -58,7 +67,13 @@ class ConversationWorker:
         self.dal = dal
         self.config = config
         self.chat_function = chat_function
-        self.holmes_id = os.environ.get("HOSTNAME") or str(os.getpid())
+        # Uniquely identify this Holmes process (presence key, assignee value
+        # in Conversations). HOSTNAME alone is not unique because a pod can
+        # restart and re-use the same name, and two replicas in different pods
+        # can have the same env var in tests. Combining hostname + pid +
+        # short uuid4 makes it globally unique across process lifetimes.
+        hostname = os.environ.get("HOSTNAME") or "local"
+        self.holmes_id = f"{hostname}-{os.getpid()}-{uuid.uuid4().hex[:8]}"
 
         self._running = False
         self._claim_thread: Optional[threading.Thread] = None
@@ -87,10 +102,6 @@ class ConversationWorker:
 
         if CONVERSATION_WORKER_REALTIME_ENABLED:
             try:
-                from holmes.core.conversations_worker.realtime_manager import (
-                    RealtimeManager,
-                )
-
                 self._realtime_manager = RealtimeManager(
                     dal=self.dal,
                     holmes_id=self.holmes_id,
@@ -447,15 +458,6 @@ class ConversationWorker:
         Mirrors server.py::chat() for the streaming path but hands raw StreamMessages
         to the publisher instead of SSE-wrapping.
         """
-        # Imports here to avoid circular deps at module load time
-        from holmes.core.prompt import PromptComponent
-        from holmes.core.tools import PrerequisiteCacheMode, ToolsetTag
-        from holmes.core.tools_utils.filesystem_result_storage import (
-            tool_result_storage,
-        )
-        from holmes.core.conversations import build_chat_messages
-        from holmes.core.tracing import TracingFactory
-
         server_tracer = TracingFactory.create_tracer(
             trace_type=os.environ.get("HOLMES_TRACE_BACKEND")
         )
@@ -576,9 +578,10 @@ class ConversationWorker:
             storage.__exit__(None, None, None)
 
     @staticmethod
-    def _terminal_to_status(terminal) -> str:
-        from holmes.utils.stream import StreamEvents
-
+    def _terminal_to_status(terminal: Optional[StreamEvents]) -> str:
+        """Map the terminal StreamEvents value observed by the publisher to the
+        string status we pass to ``complete_conversation`` (or a sentinel for
+        non-completion states)."""
         if terminal == StreamEvents.ANSWER_END:
             return "completed"
         if terminal == StreamEvents.ERROR:
