@@ -139,8 +139,17 @@ class ConversationWorker:
             except Exception:
                 logging.exception("Error stopping realtime manager", exc_info=True)
         if self._executor:
+            # shutdown(wait=False): prevent new tasks from being accepted but
+            # don't block this call on in-flight conversations — the process is
+            # shutting down and those worker threads are daemons that will be
+            # torn down with the interpreter. Blocking here would delay server
+            # shutdown unboundedly on long-running LLM streams.
             self._executor.shutdown(wait=False)
         if self._claim_thread:
+            # Bounded join: the claim loop wakes up once per notify or poll
+            # interval and checks ``self._running``, so 5 seconds is plenty
+            # for the common case. If it's somehow stuck we still return
+            # promptly rather than hang the shutdown path.
             self._claim_thread.join(timeout=5)
         logging.info("ConversationWorker stopped")
 

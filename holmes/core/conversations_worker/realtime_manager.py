@@ -40,6 +40,13 @@ if TYPE_CHECKING:
     from holmes.core.supabase_dal import SupabaseDal
 
 
+# How often the main loop re-fetches the stored Supabase session and calls
+# ``set_auth`` on the realtime client if the JWT changed. Tokens default to 1h
+# validity and the Supabase client auto-refreshes in the background, but the
+# realtime WebSocket needs an explicit push.
+_AUTH_REFRESH_INTERVAL_SECONDS = 60.0
+
+
 def _install_proxy_patch_if_needed() -> None:
     """
     If an ``https_proxy`` env var is set, monkey-patch ``realtime._async.client.connect``
@@ -117,6 +124,9 @@ class RealtimeManager:
         # True once the cluster channel is SUBSCRIBED; flips to False if the
         # realtime thread crashes or the channel reports ERROR/CLOSED.
         self._connected = False
+        # Last JWT we pushed to the realtime client via set_auth. Used to skip
+        # the network call on the common case where the token hasn't rotated.
+        self._last_auth_jwt: Optional[str] = None
 
     # ---- public ----
 
@@ -133,6 +143,7 @@ class RealtimeManager:
         self._client = None
         self._cluster_channel = None
         self._connected = False
+        self._last_auth_jwt = None
         self._thread = threading.Thread(
             target=self._thread_entry,
             daemon=True,
@@ -186,7 +197,13 @@ class RealtimeManager:
         self._started.set()
         try:
             await self._connect_and_subscribe()
+            # Main loop also drives periodic JWT refresh — see _maybe_refresh_auth.
+            last_auth_refresh = 0.0
             while not self._stop_event.is_set():
+                now = asyncio.get_running_loop().time()
+                if now - last_auth_refresh >= _AUTH_REFRESH_INTERVAL_SECONDS:
+                    await self._maybe_refresh_auth()
+                    last_auth_refresh = now
                 await asyncio.sleep(1)
         except Exception:
             logging.exception("Error in realtime manager main loop", exc_info=True)
@@ -197,6 +214,32 @@ class RealtimeManager:
                 self.on_new_pending()
             except Exception:
                 pass
+
+    async def _maybe_refresh_auth(self) -> None:
+        """
+        Supabase access tokens expire (default 1h). The Supabase Python client
+        auto-refreshes its stored session, but the realtime WebSocket doesn't
+        pick up the new token automatically — we must re-call ``set_auth``
+        with the current JWT. If we skip this, RLS-scoped Postgres Changes
+        subscriptions silently stop delivering events once the original JWT
+        expires.
+
+        Called periodically from ``_run``. Cheap when the token is unchanged.
+        """
+        if not self._client:
+            return
+        try:
+            session = self.dal.client.auth.get_session()  # type: ignore[attr-defined]
+            if session is None:
+                return
+            new_jwt = session.access_token
+            if not new_jwt or new_jwt == self._last_auth_jwt:
+                return
+            await self._client.set_auth(new_jwt)
+            self._last_auth_jwt = new_jwt
+            logging.debug("Refreshed realtime client auth token")
+        except Exception:
+            logging.exception("Failed to refresh realtime auth token", exc_info=True)
 
     async def _connect_and_subscribe(self) -> None:
         _install_proxy_patch_if_needed()
@@ -225,6 +268,7 @@ class RealtimeManager:
         await self._client.connect()
         try:
             await self._client.set_auth(user_jwt)
+            self._last_auth_jwt = user_jwt
         except Exception:
             logging.exception("Failed to set_auth on realtime client", exc_info=True)
 
