@@ -150,6 +150,53 @@ def test_publisher_raises_on_reassignment():
         )
 
 
+def test_publisher_flushes_on_error_event():
+    """ERROR events are terminal and must be flushed immediately."""
+    dal = _FakeDal()
+    pub = ConversationEventPublisher(
+        dal=dal,
+        conversation_id="c1",
+        holmes_id="h1",
+        request_sequence=1,
+        batch_interval_seconds=60.0,
+    )
+    terminal = pub.consume(
+        _stream(
+            [
+                StreamMessage(event=StreamEvents.AI_MESSAGE, data={"content": "hi"}),
+                StreamMessage(
+                    event=StreamEvents.ERROR,
+                    data={"description": "rate limit", "error_code": 5204},
+                ),
+            ]
+        )
+    )
+    assert terminal == StreamEvents.ERROR
+    # Both events in a single batch (flushed on ERROR)
+    assert len(dal.calls) == 1
+    assert dal.calls[0]["events"][-1]["event"] == "error"
+
+
+def test_publisher_covers_all_stream_event_types():
+    """Sanity check that every StreamEvents value is accepted by the publisher."""
+    dal = _FakeDal()
+    pub = ConversationEventPublisher(
+        dal=dal,
+        conversation_id="c1",
+        holmes_id="h1",
+        request_sequence=1,
+        batch_interval_seconds=60.0,
+    )
+    # Build a message for each StreamEvents value
+    all_events = [StreamMessage(event=e, data={}) for e in StreamEvents]
+    # Consume — publisher should never crash
+    pub.consume(_stream(all_events))
+    # Collect all event type strings actually written
+    written = {ev["event"] for call in dal.calls for ev in call["events"]}
+    expected = {e.value for e in StreamEvents}
+    assert expected == written, f"missing from writes: {expected - written}"
+
+
 def test_publisher_batches_intermediate_events():
     """Events that don't trigger immediate flush should be batched together."""
     dal = _FakeDal()

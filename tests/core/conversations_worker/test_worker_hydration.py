@@ -123,6 +123,36 @@ def test_hydrate_picks_approval_required_history():
     assert task.enable_tool_approval is True
 
 
+def test_extract_last_user_ask():
+    """_extract_last_user_ask walks a message history and returns the last user text."""
+    from holmes.core.conversations_worker.worker import ConversationWorker
+
+    history = [
+        {"role": "system", "content": "sys"},
+        {"role": "user", "content": "first question"},
+        {"role": "assistant", "content": "answer 1"},
+        {"role": "user", "content": "second question"},
+        {"role": "assistant", "content": "answer 2"},
+    ]
+    assert ConversationWorker._extract_last_user_ask(history) == "second question"
+
+    # Vision-style message with list content
+    vision_history = [
+        {"role": "system", "content": "sys"},
+        {
+            "role": "user",
+            "content": [
+                {"type": "text", "text": "look at this"},
+                {"type": "image_url", "image_url": {"url": "data:image/png;base64,..."}},
+            ],
+        },
+    ]
+    assert ConversationWorker._extract_last_user_ask(vision_history) == "look at this"
+
+    assert ConversationWorker._extract_last_user_ask(None) is None
+    assert ConversationWorker._extract_last_user_ask([]) is None
+
+
 def test_hydrate_extracts_model_override():
     worker = _make_worker()
     task = ConversationTask(

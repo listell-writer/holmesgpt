@@ -227,6 +227,19 @@ class ConversationWorker:
         events = self.dal.get_conversation_events(task.conversation_id)
         self._hydrate_task_from_events(task, events)
 
+        # A follow-up may carry only tool_decisions / frontend_tool_results
+        # (no new user question). In that case Holmes resumes the prior
+        # assistant turn — we reuse the previous ask as a placeholder for
+        # ChatRequest (which requires `ask: str`), but no new user message
+        # is appended to the history (see _run_chat_and_publish).
+        resume_only = bool(
+            not task.ask and (task.tool_decisions or task.frontend_tool_results)
+        )
+        if resume_only:
+            # Pull the last user text from the reconstructed history for the
+            # ChatRequest field; not used to build a new prompt.
+            task.ask = self._extract_last_user_ask(task.conversation_history) or "Continue"
+
         if not task.ask:
             logging.warning(
                 "Conversation %s has no user question, marking as failed",
@@ -260,11 +273,15 @@ class ConversationWorker:
             tool_decisions=task.tool_decisions,  # type: ignore[arg-type]
             frontend_tool_results=task.frontend_tool_results,  # type: ignore[arg-type]
         )
+        # Flag used later to skip build_chat_messages for pure resumes
+        chat_request_is_resume_only = resume_only
 
         # Call the chat function to get a StreamingResponse — we need the raw
         # StreamMessage generator not the SSE-wrapped one, so we need a different
         # path. The cleanest way is to build the LLM call directly.
-        self._run_chat_and_publish(task, chat_request, publisher)
+        self._run_chat_and_publish(
+            task, chat_request, publisher, resume_only=chat_request_is_resume_only
+        )
 
     def _hydrate_task_from_events(
         self, task: ConversationTask, events: List[Dict[str, Any]]
@@ -327,11 +344,29 @@ class ConversationWorker:
                 task.conversation_id,
             )
 
+    @staticmethod
+    def _extract_last_user_ask(history: Optional[list]) -> Optional[str]:
+        """Pull the most recent user message text from an OpenAI-format history."""
+        if not history:
+            return None
+        for msg in reversed(history):
+            if msg.get("role") == "user":
+                content = msg.get("content")
+                if isinstance(content, str):
+                    return content
+                if isinstance(content, list):
+                    # Vision message: find the first text part
+                    for part in content:
+                        if isinstance(part, dict) and part.get("type") == "text":
+                            return part.get("text")
+        return None
+
     def _run_chat_and_publish(
         self,
         task: ConversationTask,
         chat_request: ChatRequest,
         publisher: ConversationEventPublisher,
+        resume_only: bool = False,
     ) -> None:
         """
         Run Holmes on the chat_request and stream StreamMessages into the publisher.
@@ -382,17 +417,23 @@ class ConversationWorker:
             )
 
             global_instructions = self.dal.get_global_instructions_for_account()
-            messages = build_chat_messages(
-                chat_request.ask,
-                chat_request.conversation_history,
-                ai=ai,
-                config=self.config,
-                global_instructions=global_instructions,
-                additional_system_prompt=chat_request.additional_system_prompt,
-                runbooks=runbooks,
-                images=chat_request.images,
-                prompt_component_overrides=prompt_component_overrides,
-            )
+            if resume_only and chat_request.conversation_history:
+                # Pure tool-decision / frontend-tool-result resume. Don't append
+                # a new user message — call_stream consumes the existing history
+                # plus tool_decisions to produce the next turn.
+                messages = list(chat_request.conversation_history)
+            else:
+                messages = build_chat_messages(
+                    chat_request.ask,
+                    chat_request.conversation_history,
+                    ai=ai,
+                    config=self.config,
+                    global_instructions=global_instructions,
+                    additional_system_prompt=chat_request.additional_system_prompt,
+                    runbooks=runbooks,
+                    images=chat_request.images,
+                    prompt_component_overrides=prompt_component_overrides,
+                )
 
             # Write an initial ai_message event (optional) - skip; call_stream will emit events
             trace_span = server_tracer.start_trace("holmesgpt.investigation")
