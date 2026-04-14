@@ -100,12 +100,10 @@ class ConversationEventPublisher:
 
     def _flush(self, compact: bool) -> None:
         with self._lock:
-            events_to_flush = self._pending_events
-            self._pending_events = []
-        if not events_to_flush:
-            # Nothing to post. A compact=True with no events is a no-op — compact
-            # only applies alongside a new event batch.
-            return
+            if not self._pending_events:
+                return
+            # Snapshot but don't clear yet — only clear after a successful post.
+            events_to_flush = list(self._pending_events)
 
         try:
             seq = self.dal.post_conversation_events(
@@ -114,18 +112,6 @@ class ConversationEventPublisher:
                 request_sequence=self.request_sequence,
                 events=events_to_flush,
                 compact=compact,
-            )
-            if seq is None:
-                raise ConversationReassignedError(
-                    f"Conversation {self.conversation_id} reassigned or stale: post_conversation_events returned None"
-                )
-            self._last_flush_time = time.monotonic()
-            logging.debug(
-                "Posted %d events to conversation %s (seq=%s, compact=%s)",
-                len(events_to_flush),
-                self.conversation_id,
-                seq,
-                compact,
             )
         except ConversationReassignedError:
             raise
@@ -136,3 +122,28 @@ class ConversationEventPublisher:
             if "mismatch" in str(e).lower():
                 raise ConversationReassignedError(str(e)) from e
             raise
+
+        if seq is None:
+            # DAL returned None (disabled or unexpected empty response).
+            # Keep events in memory so the next flush retries them.
+            logging.warning(
+                "post_conversation_events returned None for conversation %s — "
+                "events retained for retry (%d events)",
+                self.conversation_id,
+                len(events_to_flush),
+            )
+            return
+
+        # Success — remove the flushed events from the pending list.
+        # New events may have been appended while the RPC was in flight,
+        # so we remove only the count we just posted.
+        with self._lock:
+            del self._pending_events[: len(events_to_flush)]
+        self._last_flush_time = time.monotonic()
+        logging.debug(
+            "Posted %d events to conversation %s (seq=%s, compact=%s)",
+            len(events_to_flush),
+            self.conversation_id,
+            seq,
+            compact,
+        )
