@@ -94,7 +94,7 @@ def _install_proxy_patch_if_needed() -> None:
         kwargs.setdefault("server_hostname", parsed.hostname)
         if parsed.scheme == "wss" and "ssl" not in kwargs:
             kwargs["ssl"] = ssl.create_default_context()
-        return await ws_connect(url, sock=sock, *args, **kwargs)
+        return await ws_connect(url, *args, sock=sock, **kwargs)
 
     rt_client.connect = _proxied_connect  # type: ignore[attr-defined]
     rt_client._holmes_proxy_patched = True  # type: ignore[attr-defined]
@@ -275,7 +275,13 @@ class RealtimeManager:
         # anon apikey in the URL. RLS is then enforced by passing the user's JWT
         # via set_auth() after connecting.
         apikey = self.dal.api_key
-        user_jwt = self.dal.client.auth.get_session().access_token  # type: ignore[attr-defined]
+        session = self.dal.client.auth.get_session()  # type: ignore[attr-defined]
+        user_jwt = session.access_token if session else None
+        if not user_jwt:
+            logging.warning(
+                "No Supabase session available during realtime connect; "
+                "RLS-scoped subscriptions may not work until a token refresh"
+            )
 
         self._client = AsyncRealtimeClient(
             url=ws_url,
@@ -283,11 +289,12 @@ class RealtimeManager:
             auto_reconnect=True,
         )
         await self._client.connect()
-        try:
-            await self._client.set_auth(user_jwt)
-            self._last_auth_jwt = user_jwt
-        except Exception:
-            logging.exception("Failed to set_auth on realtime client", exc_info=True)
+        if user_jwt:
+            try:
+                await self._client.set_auth(user_jwt)
+                self._last_auth_jwt = user_jwt
+            except Exception:
+                logging.exception("Failed to set_auth on realtime client", exc_info=True)
 
         # 1. Cluster-level Presence
         topic = f"holmes:cluster:{self.dal.account_id}:{self.dal.cluster}"
