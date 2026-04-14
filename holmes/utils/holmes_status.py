@@ -3,6 +3,7 @@ import json
 import logging
 
 from holmes import get_version  # type: ignore
+from holmes.common.env_vars import ENABLE_CONVERSATION_WORKER
 from holmes.config import Config
 from holmes.core.supabase_dal import SupabaseDal
 
@@ -10,6 +11,7 @@ from holmes.core.supabase_dal import SupabaseDal
 class HolmesMetadata:
     is_robusta_ai_enabled: bool
     supports_additional_system_prompt: bool = True
+    supports_realtime_conversations: bool = False
 
 
 def update_holmes_status_in_db(dal: SupabaseDal, config: Config):
@@ -20,8 +22,11 @@ def update_holmes_status_in_db(dal: SupabaseDal, config: Config):
             "Cluster name is missing in the configuration. Please ensure 'CLUSTER_NAME' is defined in the environment variables, "
             "or verify that a cluster name is provided in the Robusta configuration file."
         )
-    
-    metadata = HolmesMetadata(is_robusta_ai_enabled=config.should_try_robusta_ai)
+
+    metadata = HolmesMetadata(
+        is_robusta_ai_enabled=config.should_try_robusta_ai,
+        supports_realtime_conversations=bool(ENABLE_CONVERSATION_WORKER),
+    )
 
     dal.upsert_holmes_status(
         {
