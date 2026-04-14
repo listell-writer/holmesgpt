@@ -68,6 +68,7 @@ class ConversationEventPublisher:
         without a terminal event.
         Raises ConversationReassignedError if the conversation was reassigned mid-stream.
         """
+        reassigned = False
         try:
             for message in stream:
                 self._append_event(message)
@@ -91,9 +92,15 @@ class ConversationEventPublisher:
                     >= self.batch_interval_seconds
                 ):
                     self._flush()
+        except ConversationReassignedError:
+            reassigned = True
+            raise
         finally:
-            # final drain of any remaining events
-            self._flush()
+            # Final drain of any remaining events — skip if the conversation
+            # was reassigned, since our assignee/sequence are stale and writing
+            # would either fail or race with the new owner.
+            if not reassigned:
+                self._flush()
 
         # If events remain unsaved after the stream is fully consumed, the
         # terminal batch was lost (repeated None returns). Surface this to the
