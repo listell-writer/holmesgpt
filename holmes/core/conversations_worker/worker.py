@@ -238,6 +238,8 @@ class ConversationWorker:
 
     def _dispatch_queued(self) -> None:
         """Move tasks from the queued pool to the executor, up to capacity."""
+        if not self._running:
+            return
         while True:
             with self._active_lock:
                 active = len(self._active_conversation_ids)
@@ -323,7 +325,9 @@ class ConversationWorker:
             )
         except Exception:
             logging.exception(
-                "Failed to build conversation task from row: %s", conv, exc_info=True
+                "Failed to build conversation task from row (conversation_id=%s)",
+                conv.get("conversation_id", "unknown"),
+                exc_info=True,
             )
             return None
 
@@ -400,7 +404,9 @@ class ConversationWorker:
                 e,
                 exc_info=True,
             )
-            self._fail_conversation(task, f"Internal error: {e}")
+            self._fail_conversation(
+                task, "An internal error occurred while processing your request"
+            )
         finally:
             # Leave the conversation Presence channel regardless of outcome
             if self._realtime_manager is not None:

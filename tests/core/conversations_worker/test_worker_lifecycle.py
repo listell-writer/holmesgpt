@@ -266,7 +266,10 @@ def test_process_conversation_safe_marks_failed_on_exception():
     assert call_kwargs["conversation_id"] == "c1"
     error_events = call_kwargs["events"]
     assert error_events[0]["event"] == "error"
-    assert "synthetic failure" in error_events[0]["data"]["description"]
+    # The error event must use a generic message, not the raw exception text
+    desc = error_events[0]["data"]["description"]
+    assert "synthetic failure" not in desc, "Raw exception text must not leak into error events"
+    assert "internal error" in desc.lower()
 
     w.dal.update_conversation_status.assert_called_once_with(
         conversation_id="c1",
