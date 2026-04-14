@@ -906,7 +906,7 @@ class SupabaseDal:
     def claim_conversations(self, holmes_id: str) -> List[Dict]:
         """
         Atomically claim all pending conversations for this cluster.
-        Returns a list of claimed Conversation rows (status='running', assignee=holmes_id).
+        Returns a list of claimed Conversation rows (status='queued', assignee=holmes_id).
         """
         if not self.enabled:
             return []
@@ -977,7 +977,7 @@ class SupabaseDal:
             )
             raise
 
-    def complete_conversation(
+    def update_conversation_status(
         self,
         conversation_id: str,
         request_sequence: int,
@@ -985,18 +985,25 @@ class SupabaseDal:
         status: str,
     ) -> bool:
         """
-        Mark conversation as completed or failed.
+        Transition a conversation between active states or to terminal states.
+
+        Accepted statuses: ``queued``, ``running``, ``completed``, ``failed``.
+        The RPC validates that the current status is ``queued`` or ``running``
+        and that assignee + request_sequence match the row.  On terminal states
+        (``completed``, ``failed``) the assignee is cleared by the RPC.
         """
         if not self.enabled:
             return False
 
-        if status not in ("completed", "failed"):
-            logging.error("complete_conversation received invalid status %s", status)
+        if status not in ("queued", "running", "completed", "failed"):
+            logging.error(
+                "update_conversation_status received invalid status %s", status
+            )
             return False
 
         try:
             res = self.client.rpc(
-                "complete_conversation",
+                "update_conversation_status",
                 {
                     "_account_id": self.account_id,
                     "_conversation_id": conversation_id,
@@ -1006,9 +1013,18 @@ class SupabaseDal:
                 },
             ).execute()
             return bool(res.data)
-        except Exception:
+        except Exception as e:
+            # The RPC raises MISMATCH errors when assignee, request_sequence,
+            # or status guards fail — propagate these so the worker can exit
+            # cleanly rather than retrying a stale transition.
+            if "mismatch" in str(e).lower():
+                from holmes.core.conversations_worker.models import (
+                    ConversationReassignedError,
+                )
+
+                raise ConversationReassignedError(str(e)) from e
             logging.exception(
-                "Supabase error while completing conversation", exc_info=True
+                "Supabase error while updating conversation status", exc_info=True
             )
             return False
 

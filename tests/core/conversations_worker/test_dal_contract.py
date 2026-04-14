@@ -6,6 +6,9 @@ just forwards the response from the RPC.
 from typing import Any, Dict, List, Optional
 from unittest.mock import MagicMock
 
+import pytest
+
+from holmes.core.conversations_worker.models import ConversationReassignedError
 from holmes.core.supabase_dal import SupabaseDal
 
 
@@ -121,22 +124,81 @@ def test_claim_conversations_uses_assignee_param():
     assert params["_cluster_id"] == "cluster-1"
 
 
-# ---- complete_conversation ----
+# ---- update_conversation_status ----
 
 
-def test_complete_conversation_uses_assignee_param():
+def test_update_conversation_status_uses_assignee_param():
     dal = _build_dal(rpc_data=True)
-    dal.complete_conversation(
+    dal.update_conversation_status(
         conversation_id="c",
         request_sequence=2,
         assignee="my-pod-1",
         status="completed",
     )
     args, _ = dal.client.rpc.call_args
-    assert args[0] == "complete_conversation"
+    assert args[0] == "update_conversation_status"
     params = args[1]
     assert params["_account_id"] == "acc-1"
     assert params["_conversation_id"] == "c"
     assert params["_request_sequence"] == 2
     assert params["_assignee"] == "my-pod-1"
     assert params["_status"] == "completed"
+
+
+def test_update_conversation_status_accepts_running():
+    dal = _build_dal(rpc_data=True)
+    result = dal.update_conversation_status(
+        conversation_id="c",
+        request_sequence=1,
+        assignee="h",
+        status="running",
+    )
+    assert result is True
+    params = dal.client.rpc.call_args[0][1]
+    assert params["_status"] == "running"
+
+
+def test_update_conversation_status_accepts_queued():
+    dal = _build_dal(rpc_data=True)
+    result = dal.update_conversation_status(
+        conversation_id="c",
+        request_sequence=1,
+        assignee="h",
+        status="queued",
+    )
+    assert result is True
+    params = dal.client.rpc.call_args[0][1]
+    assert params["_status"] == "queued"
+
+
+def test_update_conversation_status_rejects_invalid_status():
+    dal = _build_dal(rpc_data=True)
+    result = dal.update_conversation_status(
+        conversation_id="c",
+        request_sequence=1,
+        assignee="h",
+        status="stopped",
+    )
+    assert result is False
+    dal.client.rpc.assert_not_called()
+
+
+def test_update_conversation_status_promotes_mismatch_to_reassigned_error():
+    """MISMATCH errors from the RPC should be raised as ConversationReassignedError."""
+    dal = SupabaseDal.__new__(SupabaseDal)
+    dal.enabled = True
+    dal.account_id = "acc-1"
+    dal.cluster = "cluster-1"
+    dal.client = MagicMock()
+    dal.client.rpc.return_value = MagicMock(
+        execute=MagicMock(
+            side_effect=Exception("MISMATCH Assignee expected h-old, got h-new")
+        )
+    )
+    with pytest.raises(ConversationReassignedError, match="MISMATCH"):
+        dal.update_conversation_status(
+            conversation_id="c",
+            request_sequence=1,
+            assignee="h",
+            status="running",
+        )

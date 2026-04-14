@@ -174,7 +174,7 @@ HOLMES_TOOL_RESULT_STORAGE_PATH = os.environ.get(
 # Conversation Worker (M2)
 ENABLE_CONVERSATION_WORKER = load_bool("ENABLE_CONVERSATION_WORKER", False)
 CONVERSATION_WORKER_MAX_CONCURRENT = int(
-    os.environ.get("CONVERSATION_WORKER_MAX_CONCURRENT", 10)
+    os.environ.get("CONVERSATION_WORKER_MAX_CONCURRENT", 5)
 )
 # Only used when realtime is disabled or disconnected. When realtime is enabled
 # and connected, Holmes relies on Postgres Changes notifications and does not

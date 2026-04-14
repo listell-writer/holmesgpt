@@ -6,6 +6,7 @@ from pydantic import BaseModel, Field
 
 class ConversationStatus(str, Enum):
     PENDING = "pending"
+    QUEUED = "queued"
     RUNNING = "running"
     COMPLETED = "completed"
     FAILED = "failed"

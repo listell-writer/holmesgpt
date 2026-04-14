@@ -163,11 +163,28 @@ class RealtimeManager:
         if self._thread:
             self._thread.join(timeout=5)
 
-    def join_conversation_presence(self, conversation_id: str) -> None:
-        """Join a per-conversation presence channel to advertise heartbeat."""
+    def join_conversation_presence(
+        self, conversation_id: str, status: str = "running"
+    ) -> None:
+        """Join a per-conversation presence channel to advertise heartbeat.
+
+        ``status`` is included in the presence payload so Relay can distinguish
+        queued (claimed but waiting for an executor slot) from running.
+        """
         if self._loop and self._loop.is_running():
             asyncio.run_coroutine_threadsafe(
-                self._join_conversation_channel(conversation_id), self._loop
+                self._join_conversation_channel(conversation_id, status=status),
+                self._loop,
+            )
+
+    def update_conversation_presence(
+        self, conversation_id: str, status: str = "running"
+    ) -> None:
+        """Update the presence payload for an already-joined conversation channel."""
+        if self._loop and self._loop.is_running():
+            asyncio.run_coroutine_threadsafe(
+                self._update_conversation_channel(conversation_id, status=status),
+                self._loop,
             )
 
     def leave_conversation_presence(self, conversation_id: str) -> None:
@@ -384,7 +401,9 @@ class RealtimeManager:
             "RealtimeManager connected and subscribed to topic=%s", topic
         )
 
-    async def _join_conversation_channel(self, conversation_id: str) -> None:
+    async def _join_conversation_channel(
+        self, conversation_id: str, status: str = "running"
+    ) -> None:
         if not self._client:
             return
         try:
@@ -400,10 +419,10 @@ class RealtimeManager:
             )
             subscribed = asyncio.Event()
 
-            def _on_sub(status: Any, err: Optional[Exception] = None) -> None:
+            def _on_sub(sub_status: Any, err: Optional[Exception] = None) -> None:
                 logging.debug(
                     "Conversation presence subscribe status=%s err=%s conv=%s",
-                    status,
+                    sub_status,
                     err,
                     conversation_id,
                 )
@@ -421,14 +440,54 @@ class RealtimeManager:
                     "version": get_version(),
                     "started_at": datetime.now(timezone.utc).isoformat(),
                     "conversation_id": conversation_id,
+                    "status": status,
                 }
             )
             logging.info(
-                "Joined conversation presence channel for %s", conversation_id
+                "Joined conversation presence channel for %s (status=%s)",
+                conversation_id,
+                status,
             )
         except Exception:
             logging.exception(
                 "Failed to join conversation presence %s",
+                conversation_id,
+                exc_info=True,
+            )
+
+    async def _update_conversation_channel(
+        self, conversation_id: str, status: str = "running"
+    ) -> None:
+        """Re-track presence with an updated status on an existing channel."""
+        if not self._client:
+            return
+        topic = f"holmes:conversation:{conversation_id}"
+        ch = self._client.channels.get(topic) or self._client.channels.get(  # type: ignore[attr-defined]
+            f"realtime:{topic}"
+        )
+        if ch is None:
+            logging.warning(
+                "No conversation presence channel to update for %s", conversation_id
+            )
+            return
+        try:
+            await ch.track(
+                {
+                    "holmes_id": self.holmes_id,
+                    "version": get_version(),
+                    "started_at": datetime.now(timezone.utc).isoformat(),
+                    "conversation_id": conversation_id,
+                    "status": status,
+                }
+            )
+            logging.debug(
+                "Updated conversation presence for %s to status=%s",
+                conversation_id,
+                status,
+            )
+        except Exception:
+            logging.exception(
+                "Failed to update conversation presence %s",
                 conversation_id,
                 exc_info=True,
             )

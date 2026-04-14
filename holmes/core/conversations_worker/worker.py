@@ -3,6 +3,7 @@ import os
 import threading
 import time
 import uuid
+from collections import deque
 from concurrent.futures import ThreadPoolExecutor
 from typing import Any, Callable, Dict, List, Optional, TYPE_CHECKING, Union
 
@@ -56,6 +57,9 @@ class ConversationWorker:
     Active participant that picks up pending Conversation rows from Supabase,
     runs them through the existing /api/chat pipeline (via chat_function),
     and writes results back as ConversationEvents in real-time.
+
+    Lifecycle: pending → queued (claimed) → running (processing) → completed/failed.
+    Presence is advertised for both queued and running conversations.
     """
 
     def __init__(
@@ -79,10 +83,17 @@ class ConversationWorker:
         self._claim_thread: Optional[threading.Thread] = None
         self._notify_event = threading.Event()
         self._executor: Optional[ThreadPoolExecutor] = None
+
+        # Tracks conversations currently being processed (running state).
         self._active_conversation_ids: set = set()
         self._active_lock = threading.Lock()
 
-        self._realtime_manager = None  # optional
+        # Conversations that have been claimed (queued) but not yet submitted
+        # to the executor because we're at capacity.
+        self._queued_tasks: deque = deque()
+        self._queued_lock = threading.Lock()
+
+        self._realtime_manager: Optional[RealtimeManager] = None
 
     def start(self) -> None:
         if not self.dal.enabled:
@@ -194,26 +205,107 @@ class ConversationWorker:
             return False
 
     def _try_claim_and_dispatch(self) -> None:
-        # Respect max concurrency: if we're at capacity, skip claiming
-        with self._active_lock:
-            active = len(self._active_conversation_ids)
-        if active >= CONVERSATION_WORKER_MAX_CONCURRENT:
-            logging.debug(
-                "At max concurrency (%d), skipping claim", active
-            )
-            return
-
+        # Claim ALL pending conversations — they transition to queued state.
+        # There is no capacity check here: we claim eagerly so that no other
+        # Holmes instance can grab them, and queue them locally until executor
+        # slots open up.
         claimed = self.dal.claim_conversations(self.holmes_id)
-        if not claimed:
-            return
-        logging.info("Claimed %d conversation(s)", len(claimed))
+        if claimed:
+            logging.info("Claimed %d conversation(s)", len(claimed))
         for conv in claimed:
             task = self._build_task_from_conversation_row(conv)
             if task is None:
                 continue
+            # Join presence immediately (while still queued) so Relay can see
+            # this conversation has a live Holmes assigned.
+            if self._realtime_manager is not None:
+                try:
+                    self._realtime_manager.join_conversation_presence(
+                        task.conversation_id, status="queued"
+                    )
+                except Exception:
+                    logging.exception(
+                        "Failed to join conversation presence for %s",
+                        task.conversation_id,
+                        exc_info=True,
+                    )
+            with self._queued_lock:
+                self._queued_tasks.append(task)
+
+        # Dispatch as many queued tasks as executor capacity allows.
+        self._dispatch_queued()
+
+    def _dispatch_queued(self) -> None:
+        """Move tasks from the queued pool to the executor, up to capacity."""
+        while True:
+            with self._active_lock:
+                active = len(self._active_conversation_ids)
+            if active >= CONVERSATION_WORKER_MAX_CONCURRENT:
+                break
+
+            with self._queued_lock:
+                if not self._queued_tasks:
+                    break
+                task = self._queued_tasks.popleft()
+
+            # Transition from queued → running in the DB. The RPC validates
+            # that the assignee and request_sequence still match — if
+            # stop_conversation or retry_conversation bumped the sequence
+            # while the task was queued, this raises ConversationReassignedError.
+            try:
+                ok = self.dal.update_conversation_status(
+                    conversation_id=task.conversation_id,
+                    request_sequence=task.request_sequence,
+                    assignee=self.holmes_id,
+                    status="running",
+                )
+                if not ok:
+                    logging.warning(
+                        "Failed to transition conversation %s to running — skipping",
+                        task.conversation_id,
+                    )
+                    self._leave_presence_quietly(task.conversation_id)
+                    continue
+            except ConversationReassignedError:
+                logging.warning(
+                    "Conversation %s was reassigned while queued — skipping",
+                    task.conversation_id,
+                )
+                self._leave_presence_quietly(task.conversation_id)
+                continue
+            except Exception:
+                logging.exception(
+                    "Error transitioning conversation %s to running",
+                    task.conversation_id,
+                    exc_info=True,
+                )
+                self._leave_presence_quietly(task.conversation_id)
+                continue
+
+            # Update presence to reflect running status
+            if self._realtime_manager is not None:
+                try:
+                    self._realtime_manager.update_conversation_presence(
+                        task.conversation_id, status="running"
+                    )
+                except Exception:
+                    logging.exception(
+                        "Failed to update conversation presence to running for %s",
+                        task.conversation_id,
+                        exc_info=True,
+                    )
+
             with self._active_lock:
                 self._active_conversation_ids.add(task.conversation_id)
             self._executor.submit(self._process_conversation_safe, task)
+
+    def _leave_presence_quietly(self, conversation_id: str) -> None:
+        """Leave conversation presence, swallowing any errors."""
+        if self._realtime_manager is not None:
+            try:
+                self._realtime_manager.leave_conversation_presence(conversation_id)
+            except Exception:
+                pass
 
     def _build_task_from_conversation_row(
         self, conv: Dict[str, Any]
@@ -243,8 +335,8 @@ class ConversationWorker:
             # Another worker claimed this conversation or the initiator bumped
             # request_sequence (e.g. stop_conversation) while we were working.
             # The DB already reflects the new state — do NOT call
-            # complete_conversation, which would either fail (status guard) or
-            # race with the new owner.
+            # update_conversation_status, which would either fail (status guard)
+            # or race with the new owner.
             logging.warning(
                 "Conversation %s was reassigned mid-process: %s",
                 task.conversation_id,
@@ -259,7 +351,7 @@ class ConversationWorker:
             )
             # Attempt to mark as failed
             try:
-                self.dal.complete_conversation(
+                self.dal.update_conversation_status(
                     conversation_id=task.conversation_id,
                     request_sequence=task.request_sequence,
                     assignee=self.holmes_id,
@@ -286,21 +378,19 @@ class ConversationWorker:
                     )
             with self._active_lock:
                 self._active_conversation_ids.discard(task.conversation_id)
-
-    def _process_conversation(self, task: ConversationTask) -> None:
-        # Join per-conversation Presence channel so external observers (Relay)
-        # can see that this conversation has a live Holmes working on it.
-        if self._realtime_manager is not None:
+            # A slot freed up — try to dispatch the next queued task.
             try:
-                self._realtime_manager.join_conversation_presence(
-                    task.conversation_id
-                )
+                self._dispatch_queued()
             except Exception:
                 logging.exception(
-                    "Failed to join conversation presence for %s",
+                    "Error dispatching queued tasks after conversation %s",
                     task.conversation_id,
                     exc_info=True,
                 )
+
+    def _process_conversation(self, task: ConversationTask) -> None:
+        # Presence was already joined during claim (queued state) and updated
+        # to running by _dispatch_queued. No join needed here.
 
         # Load events and extract the user ask + conversation history
         events = self.dal.get_conversation_events(task.conversation_id)
@@ -324,7 +414,7 @@ class ConversationWorker:
                 "Conversation %s has no user question, marking as failed",
                 task.conversation_id,
             )
-            self.dal.complete_conversation(
+            self.dal.update_conversation_status(
                 conversation_id=task.conversation_id,
                 request_sequence=task.request_sequence,
                 assignee=self.holmes_id,
@@ -543,7 +633,7 @@ class ConversationWorker:
                 terminal = publisher.consume(stream)
                 status = self._terminal_to_status(terminal)
                 if status == "completed" or status == "failed":
-                    ok = self.dal.complete_conversation(
+                    ok = self.dal.update_conversation_status(
                         conversation_id=task.conversation_id,
                         request_sequence=task.request_sequence,
                         assignee=self.holmes_id,
@@ -556,11 +646,9 @@ class ConversationWorker:
                             status,
                         )
                 elif status == "awaiting_approval":
-                    # Leave the conversation in 'running' state — actually approvals
-                    # per spec should mark the current request as complete so the
-                    # follow-up can re-pend it. We treat approval_required as completed
-                    # for the current request_sequence.
-                    self.dal.complete_conversation(
+                    # Approval required is treated as completed for the current
+                    # request_sequence — the follow-up will re-pend it.
+                    self.dal.update_conversation_status(
                         conversation_id=task.conversation_id,
                         request_sequence=task.request_sequence,
                         assignee=self.holmes_id,
@@ -571,7 +659,7 @@ class ConversationWorker:
                         "Conversation %s ended without a terminal event",
                         task.conversation_id,
                     )
-                    self.dal.complete_conversation(
+                    self.dal.update_conversation_status(
                         conversation_id=task.conversation_id,
                         request_sequence=task.request_sequence,
                         assignee=self.holmes_id,
@@ -589,8 +677,8 @@ class ConversationWorker:
     @staticmethod
     def _terminal_to_status(terminal: Optional[StreamEvents]) -> str:
         """Map the terminal StreamEvents value observed by the publisher to the
-        string status we pass to ``complete_conversation`` (or a sentinel for
-        non-completion states)."""
+        string status we pass to ``update_conversation_status`` (or a sentinel
+        for non-completion states)."""
         if terminal == StreamEvents.ANSWER_END:
             return "completed"
         if terminal == StreamEvents.ERROR:
