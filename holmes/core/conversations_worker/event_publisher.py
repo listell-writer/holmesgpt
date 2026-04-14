@@ -48,9 +48,15 @@ class ConversationEventPublisher:
 
         self._pending_events: List[Dict[str, Any]] = []
         self._last_flush_time: float = time.monotonic()
+        self._last_retry_time: float = 0.0
         self._lock = threading.Lock()
 
         self._last_terminal_event: Optional[StreamEvents] = None
+
+        # Sticky compact flag: set when a compact flush is attempted but the
+        # DAL returns None. Ensures the compact intent is preserved across
+        # retries and the final drain.
+        self._pending_compact: bool = False
 
     def consume(
         self,
@@ -71,20 +77,36 @@ class ConversationEventPublisher:
                     # ai_answer_end and approval_required carry a full
                     # conversation history snapshot in their messages array,
                     # so all prior events are superseded → compact them.
-                    self._flush(
-                        compact=message.event in _COMPACT_ON_FLUSH_EVENTS
-                    )
+                    if message.event in _COMPACT_ON_FLUSH_EVENTS:
+                        self._pending_compact = True
+                    self._flush()
                 elif message.event == StreamEvents.CONVERSATION_HISTORY_COMPACTED:
                     # Flush with compact=True so previous events are marked compacted
-                    self._flush(compact=True)
+                    self._pending_compact = True
+                    self._flush()
                 elif (
                     time.monotonic() - self._last_flush_time
                     >= self.batch_interval_seconds
+                    and time.monotonic() - self._last_retry_time
+                    >= self.batch_interval_seconds
                 ):
-                    self._flush(compact=False)
+                    self._flush()
         finally:
             # final drain of any remaining events
-            self._flush(compact=False)
+            self._flush()
+
+        # If events remain unsaved after the stream is fully consumed, the
+        # terminal batch was lost (repeated None returns). Surface this to the
+        # caller so the conversation is marked failed rather than completed.
+        with self._lock:
+            remaining = len(self._pending_events)
+        if remaining > 0:
+            logging.error(
+                "consume() finished with %d unsaved events for conversation %s",
+                remaining,
+                self.conversation_id,
+            )
+            return None
 
         return self._last_terminal_event
 
@@ -98,12 +120,13 @@ class ConversationEventPublisher:
                 }
             )
 
-    def _flush(self, compact: bool) -> None:
+    def _flush(self) -> None:
         with self._lock:
             if not self._pending_events:
                 return
             # Snapshot but don't clear yet — only clear after a successful post.
             events_to_flush = list(self._pending_events)
+            compact = self._pending_compact
 
         try:
             seq = self.dal.post_conversation_events(
@@ -125,20 +148,25 @@ class ConversationEventPublisher:
 
         if seq is None:
             # DAL returned None (disabled or unexpected empty response).
-            # Keep events in memory so the next flush retries them.
+            # Keep events and compact flag in memory so the next flush retries.
+            # Update _last_retry_time to throttle retries independently of
+            # normal flush timing.
+            self._last_retry_time = time.monotonic()
             logging.warning(
                 "post_conversation_events returned None for conversation %s — "
-                "events retained for retry (%d events)",
+                "events retained for retry (%d events, compact=%s)",
                 self.conversation_id,
                 len(events_to_flush),
+                compact,
             )
             return
 
-        # Success — remove the flushed events from the pending list.
+        # Success — remove the flushed events and clear the compact flag.
         # New events may have been appended while the RPC was in flight,
         # so we remove only the count we just posted.
         with self._lock:
             del self._pending_events[: len(events_to_flush)]
+            self._pending_compact = False
         self._last_flush_time = time.monotonic()
         logging.debug(
             "Posted %d events to conversation %s (seq=%s, compact=%s)",

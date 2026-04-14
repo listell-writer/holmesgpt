@@ -290,3 +290,73 @@ def test_publisher_batches_intermediate_events():
     # All 4 should end up in a single flush (final ANSWER_END)
     assert len(dal.calls) == 1
     assert len(dal.calls[0]["events"]) == 4
+
+
+def test_publisher_sticky_compact_across_none_retry():
+    """When a compact flush returns None, the compact flag must persist
+    so the retry uses compact=True."""
+    call_count = {"n": 0}
+
+    class _RetryDal(_FakeDal):
+        def post_conversation_events(self, **kwargs):
+            call_count["n"] += 1
+            if call_count["n"] == 1:
+                # First attempt returns None (retry)
+                self.calls.append(kwargs)
+                return None
+            return super().post_conversation_events(**kwargs)
+
+    dal = _RetryDal()
+    pub = ConversationEventPublisher(
+        dal=dal,
+        conversation_id="c1",
+        assignee="h1",
+        request_sequence=1,
+        batch_interval_seconds=0.0,  # flush on every message
+    )
+    terminal = pub.consume(
+        _stream(
+            [
+                StreamMessage(event=StreamEvents.AI_MESSAGE, data={"content": "hi"}),
+                StreamMessage(event=StreamEvents.ANSWER_END, data={"content": "done"}),
+                # A non-terminal event after ANSWER_END won't happen in practice,
+                # but in the test it triggers the interval-based retry of the
+                # retained batch.
+                StreamMessage(event=StreamEvents.TOKEN_COUNT, data={}),
+            ]
+        )
+    )
+    assert terminal == StreamEvents.ANSWER_END
+    # The retry call must also have compact=True
+    successful_calls = [c for c in dal.calls if c.get("compact") is True]
+    assert len(successful_calls) >= 1, (
+        f"Expected at least one compact=True call to succeed; calls={dal.calls}"
+    )
+
+
+def test_publisher_returns_none_when_events_unsaved():
+    """If all flush attempts return None, consume() must return None
+    to signal the caller that the terminal batch was lost."""
+
+    class _AlwaysNoneDal(_FakeDal):
+        def post_conversation_events(self, **kwargs):
+            self.calls.append(kwargs)
+            return None
+
+    dal = _AlwaysNoneDal()
+    pub = ConversationEventPublisher(
+        dal=dal,
+        conversation_id="c1",
+        assignee="h1",
+        request_sequence=1,
+        batch_interval_seconds=60.0,
+    )
+    terminal = pub.consume(
+        _stream(
+            [
+                StreamMessage(event=StreamEvents.ANSWER_END, data={"content": "done"}),
+            ]
+        )
+    )
+    # consume() must return None because events are still unsaved
+    assert terminal is None
