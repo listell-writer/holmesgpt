@@ -94,6 +94,13 @@ class ConversationWorker:
         self._queued_tasks: deque = deque()
         self._queued_lock = threading.Lock()
 
+        # Serializes _dispatch_queued with stop() so that the capacity check,
+        # DB transition, active-set update, and executor.submit are atomic —
+        # prevents submitting to a shut-down executor or exceeding
+        # MAX_CONCURRENT when _dispatch_queued runs from multiple threads
+        # (claim loop + _process_conversation_safe finally block).
+        self._dispatch_lock = threading.Lock()
+
         self._realtime_manager: Optional[RealtimeManager] = None
 
     def start(self) -> None:
@@ -150,13 +157,17 @@ class ConversationWorker:
                 self._realtime_manager.stop()
             except Exception:
                 logging.exception("Error stopping realtime manager", exc_info=True)
-        if self._executor:
-            # shutdown(wait=False): prevent new tasks from being accepted but
-            # don't block this call on in-flight conversations — the process is
-            # shutting down and those worker threads are daemons that will be
-            # torn down with the interpreter. Blocking here would delay server
-            # shutdown unboundedly on long-running LLM streams.
-            self._executor.shutdown(wait=False)
+        # Acquire _dispatch_lock so any in-flight _dispatch_queued call
+        # finishes before we shut down the executor — prevents RuntimeError
+        # from submit() on a shut-down pool.
+        with self._dispatch_lock:
+            if self._executor:
+                # shutdown(wait=False): prevent new tasks from being accepted
+                # but don't block on in-flight conversations — the process is
+                # shutting down and those worker threads are daemons that will
+                # be torn down with the interpreter. Blocking here would delay
+                # server shutdown unboundedly on long-running LLM streams.
+                self._executor.shutdown(wait=False)
         if self._claim_thread:
             # Bounded join: the claim loop wakes up once per notify or poll
             # interval and checks ``self._running``, so 5 seconds is plenty
@@ -237,70 +248,74 @@ class ConversationWorker:
         self._dispatch_queued()
 
     def _dispatch_queued(self) -> None:
-        """Move tasks from the queued pool to the executor, up to capacity."""
-        if not self._running:
-            return
-        while True:
-            with self._active_lock:
-                active = len(self._active_conversation_ids)
-            if active >= CONVERSATION_WORKER_MAX_CONCURRENT:
-                break
+        """Move tasks from the queued pool to the executor, up to capacity.
 
-            with self._queued_lock:
-                if not self._queued_tasks:
+        Holds ``_dispatch_lock`` for the entire sequence so the capacity check,
+        DB transition, active-set update, and executor submit are atomic with
+        respect to ``stop()`` and concurrent calls from other threads.
+        """
+        with self._dispatch_lock:
+            while self._running:
+                with self._active_lock:
+                    active = len(self._active_conversation_ids)
+                if active >= CONVERSATION_WORKER_MAX_CONCURRENT:
                     break
-                task = self._queued_tasks.popleft()
 
-            # Transition from queued → running in the DB. The RPC validates
-            # that the assignee and request_sequence still match — if
-            # stop_conversation or retry_conversation bumped the sequence
-            # while the task was queued, this raises ConversationReassignedError.
-            try:
-                ok = self.dal.update_conversation_status(
-                    conversation_id=task.conversation_id,
-                    request_sequence=task.request_sequence,
-                    assignee=self.holmes_id,
-                    status="running",
-                )
-                if not ok:
+                with self._queued_lock:
+                    if not self._queued_tasks:
+                        break
+                    task = self._queued_tasks.popleft()
+
+                # Transition from queued → running in the DB. The RPC validates
+                # that the assignee and request_sequence still match — if
+                # stop_conversation or retry_conversation bumped the sequence
+                # while the task was queued, this raises ConversationReassignedError.
+                try:
+                    ok = self.dal.update_conversation_status(
+                        conversation_id=task.conversation_id,
+                        request_sequence=task.request_sequence,
+                        assignee=self.holmes_id,
+                        status="running",
+                    )
+                    if not ok:
+                        logging.warning(
+                            "Failed to transition conversation %s to running — skipping",
+                            task.conversation_id,
+                        )
+                        self._leave_presence_quietly(task.conversation_id)
+                        continue
+                except ConversationReassignedError:
                     logging.warning(
-                        "Failed to transition conversation %s to running — skipping",
+                        "Conversation %s was reassigned while queued — skipping",
                         task.conversation_id,
                     )
                     self._leave_presence_quietly(task.conversation_id)
                     continue
-            except ConversationReassignedError:
-                logging.warning(
-                    "Conversation %s was reassigned while queued — skipping",
-                    task.conversation_id,
-                )
-                self._leave_presence_quietly(task.conversation_id)
-                continue
-            except Exception:
-                logging.exception(
-                    "Error transitioning conversation %s to running",
-                    task.conversation_id,
-                    exc_info=True,
-                )
-                self._leave_presence_quietly(task.conversation_id)
-                continue
-
-            # Update presence to reflect running status
-            if self._realtime_manager is not None:
-                try:
-                    self._realtime_manager.update_conversation_presence(
-                        task.conversation_id, status="running"
-                    )
                 except Exception:
                     logging.exception(
-                        "Failed to update conversation presence to running for %s",
+                        "Error transitioning conversation %s to running",
                         task.conversation_id,
                         exc_info=True,
                     )
+                    self._leave_presence_quietly(task.conversation_id)
+                    continue
 
-            with self._active_lock:
-                self._active_conversation_ids.add(task.conversation_id)
-            self._executor.submit(self._process_conversation_safe, task)
+                # Update presence to reflect running status
+                if self._realtime_manager is not None:
+                    try:
+                        self._realtime_manager.update_conversation_presence(
+                            task.conversation_id, status="running"
+                        )
+                    except Exception:
+                        logging.exception(
+                            "Failed to update conversation presence to running for %s",
+                            task.conversation_id,
+                            exc_info=True,
+                        )
+
+                with self._active_lock:
+                    self._active_conversation_ids.add(task.conversation_id)
+                self._executor.submit(self._process_conversation_safe, task)
 
     def _leave_presence_quietly(self, conversation_id: str) -> None:
         """Leave conversation presence, swallowing any errors."""

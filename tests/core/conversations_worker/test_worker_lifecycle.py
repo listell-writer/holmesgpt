@@ -28,6 +28,7 @@ def _bare_worker():
     w._active_lock = threading.Lock()
     w._queued_tasks = deque()
     w._queued_lock = threading.Lock()
+    w._dispatch_lock = threading.Lock()
     w._realtime_manager = None
     return w
 
