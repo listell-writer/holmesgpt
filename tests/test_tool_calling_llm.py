@@ -1698,3 +1698,94 @@ class TestFrontendNoopToolFlow:
         tool_names = [t["function"]["name"] for t in tools_sent]
         assert "kubectl_get" in tool_names, "Backend tool should be included"
         assert "navigate_to_page" in tool_names, "Noop tool should be included"
+
+
+# ---------------------------------------------------------------------------
+# Test: <tool_call> tag parsing from text content
+# ---------------------------------------------------------------------------
+
+
+class TestToolCallTagParsing:
+    """Verify _parse_tool_calls_from_text recovers tool calls from XML tags."""
+
+    def test_parse_single_tool_call(self):
+        from holmes.core.tool_calling_llm import _parse_tool_calls_from_text
+
+        content = '<tool_call>\n{"name": "get_pods", "arguments": "{\\"namespace\\": \\"default\\"}"}\n</tool_call>'
+        result = _parse_tool_calls_from_text(content)
+        assert result is not None
+        assert len(result) == 1
+        assert result[0].function.name == "get_pods"
+        assert json.loads(result[0].function.arguments) == {"namespace": "default"}
+
+    def test_parse_multiple_tool_calls(self):
+        from holmes.core.tool_calling_llm import _parse_tool_calls_from_text
+
+        content = (
+            '<tool_call>\n{"name": "get_pods", "arguments": "{}"}\n</tool_call>'
+            '<tool_call>\n{"name": "get_logs", "arguments": "{}"}\n</tool_call>'
+        )
+        result = _parse_tool_calls_from_text(content)
+        assert result is not None
+        assert len(result) == 2
+        assert result[0].function.name == "get_pods"
+        assert result[1].function.name == "get_logs"
+
+    def test_parse_dict_arguments(self):
+        from holmes.core.tool_calling_llm import _parse_tool_calls_from_text
+
+        content = '<tool_call>\n{"name": "search", "arguments": {"query": "error"}}\n</tool_call>'
+        result = _parse_tool_calls_from_text(content)
+        assert result is not None
+        assert result[0].function.arguments == '{"query": "error"}'
+
+    def test_no_tool_call_tags_returns_none(self):
+        from holmes.core.tool_calling_llm import _parse_tool_calls_from_text
+
+        assert _parse_tool_calls_from_text("No tool calls here") is None
+        assert _parse_tool_calls_from_text("") is None
+        assert _parse_tool_calls_from_text(None) is None
+
+    def test_malformed_json_is_skipped(self):
+        from holmes.core.tool_calling_llm import _parse_tool_calls_from_text
+
+        content = (
+            '<tool_call>\n{not valid json}\n</tool_call>'
+            '<tool_call>\n{"name": "good_tool", "arguments": "{}"}\n</tool_call>'
+        )
+        result = _parse_tool_calls_from_text(content)
+        assert result is not None
+        assert len(result) == 1
+        assert result[0].function.name == "good_tool"
+
+    @patch(LIMIT_PATCH, side_effect=_make_context_limiter_passthrough)
+    def test_stream_recovers_tool_calls_from_text(self, _mock_limit, make_ai, mock_llm):
+        """End-to-end: LLM returns <tool_call> tags in content (like Bedrock Qwen3).
+
+        The stream should recover the tool calls and proceed normally.
+        """
+        # First response: LLM outputs <tool_call> tags in content, tool_calls=None
+        tool_call_text = '<tool_call>\n{"name": "kubectl_get", "arguments": "{\\"command\\": \\"kubectl get pods\\"}"}\n</tool_call>'
+        resp_with_text_tool = _make_llm_response(
+            content=tool_call_text, tool_calls=None
+        )
+        resp_final = _make_llm_response(
+            content="All pods are running", tool_calls=None
+        )
+        mock_llm.completion.side_effect = [resp_with_text_tool, resp_final]
+
+        ai = make_ai()
+        tool_result = _make_tool_call_result()
+        ai._invoke_llm_tool_call = MagicMock(return_value=tool_result)
+
+        messages = [{"role": "user", "content": "What pods are running?"}]
+        events = _collect_stream_events(ai.call_stream(msgs=messages))
+
+        # Should have recovered the tool call and proceeded to invoke it
+        tool_results = _events_of_type(events, StreamEvents.TOOL_RESULT)
+        assert len(tool_results) >= 1, "Should have at least one TOOL_RESULT event"
+
+        # Final answer should be the text response, not the <tool_call> tags
+        end_events = _events_of_type(events, StreamEvents.ANSWER_END)
+        assert len(end_events) == 1
+        assert end_events[0].data["content"] == "All pods are running"

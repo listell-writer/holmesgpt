@@ -15,6 +15,7 @@ import sentry_sdk
 from openai import BadRequestError
 from openai.types.chat.chat_completion_message_tool_call import (
     ChatCompletionMessageToolCall,
+    Function,
 )
 from pydantic import BaseModel, Field
 
@@ -151,6 +152,66 @@ def extract_bash_session_prefixes(messages: List[Dict[str, Any]]) -> List[str]:
             f"Found {len(prefixes)} session-approved bash prefixes from conversation: {list(prefixes)}"
         )
     return list(prefixes)
+
+
+# Regex to find <tool_call>...</tool_call> blocks in LLM text output.
+# Some providers (e.g. Bedrock Qwen3) emit tool calls as XML tags in the
+# response content instead of populating the structured tool_calls field.
+_TOOL_CALL_TAG_RE = re.compile(
+    r"<tool_call>\s*(\{.*?\})\s*</tool_call>", re.DOTALL
+)
+
+
+def _parse_tool_calls_from_text(
+    content: Optional[str],
+) -> Optional[List[ChatCompletionMessageToolCall]]:
+    """Extract tool calls from ``<tool_call>`` XML tags in plain-text content.
+
+    Some LLM providers (notably Bedrock invoke with Qwen-family models) format
+    tool calls as ``<tool_call>{"name": "...", "arguments": "..."}</tool_call>``
+    in the message *content* instead of populating the structured ``tool_calls``
+    field.  This helper parses those tags into proper
+    :class:`ChatCompletionMessageToolCall` objects so the rest of the agentic
+    loop can process them normally.
+
+    Returns ``None`` when no ``<tool_call>`` tags are found.
+    """
+    if not content:
+        return None
+
+    matches = _TOOL_CALL_TAG_RE.findall(content)
+    if not matches:
+        return None
+
+    parsed: List[ChatCompletionMessageToolCall] = []
+    for idx, raw_json in enumerate(matches):
+        try:
+            payload = json.loads(raw_json)
+        except json.JSONDecodeError:
+            logging.warning("Failed to parse <tool_call> JSON: %s", raw_json[:200])
+            continue
+
+        name = payload.get("name", "")
+        arguments = payload.get("arguments", "{}")
+        # arguments can be a dict or an already-serialised JSON string
+        if isinstance(arguments, dict):
+            arguments = json.dumps(arguments)
+
+        parsed.append(
+            ChatCompletionMessageToolCall(
+                id=f"tc_text_{idx}",
+                type="function",
+                function=Function(name=name, arguments=arguments),
+            )
+        )
+
+    if not parsed:
+        return None
+
+    logging.info(
+        "Recovered %d tool call(s) from <tool_call> tags in text content", len(parsed)
+    )
+    return parsed
 
 
 # Callback type: receives a pending approval, returns (approved, optional_feedback)
@@ -1076,6 +1137,26 @@ class ToolCallingLLM:
             yield self._emit_token_count(messages, tools, full_response, limit_result, metadata, stats)
 
             tools_to_call = getattr(response_message, "tool_calls", None)
+
+            # Some providers (e.g. Bedrock Qwen3) emit tool calls as
+            # <tool_call> XML tags in the content instead of populating the
+            # structured tool_calls field.  Detect and recover them here so
+            # the rest of the agentic loop works normally.
+            if not tools_to_call:
+                recovered = _parse_tool_calls_from_text(response_message.content)
+                if recovered:
+                    tools_to_call = recovered
+                    # Fix up the assistant message we already appended to
+                    # `messages` so it carries tool_calls (not raw XML text).
+                    assistant_msg = messages[-1]
+                    assistant_msg["tool_calls"] = [
+                        tc.model_dump() for tc in recovered
+                    ]
+                    # Strip the <tool_call> tags from content so the LLM
+                    # doesn't see them again on subsequent turns.
+                    cleaned = _TOOL_CALL_TAG_RE.sub("", response_message.content or "").strip()
+                    assistant_msg["content"] = cleaned or None
+
             if not tools_to_call:
                 yield StreamMessage(
                     event=StreamEvents.ANSWER_END,
