@@ -165,6 +165,19 @@ class SupabaseFixture:
             f"within {timeout}s (status={conv['status']}, seq={conv['request_sequence']})"
         )
 
+    def get_compaction_stats(self, conversation_id: str) -> Dict[str, Any]:
+        """Return compaction statistics for the conversation's event rows."""
+        rows = self.get_events(conversation_id)
+        compacted = [r for r in rows if r.get("compacted")]
+        non_compacted = [r for r in rows if not r.get("compacted")]
+        return {
+            "total": len(rows),
+            "compacted": len(compacted),
+            "non_compacted": len(non_compacted),
+            "compacted_seqs": [r["seq"] for r in compacted],
+            "non_compacted_seqs": [r["seq"] for r in non_compacted],
+        }
+
     def find_terminal_event(self, conversation_id: str) -> Optional[Dict[str, Any]]:
         """Find the last terminal event (ai_answer_end / approval_required / error)."""
         for row in reversed(self.get_events(conversation_id)):

@@ -18,6 +18,13 @@ _FLUSH_IMMEDIATELY_EVENTS = {
     StreamEvents.ERROR,
 }
 
+# Terminal events whose `messages` array carries the full conversation history
+# snapshot — all prior events are superseded and should be marked compacted.
+_COMPACT_ON_FLUSH_EVENTS = {
+    StreamEvents.ANSWER_END,
+    StreamEvents.APPROVAL_REQUIRED,
+}
+
 
 class ConversationEventPublisher:
     """
@@ -61,7 +68,12 @@ class ConversationEventPublisher:
                 # Flush on terminal events immediately, or when interval elapses
                 if message.event in _FLUSH_IMMEDIATELY_EVENTS:
                     self._last_terminal_event = message.event
-                    self._flush(compact=False)
+                    # ai_answer_end and approval_required carry a full
+                    # conversation history snapshot in their messages array,
+                    # so all prior events are superseded → compact them.
+                    self._flush(
+                        compact=message.event in _COMPACT_ON_FLUSH_EVENTS
+                    )
                 elif message.event == StreamEvents.CONVERSATION_HISTORY_COMPACTED:
                     # Flush with compact=True so previous events are marked compacted
                     self._flush(compact=True)

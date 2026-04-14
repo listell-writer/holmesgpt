@@ -67,7 +67,9 @@ def test_publisher_flushes_on_terminal_answer_end():
     # Both events should be in a single batch (flushed on ANSWER_END)
     assert len(dal.calls) == 1
     assert len(dal.calls[0]["events"]) == 2
-    assert dal.calls[0]["compact"] is False
+    # ai_answer_end carries the full conversation history snapshot —
+    # all prior events are superseded and should be compacted.
+    assert dal.calls[0]["compact"] is True
     assert dal.calls[0]["events"][0]["event"] == "ai_message"
     assert dal.calls[0]["events"][1]["event"] == "ai_answer_end"
 
@@ -94,6 +96,8 @@ def test_publisher_flushes_on_approval_required():
     )
     assert terminal == StreamEvents.APPROVAL_REQUIRED
     assert len(dal.calls) == 1
+    # approval_required also carries the full conversation history snapshot.
+    assert dal.calls[0]["compact"] is True
 
 
 def test_publisher_compact_flag_on_compacted_event():
@@ -121,20 +125,16 @@ def test_publisher_compact_flag_on_compacted_event():
             ]
         )
     )
-    # Exactly one flush with compact=True (the one containing the compacted event).
+    # Two flushes with compact=True: the compacted event AND the ai_answer_end.
     compact_calls = [c for c in dal.calls if c["compact"] is True]
-    assert len(compact_calls) == 1, f"expected 1 compact=True call, got {len(compact_calls)}"
-    # The compact=True call must carry the compacted event.
+    assert len(compact_calls) == 2, f"expected 2 compact=True calls, got {len(compact_calls)}"
+    # First compact=True call must carry the compacted event.
     compact_event_types = [e["event"] for e in compact_calls[0]["events"]]
     assert "conversation_history_compacted" in compact_event_types
 
-    # The ANSWER_END flush must NOT have compact=True.
-    answer_calls = [
-        c for c in dal.calls
-        if any(e["event"] == "ai_answer_end" for e in c["events"])
-    ]
-    assert len(answer_calls) == 1
-    assert answer_calls[0]["compact"] is False
+    # Second compact=True call must carry ai_answer_end.
+    answer_event_types = [e["event"] for e in compact_calls[1]["events"]]
+    assert "ai_answer_end" in answer_event_types
 
     # Every event appears exactly once across all calls (no double-posting).
     all_event_types = [e["event"] for c in dal.calls for e in c["events"]]
@@ -165,12 +165,16 @@ def test_publisher_compaction_start_does_not_trigger_compact_flag():
             ]
         )
     )
-    # No compact=True should have been set since COMPACTED never arrived
-    assert not any(c["compact"] is True for c in dal.calls)
+    # The only compact=True should be from the ANSWER_END (which always compacts).
+    # The COMPACTION_START alone must NOT trigger compact.
+    compact_calls = [c for c in dal.calls if c["compact"] is True]
+    assert len(compact_calls) == 1
+    # That one compact call must be the ANSWER_END batch
+    assert any(e["event"] == "ai_answer_end" for e in compact_calls[0]["events"])
 
 
-def test_publisher_no_compaction_events_never_sets_compact_flag():
-    """Normal flows must never set compact=True."""
+def test_publisher_only_terminal_compacts_without_compaction_events():
+    """Normal flows (no COMPACTED event) should still compact on ANSWER_END."""
     dal = _FakeDal()
     pub = ConversationEventPublisher(
         dal=dal,
@@ -190,9 +194,10 @@ def test_publisher_no_compaction_events_never_sets_compact_flag():
             ]
         )
     )
-    assert all(c["compact"] is False for c in dal.calls), (
-        f"unexpected compact=True: {dal.calls}"
-    )
+    # Only the ANSWER_END flush should have compact=True
+    compact_calls = [c for c in dal.calls if c["compact"] is True]
+    assert len(compact_calls) == 1
+    assert any(e["event"] == "ai_answer_end" for e in compact_calls[0]["events"])
 
 
 def test_publisher_raises_on_reassignment():
@@ -238,6 +243,8 @@ def test_publisher_flushes_on_error_event():
     # Both events in a single batch (flushed on ERROR)
     assert len(dal.calls) == 1
     assert dal.calls[0]["events"][-1]["event"] == "error"
+    # ERROR events do NOT carry a conversation history snapshot — no compaction.
+    assert dal.calls[0]["compact"] is False
 
 
 def test_publisher_covers_all_stream_event_types():

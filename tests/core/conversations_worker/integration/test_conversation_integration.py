@@ -60,6 +60,29 @@ class TestSingleTurn:
         assert data.get("content"), "ai_answer_end must have non-empty content"
         assert data.get("messages"), "ai_answer_end must include conversation_history"
 
+    def test_single_turn_compacts_prior_events(self, supabase_fx: SupabaseFixture):
+        """After a single turn, all event rows before the ai_answer_end row
+        should be marked compacted=true (the terminal carries the full history)."""
+        conv = supabase_fx.create_conversation(
+            ask="What is 3*3? Just the number.",
+            title="integ: single-turn-compaction",
+        )
+        cid = conv["conversation_id"]
+        supabase_fx.wait_for_terminal(cid, request_sequence=1, timeout=120)
+
+        stats = supabase_fx.get_compaction_stats(cid)
+        # Must have at least 2 rows (user_message row + ai_answer_end row)
+        assert stats["total"] >= 2, f"Expected ≥2 event rows, got {stats['total']}"
+        # All rows except the last (ai_answer_end) should be compacted
+        assert stats["compacted"] >= 1, (
+            f"Prior rows should be compacted; got {stats}"
+        )
+        # The highest seq should be non-compacted (it's the ai_answer_end row)
+        max_seq = max(stats["non_compacted_seqs"])
+        assert max_seq == max(
+            stats["compacted_seqs"] + stats["non_compacted_seqs"]
+        ), "The ai_answer_end row (highest seq) should not be compacted"
+
 
 # ---------------------------------------------------------------------------
 # 2. Multi-turn: follow-up conversation
@@ -75,6 +98,16 @@ class TestMultiTurn:
         )
         cid = conv["conversation_id"]
         supabase_fx.wait_for_terminal(cid, request_sequence=1, timeout=120)
+
+        # After turn 1, the ai_answer_end row should have compacted all prior rows
+        stats_t1 = supabase_fx.get_compaction_stats(cid)
+        assert stats_t1["compacted"] > 0, (
+            f"Turn 1 should compact prior events; got {stats_t1}"
+        )
+        # The last row (ai_answer_end) should NOT be compacted
+        assert stats_t1["non_compacted"] >= 1, (
+            f"The terminal row should remain non-compacted; got {stats_t1}"
+        )
 
         # Turn 2 follow-up
         now_iso = datetime.now(timezone.utc).isoformat()
@@ -97,6 +130,13 @@ class TestMultiTurn:
         assert terminal is not None
         content = str(terminal.get("data", {}).get("content", ""))
         assert "42" in content, f"Follow-up should reference '42', got: {content[:200]}"
+
+        # After turn 2, more rows should be compacted than after turn 1
+        stats_t2 = supabase_fx.get_compaction_stats(cid)
+        assert stats_t2["compacted"] > stats_t1["compacted"], (
+            f"Turn 2 should compact more rows than turn 1; "
+            f"turn1={stats_t1['compacted']}, turn2={stats_t2['compacted']}"
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -162,6 +202,13 @@ class TestToolApproval:
         event_types = supabase_fx.flat_event_types(cid)
         assert "tool_calling_result" in event_types
         assert "ai_answer_end" in event_types
+
+        # Verify compaction: approval_required (turn 1) compacts prior events,
+        # then ai_answer_end (turn 2) compacts everything before it.
+        stats = supabase_fx.get_compaction_stats(cid)
+        assert stats["compacted"] >= 2, (
+            f"Approval + answer should compact multiple prior rows; got {stats}"
+        )
 
 
 # ---------------------------------------------------------------------------
