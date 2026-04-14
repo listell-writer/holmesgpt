@@ -3,6 +3,7 @@ import os
 import threading
 import time
 import uuid
+from datetime import datetime, timezone
 from collections import deque
 from concurrent.futures import ThreadPoolExecutor
 from typing import Any, Callable, Dict, List, Optional, TYPE_CHECKING, Union
@@ -326,6 +327,56 @@ class ConversationWorker:
             )
             return None
 
+    # ---- error reporting helpers ----
+
+    def _post_error_event(
+        self, task: ConversationTask, description: str, error_code: int = 5000
+    ) -> None:
+        """Post an error event to ConversationEvents so subscribers can see the failure reason."""
+        try:
+            self.dal.post_conversation_events(
+                conversation_id=task.conversation_id,
+                assignee=self.holmes_id,
+                request_sequence=task.request_sequence,
+                events=[
+                    {
+                        "event": "error",
+                        "data": {
+                            "description": description,
+                            "error_code": error_code,
+                            "msg": description,
+                            "success": False,
+                        },
+                        "ts": datetime.now(timezone.utc).isoformat(),
+                    }
+                ],
+            )
+        except Exception:
+            logging.exception(
+                "Failed to post error event for conversation %s",
+                task.conversation_id,
+                exc_info=True,
+            )
+
+    def _fail_conversation(
+        self, task: ConversationTask, description: str, error_code: int = 5000
+    ) -> None:
+        """Post an error event and then mark the conversation as failed."""
+        self._post_error_event(task, description, error_code)
+        try:
+            self.dal.update_conversation_status(
+                conversation_id=task.conversation_id,
+                request_sequence=task.request_sequence,
+                assignee=self.holmes_id,
+                status="failed",
+            )
+        except Exception:
+            logging.exception(
+                "Failed to mark conversation %s as failed",
+                task.conversation_id,
+                exc_info=True,
+            )
+
     # ---- per-conversation processing ----
 
     def _process_conversation_safe(self, task: ConversationTask) -> None:
@@ -349,20 +400,7 @@ class ConversationWorker:
                 e,
                 exc_info=True,
             )
-            # Attempt to mark as failed
-            try:
-                self.dal.update_conversation_status(
-                    conversation_id=task.conversation_id,
-                    request_sequence=task.request_sequence,
-                    assignee=self.holmes_id,
-                    status="failed",
-                )
-            except Exception:
-                logging.exception(
-                    "Failed to mark conversation %s as failed",
-                    task.conversation_id,
-                    exc_info=True,
-                )
+            self._fail_conversation(task, f"Internal error: {e}")
         finally:
             # Leave the conversation Presence channel regardless of outcome
             if self._realtime_manager is not None:
@@ -414,12 +452,7 @@ class ConversationWorker:
                 "Conversation %s has no user question, marking as failed",
                 task.conversation_id,
             )
-            self.dal.update_conversation_status(
-                conversation_id=task.conversation_id,
-                request_sequence=task.request_sequence,
-                assignee=self.holmes_id,
-                status="failed",
-            )
+            self._fail_conversation(task, "No user question found in conversation events")
             return
 
         publisher = ConversationEventPublisher(
@@ -659,11 +692,8 @@ class ConversationWorker:
                         "Conversation %s ended without a terminal event",
                         task.conversation_id,
                     )
-                    self.dal.update_conversation_status(
-                        conversation_id=task.conversation_id,
-                        request_sequence=task.request_sequence,
-                        assignee=self.holmes_id,
-                        status="failed",
+                    self._fail_conversation(
+                        task, "Conversation ended without a terminal event"
                     )
             finally:
                 trace_span.end()

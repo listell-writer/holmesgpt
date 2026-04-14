@@ -260,6 +260,14 @@ def test_process_conversation_safe_marks_failed_on_exception():
     with patch.object(ConversationWorker, "_process_conversation", boom):
         w._process_conversation_safe(task)
 
+    # Error event should be posted before marking as failed
+    w.dal.post_conversation_events.assert_called_once()
+    call_kwargs = w.dal.post_conversation_events.call_args[1]
+    assert call_kwargs["conversation_id"] == "c1"
+    error_events = call_kwargs["events"]
+    assert error_events[0]["event"] == "error"
+    assert "synthetic failure" in error_events[0]["data"]["description"]
+
     w.dal.update_conversation_status.assert_called_once_with(
         conversation_id="c1",
         request_sequence=1,
@@ -319,6 +327,8 @@ def test_process_conversation_safe_always_leaves_presence_on_error():
     rt.leave_conversation_presence.assert_called_once_with("c1")
     # Critically: we must NOT mark a reassigned conversation as failed
     w.dal.update_conversation_status.assert_not_called()
+    # And no error event should be posted either
+    w.dal.post_conversation_events.assert_not_called()
 
 
 def test_process_conversation_safe_dispatches_queued_after_completion():
