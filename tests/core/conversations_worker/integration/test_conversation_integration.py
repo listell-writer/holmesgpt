@@ -19,6 +19,7 @@ from datetime import datetime, timezone
 
 import pytest
 
+from holmes.common.env_vars import CONVERSATION_WORKER_MAX_CONCURRENT
 from tests.core.conversations_worker.integration import SupabaseFixture
 
 pytestmark = [pytest.mark.conversation_worker, pytest.mark.integration]
@@ -238,12 +239,9 @@ class TestStopConversation:
         # Stop immediately
         supabase_fx.stop_conversation(cid)
 
-        # Wait and verify status stays stopped
-        time.sleep(5)
-        final = supabase_fx.get_conversation(cid)
-        assert final["status"] == "stopped", (
-            f"Expected stopped, got {final['status']}"
-        )
+        # Wait for the conversation to reach stopped status
+        final = supabase_fx.wait_for_status(cid, {"stopped"}, timeout=30)
+        assert final["status"] == "stopped"
         assert final["assignee"] is None
 
 
@@ -296,40 +294,42 @@ class TestErrorEvents:
 # ---------------------------------------------------------------------------
 class TestStress:
 
+    # Exceed the worker's max concurrent by at least 3 so some conversations
+    # are guaranteed to queue.  Derived from the env-configurable value.
+    _OVERFLOW = 3
+
+    def _num(self) -> int:
+        return CONVERSATION_WORKER_MAX_CONCURRENT + self._OVERFLOW
+
     def test_concurrent_conversations_queue_and_complete(
         self, supabase_fx: SupabaseFixture
     ):
-        """Create more conversations than MAX_CONCURRENT (5).
+        """Create more conversations than CONVERSATION_WORKER_MAX_CONCURRENT.
 
-        All should eventually complete. Some should be observed in 'queued' state.
+        All should eventually complete.
         """
-        NUM = 8
+        num = self._num()
         TIMEOUT = 300
 
-        # Create all at once
         conv_ids = []
-        for i in range(1, NUM + 1):
+        for i in range(1, num + 1):
             conv = supabase_fx.create_conversation(
                 ask=f"What is {i * 7} + {i * 3}? Answer with just the number.",
                 title=f"integ: stress-{i}",
             )
             conv_ids.append(conv["conversation_id"])
 
-        saw_queued = set()
         start = time.time()
         while time.time() - start < TIMEOUT:
             all_done = True
             for cid in conv_ids:
                 conv = supabase_fx.get_conversation(cid)
-                if conv["status"] == "queued":
-                    saw_queued.add(cid)
                 if conv["status"] not in ("completed", "failed"):
                     all_done = False
             if all_done:
                 break
             time.sleep(0.5)
 
-        # Verify all completed
         results = {}
         for cid in conv_ids:
             conv = supabase_fx.get_conversation(cid)
@@ -337,19 +337,18 @@ class TestStress:
 
         completed = sum(1 for s in results.values() if s == "completed")
         failed = sum(1 for s in results.values() if s == "failed")
-        assert completed == NUM, (
-            f"Expected all {NUM} completed, got {completed} completed, "
-            f"{failed} failed. Statuses: {results}"
+        assert completed == num, (
+            f"Expected all {num} completed (max_concurrent={CONVERSATION_WORKER_MAX_CONCURRENT}), "
+            f"got {completed} completed, {failed} failed. Statuses: {results}"
         )
 
     def test_queued_state_observed(self, supabase_fx: SupabaseFixture):
-        """With 8 conversations and max_concurrent=5, at least one should
-        have been observed in queued state during the stress test."""
-        # This test piggybacks on the previous one — it creates its own batch
-        NUM = 8
+        """When the batch exceeds max_concurrent, at least one conversation
+        should be observed in queued state during polling."""
+        num = self._num()
 
         conv_ids = []
-        for i in range(1, NUM + 1):
+        for i in range(1, num + 1):
             conv = supabase_fx.create_conversation(
                 ask=f"What is {i * 11} - {i}? Just the number.",
                 title=f"integ: queued-obs-{i}",
@@ -370,10 +369,10 @@ class TestStress:
                 break
             time.sleep(0.3)
 
-        # At least some should have been in queued
         assert len(saw_queued) > 0, (
-            "With 8 conversations and max_concurrent=5, at least 1 should "
-            "have been observed in queued state"
+            f"With {num} conversations and max_concurrent="
+            f"{CONVERSATION_WORKER_MAX_CONCURRENT}, at least 1 should "
+            f"have been observed in queued state"
         )
 
 

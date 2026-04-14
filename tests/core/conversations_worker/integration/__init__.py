@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import base64
 import json
+import logging
 import os
 import time
 from dataclasses import dataclass, field
@@ -192,6 +193,7 @@ def supabase_fx() -> SupabaseFixture:
     """Session-scoped Supabase client fixture.
 
     Requires ROBUSTA_UI_TOKEN and CLUSTER_NAME environment variables.
+    Performs best-effort cleanup of created conversations after the session.
     """
     decoded = _decode_token()
     cluster_id = os.environ.get("CLUSTER_NAME")
@@ -206,9 +208,28 @@ def supabase_fx() -> SupabaseFixture:
     client.auth.set_session(res.session.access_token, res.session.refresh_token)
     client.postgrest.auth(res.session.access_token)
 
-    return SupabaseFixture(
+    fx = SupabaseFixture(
         client=client,
         account_id=decoded["account_id"],
         cluster_id=cluster_id,
         user_id=res.user.id,
     )
+    yield fx
+
+    # Best-effort teardown: stop any still-active conversations and delete them
+    for cid in fx._created_conversations:
+        try:
+            conv = fx.get_conversation(cid)
+            if conv["status"] in ("pending", "queued", "running"):
+                fx.stop_conversation(cid)
+        except Exception:
+            pass
+        try:
+            client.table("ConversationEvents").delete().eq(
+                "conversation_id", cid
+            ).execute()
+            client.table("Conversations").delete().eq(
+                "conversation_id", cid
+            ).execute()
+        except Exception:
+            logging.warning("Failed to clean up conversation %s", cid)
