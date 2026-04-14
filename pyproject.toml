@@ -181,7 +181,8 @@ markers = [
     "regression: Critical regression tests that must always pass",
     "benchmark: Challenging tests for evaluating and benchmarking model capabilities",
     "db-connectors: Tests for the database/SQL connector toolset",
-    "mcp: Tests for MCP (Model Context Protocol) server integration"
+    "mcp: Tests for MCP (Model Context Protocol) server integration",
+    "conversation_worker: M2 conversation worker integration tests (requires running Holmes + Supabase)"
 ]
 
 addopts = [
