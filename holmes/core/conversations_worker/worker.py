@@ -686,7 +686,7 @@ class ConversationWorker:
 
                 terminal = publisher.consume(stream)
                 status = self._terminal_to_status(terminal)
-                if status == "completed" or status == "failed":
+                if status in ("completed", "failed"):
                     ok = self.dal.update_conversation_status(
                         conversation_id=task.conversation_id,
                         request_sequence=task.request_sequence,
@@ -699,15 +699,6 @@ class ConversationWorker:
                             task.conversation_id,
                             status,
                         )
-                elif status == "awaiting_approval":
-                    # Approval required is treated as completed for the current
-                    # request_sequence — the follow-up will re-pend it.
-                    self.dal.update_conversation_status(
-                        conversation_id=task.conversation_id,
-                        request_sequence=task.request_sequence,
-                        assignee=self.holmes_id,
-                        status="completed",
-                    )
                 else:
                     logging.warning(
                         "Conversation %s ended without a terminal event",
@@ -735,5 +726,7 @@ class ConversationWorker:
         if terminal == StreamEvents.ERROR:
             return "failed"
         if terminal == StreamEvents.APPROVAL_REQUIRED:
-            return "awaiting_approval"
+            # Approval pauses the LLM but the current request_sequence is
+            # done — the follow-up (with tool_decisions) will re-pend it.
+            return "completed"
         return "unknown"
