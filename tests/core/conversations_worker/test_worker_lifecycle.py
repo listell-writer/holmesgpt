@@ -182,7 +182,7 @@ def test_dispatch_queued_with_presence_on_skip():
     )
     w._queued_tasks.append(task)
     w._dispatch_queued()
-    rt.leave_conversation_presence.assert_called_once_with("c1")
+    rt.leave_conversation_presence.assert_called_once_with("c1", request_sequence=1)
 
 
 def test_dispatch_queued_handles_mismatch_during_transition():
@@ -206,7 +206,7 @@ def test_dispatch_queued_handles_mismatch_during_transition():
     w._dispatch_queued()
     w._executor.submit.assert_not_called()
     assert "c1" not in w._active_conversation_ids
-    rt.leave_conversation_presence.assert_called_once_with("c1")
+    rt.leave_conversation_presence.assert_called_once_with("c1", request_sequence=1)
 
 
 def test_try_claim_joins_presence_with_queued_status():
@@ -225,7 +225,9 @@ def test_try_claim_joins_presence_with_queued_status():
         }
     ]
     w._try_claim_and_dispatch()
-    rt.join_conversation_presence.assert_called_once_with("c1", status="queued")
+    rt.join_conversation_presence.assert_called_once_with(
+        "c1", request_sequence=1, status="queued"
+    )
 
 
 def test_dispatch_queued_updates_presence_to_running():
@@ -242,7 +244,9 @@ def test_dispatch_queued_updates_presence_to_running():
     )
     w._queued_tasks.append(task)
     w._dispatch_queued()
-    rt.update_conversation_presence.assert_called_once_with("c1", status="running")
+    rt.update_conversation_presence.assert_called_once_with(
+        "c1", request_sequence=1, status="running"
+    )
 
 
 def test_process_conversation_safe_marks_failed_on_exception():
@@ -297,7 +301,7 @@ def test_process_conversation_safe_leaves_presence():
     with patch.object(ConversationWorker, "_process_conversation", lambda self, t: None):
         w._process_conversation_safe(task)
 
-    rt.leave_conversation_presence.assert_called_once_with("c1")
+    rt.leave_conversation_presence.assert_called_once_with("c1", request_sequence=1)
     assert "c1" not in w._active_conversation_ids
 
 
@@ -328,7 +332,7 @@ def test_process_conversation_safe_always_leaves_presence_on_error():
         w._process_conversation_safe(task)
 
     # leave must run in the finally even after a reassignment
-    rt.leave_conversation_presence.assert_called_once_with("c1")
+    rt.leave_conversation_presence.assert_called_once_with("c1", request_sequence=1)
     # Critically: we must NOT mark a reassigned conversation as failed
     w.dal.update_conversation_status.assert_not_called()
     # And no error event should be posted either

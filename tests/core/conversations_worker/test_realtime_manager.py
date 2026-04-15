@@ -36,13 +36,85 @@ def test_leave_conversation_presence_noop_without_loop():
     m = _make_manager()
     m._loop = None
     # Must not raise
-    m.leave_conversation_presence("some-id")
+    m.leave_conversation_presence("some-id", request_sequence=1)
 
 
 def test_join_conversation_presence_noop_without_loop():
     m = _make_manager()
     m._loop = None
-    m.join_conversation_presence("some-id")
+    m.join_conversation_presence("some-id", request_sequence=1)
+
+
+def test_presence_sequence_gate_skips_older_join():
+    """A newer request_sequence's join should block a later older-sequence join."""
+    m = _make_manager()
+    m._loop = None  # asyncio schedule is a no-op without a loop
+    # Newer worker joins first
+    m.join_conversation_presence("c1", request_sequence=5, status="running")
+    assert m._presence_sequences["c1"] == 5
+    # Older worker tries to join — gate rejects it
+    assert m._is_newest_sequence("c1", 3, update=True) is False
+    # Stored sequence is unchanged
+    assert m._presence_sequences["c1"] == 5
+
+
+def test_presence_sequence_gate_skips_older_leave():
+    """A newer worker's join must prevent an older worker's leave
+    from tearing down the newer presence."""
+    m = _make_manager()
+    m._loop = None
+    m.join_conversation_presence("c1", request_sequence=7, status="running")
+    # Older worker calling leave must not disrupt the newer presence
+    assert m._is_newest_sequence("c1", 4, update=False) is False
+    # Same-sequence leave is allowed
+    assert m._is_newest_sequence("c1", 7, update=False) is True
+
+
+def test_presence_sequence_gate_advances_on_equal_or_newer():
+    m = _make_manager()
+    m._loop = None
+    m.join_conversation_presence("c1", request_sequence=2, status="queued")
+    assert m._presence_sequences["c1"] == 2
+    # Same sequence update is fine
+    m.update_conversation_presence("c1", request_sequence=2, status="running")
+    assert m._presence_sequences["c1"] == 2
+    # Newer sequence advances
+    m.join_conversation_presence("c1", request_sequence=10, status="queued")
+    assert m._presence_sequences["c1"] == 10
+
+
+def test_many_workers_race_newest_wins():
+    """Simulate many concurrent calls for different sequences — only the
+    highest is remembered and allowed to operate."""
+    import threading as _threading
+    import random as _random
+
+    m = _make_manager()
+    m._loop = None
+
+    sequences = list(range(1, 21))  # 20 "workers"
+    _random.shuffle(sequences)
+
+    barrier = _threading.Barrier(len(sequences))
+
+    def _join(seq: int):
+        barrier.wait()
+        m.join_conversation_presence("c1", request_sequence=seq, status="queued")
+
+    threads = [_threading.Thread(target=_join, args=(s,)) for s in sequences]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+
+    # The stored sequence must be the highest (20) after all races finish
+    assert m._presence_sequences["c1"] == max(sequences)
+
+    # Now any older-sequence leave is rejected
+    for seq in range(1, 20):
+        assert m._is_newest_sequence("c1", seq, update=False) is False
+    # Only sequence 20 is accepted as current
+    assert m._is_newest_sequence("c1", 20, update=False) is True
 
 
 def test_install_proxy_patch_does_nothing_without_env(monkeypatch):

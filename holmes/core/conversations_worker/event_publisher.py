@@ -11,18 +11,29 @@ if TYPE_CHECKING:
     from holmes.core.supabase_dal import SupabaseDal
 
 
-# Events that should cause an immediate flush
-_FLUSH_IMMEDIATELY_EVENTS = {
+# Events that end a turn and must be flushed immediately.  The publisher
+# reports the last one it saw back to the worker so the conversation status
+# can be set appropriately.
+_TERMINAL_EVENTS = {
     StreamEvents.ANSWER_END,
     StreamEvents.APPROVAL_REQUIRED,
     StreamEvents.ERROR,
 }
 
-# Terminal events whose `messages` array carries the full conversation history
+# Events that should cause an immediate flush.  Terminal events end a turn;
+# CONVERSATION_HISTORY_COMPACTED isn't terminal but carries the same
+# "history snapshot + prior events superseded" semantics so it's flushed +
+# compacted with the same logic.
+_FLUSH_IMMEDIATELY_EVENTS = _TERMINAL_EVENTS | {
+    StreamEvents.CONVERSATION_HISTORY_COMPACTED
+}
+
+# Events whose `messages` array carries the full conversation history
 # snapshot — all prior events are superseded and should be marked compacted.
 _COMPACT_ON_FLUSH_EVENTS = {
     StreamEvents.ANSWER_END,
     StreamEvents.APPROVAL_REQUIRED,
+    StreamEvents.CONVERSATION_HISTORY_COMPACTED,
 }
 
 
@@ -38,7 +49,7 @@ class ConversationEventPublisher:
         conversation_id: str,
         assignee: str,
         request_sequence: int,
-        batch_interval_seconds: float = 0.5,
+        batch_interval_seconds: float = 1.0,
     ):
         self.dal = dal
         self.conversation_id = conversation_id
@@ -72,18 +83,15 @@ class ConversationEventPublisher:
         try:
             for message in stream:
                 self._append_event(message)
+                if message.event in _TERMINAL_EVENTS:
+                    self._last_terminal_event = message.event
                 # Flush on terminal events immediately, or when interval elapses
                 if message.event in _FLUSH_IMMEDIATELY_EVENTS:
-                    self._last_terminal_event = message.event
-                    # ai_answer_end and approval_required carry a full
-                    # conversation history snapshot in their messages array,
-                    # so all prior events are superseded → compact them.
+                    # ai_answer_end / approval_required / compacted carry a
+                    # full conversation history snapshot in their messages
+                    # array, so all prior events are superseded → compact.
                     if message.event in _COMPACT_ON_FLUSH_EVENTS:
                         self._pending_compact = True
-                    self._flush()
-                elif message.event == StreamEvents.CONVERSATION_HISTORY_COMPACTED:
-                    # Flush with compact=True so previous events are marked compacted
-                    self._pending_compact = True
                     self._flush()
                 elif (
                     time.monotonic() - self._last_flush_time

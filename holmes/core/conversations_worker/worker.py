@@ -233,7 +233,9 @@ class ConversationWorker:
             if self._realtime_manager is not None:
                 try:
                     self._realtime_manager.join_conversation_presence(
-                        task.conversation_id, status="queued"
+                        task.conversation_id,
+                        request_sequence=task.request_sequence,
+                        status="queued",
                     )
                 except Exception:
                     logging.exception(
@@ -282,14 +284,18 @@ class ConversationWorker:
                             "Failed to transition conversation %s to running — skipping",
                             task.conversation_id,
                         )
-                        self._leave_presence_quietly(task.conversation_id)
+                        self._leave_presence_quietly(
+                            task.conversation_id, task.request_sequence
+                        )
                         continue
                 except ConversationReassignedError:
                     logging.warning(
                         "Conversation %s was reassigned while queued — skipping",
                         task.conversation_id,
                     )
-                    self._leave_presence_quietly(task.conversation_id)
+                    self._leave_presence_quietly(
+                        task.conversation_id, task.request_sequence
+                    )
                     continue
                 except Exception:
                     logging.exception(
@@ -297,14 +303,18 @@ class ConversationWorker:
                         task.conversation_id,
                         exc_info=True,
                     )
-                    self._leave_presence_quietly(task.conversation_id)
+                    self._leave_presence_quietly(
+                        task.conversation_id, task.request_sequence
+                    )
                     continue
 
                 # Update presence to reflect running status
                 if self._realtime_manager is not None:
                     try:
                         self._realtime_manager.update_conversation_presence(
-                            task.conversation_id, status="running"
+                            task.conversation_id,
+                            request_sequence=task.request_sequence,
+                            status="running",
                         )
                     except Exception:
                         logging.exception(
@@ -317,11 +327,15 @@ class ConversationWorker:
                     self._active_conversation_ids.add(task.conversation_id)
                 self._executor.submit(self._process_conversation_safe, task)
 
-    def _leave_presence_quietly(self, conversation_id: str) -> None:
+    def _leave_presence_quietly(
+        self, conversation_id: str, request_sequence: int
+    ) -> None:
         """Leave conversation presence, swallowing any errors."""
         if self._realtime_manager is not None:
             try:
-                self._realtime_manager.leave_conversation_presence(conversation_id)
+                self._realtime_manager.leave_conversation_presence(
+                    conversation_id, request_sequence=request_sequence
+                )
             except Exception:
                 pass
 
@@ -427,7 +441,8 @@ class ConversationWorker:
             if self._realtime_manager is not None:
                 try:
                     self._realtime_manager.leave_conversation_presence(
-                        task.conversation_id
+                        task.conversation_id,
+                        request_sequence=task.request_sequence,
                     )
                 except Exception:
                     logging.exception(

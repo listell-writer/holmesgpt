@@ -35,16 +35,26 @@ except ImportError:  # pragma: no cover — optional dependency
     _SocksProxy = None  # type: ignore[assignment]
 
 from holmes import get_version
+from holmes.common.env_vars import (
+    CONVERSATION_WORKER_AUTH_REFRESH_INTERVAL_SECONDS,
+)
+from holmes.core.supabase_dal import CONVERSATIONS_TABLE
 
 if TYPE_CHECKING:
     from holmes.core.supabase_dal import SupabaseDal
 
 
-# How often the main loop re-fetches the stored Supabase session and calls
-# ``set_auth`` on the realtime client if the JWT changed. Tokens default to 1h
-# validity and the Supabase client auto-refreshes in the background, but the
-# realtime WebSocket needs an explicit push.
-_AUTH_REFRESH_INTERVAL_SECONDS = 60.0
+# ---- channel topic helpers ----
+
+
+def cluster_presence_topic(account_id: str, cluster_id: str) -> str:
+    """Topic for the cluster-level presence / pg-changes channel."""
+    return f"holmes:cluster:{account_id}:{cluster_id}"
+
+
+def conversation_presence_topic(conversation_id: str) -> str:
+    """Topic for the per-conversation presence channel."""
+    return f"holmes:conversation:{conversation_id}"
 
 
 def _install_proxy_patch_if_needed() -> None:
@@ -127,6 +137,11 @@ class RealtimeManager:
         # Last JWT we pushed to the realtime client via set_auth. Used to skip
         # the network call on the common case where the token hasn't rotated.
         self._last_auth_jwt: Optional[str] = None
+        # Per-conversation highest request_sequence that has joined presence.
+        # Older-sequence join / leave / update calls are ignored so a stale
+        # worker can't disrupt the presence owned by the newest worker.
+        self._presence_sequences: Dict[str, int] = {}
+        self._presence_sequences_lock = threading.Lock()
 
     # ---- public ----
 
@@ -163,31 +178,112 @@ class RealtimeManager:
         if self._thread:
             self._thread.join(timeout=5)
 
+    def _is_newest_sequence(
+        self, conversation_id: str, request_sequence: int, *, update: bool
+    ) -> bool:
+        """
+        Check whether ``request_sequence`` is >= the highest we've seen for
+        ``conversation_id``. When ``update=True``, advance the stored value
+        on success.
+
+        Returns True if this caller is the current or newer owner; False if
+        a newer owner has already claimed the conversation.
+        """
+        with self._presence_sequences_lock:
+            current = self._presence_sequences.get(conversation_id, -1)
+            if request_sequence < current:
+                return False
+            if update:
+                self._presence_sequences[conversation_id] = max(
+                    current, request_sequence
+                )
+            return True
+
     def join_conversation_presence(
-        self, conversation_id: str, status: str = "running"
+        self,
+        conversation_id: str,
+        request_sequence: int,
+        status: str = "running",
     ) -> None:
         """Join a per-conversation presence channel to advertise heartbeat.
+
+        ``request_sequence`` gates against stale workers: if a newer worker
+        (higher ``request_sequence``) has already joined presence for this
+        conversation, this call is ignored so the newer worker's presence
+        isn't disrupted.
 
         ``status`` is included in the presence payload so Relay can distinguish
         queued (claimed but waiting for an executor slot) from running.
         """
+        if not self._is_newest_sequence(
+            conversation_id, request_sequence, update=True
+        ):
+            logging.info(
+                "Skipping stale join_conversation_presence "
+                "(conv=%s, request_sequence=%s < current)",
+                conversation_id,
+                request_sequence,
+            )
+            return
         if self._loop and self._loop.is_running():
             asyncio.run_coroutine_threadsafe(
-                self._join_conversation_channel(conversation_id, status=status),
+                self._join_conversation_channel(
+                    conversation_id,
+                    request_sequence=request_sequence,
+                    status=status,
+                ),
                 self._loop,
             )
 
     def update_conversation_presence(
-        self, conversation_id: str, status: str = "running"
+        self,
+        conversation_id: str,
+        request_sequence: int,
+        status: str = "running",
     ) -> None:
         """Update the presence payload for an already-joined conversation channel."""
+        if not self._is_newest_sequence(
+            conversation_id, request_sequence, update=True
+        ):
+            logging.info(
+                "Skipping stale update_conversation_presence "
+                "(conv=%s, request_sequence=%s < current)",
+                conversation_id,
+                request_sequence,
+            )
+            return
         if self._loop and self._loop.is_running():
             asyncio.run_coroutine_threadsafe(
-                self._update_conversation_channel(conversation_id, status=status),
+                self._update_conversation_channel(
+                    conversation_id,
+                    request_sequence=request_sequence,
+                    status=status,
+                ),
                 self._loop,
             )
 
-    def leave_conversation_presence(self, conversation_id: str) -> None:
+    def leave_conversation_presence(
+        self, conversation_id: str, request_sequence: int
+    ) -> None:
+        """Leave a per-conversation presence channel.
+
+        Only leaves if ``request_sequence`` matches the highest we've seen —
+        otherwise a stale worker cleaning up would tear down the newer
+        worker's presence.
+        """
+        # Check without updating: we only care whether this caller is still
+        # the current owner. A newer sequence having joined means the current
+        # channel belongs to them, so don't disrupt it.
+        if not self._is_newest_sequence(
+            conversation_id, request_sequence, update=False
+        ):
+            logging.info(
+                "Skipping stale leave_conversation_presence "
+                "(conv=%s, request_sequence=%s < current)",
+                conversation_id,
+                request_sequence,
+            )
+            return
         if not (self._loop and self._loop.is_running()):
             logging.warning(
                 "leave_conversation_presence called but loop is not running (conv=%s)",
@@ -214,14 +310,23 @@ class RealtimeManager:
         self._started.set()
         try:
             await self._connect_and_subscribe()
-            # Main loop also drives periodic JWT refresh — see _maybe_refresh_auth.
-            last_auth_refresh = 0.0
+            # Main loop drives periodic JWT refresh.  We sleep until the next
+            # refresh is due rather than polling every second so CPU stays
+            # idle between refreshes.
+            refresh_interval = CONVERSATION_WORKER_AUTH_REFRESH_INTERVAL_SECONDS
+            next_refresh_at = asyncio.get_running_loop().time() + refresh_interval
             while not self._stop_event.is_set():
                 now = asyncio.get_running_loop().time()
-                if now - last_auth_refresh >= _AUTH_REFRESH_INTERVAL_SECONDS:
+                if now >= next_refresh_at:
                     await self._maybe_refresh_auth()
-                    last_auth_refresh = now
-                await asyncio.sleep(1)
+                    # Postpone the next refresh by the full interval to avoid
+                    # a 0-sleep spin loop if _maybe_refresh_auth itself was
+                    # slow enough to push ``now`` past the old target.
+                    next_refresh_at = (
+                        asyncio.get_running_loop().time() + refresh_interval
+                    )
+                sleep_for = max(0.01, next_refresh_at - asyncio.get_running_loop().time())
+                await asyncio.sleep(sleep_for)
         except Exception:
             logging.exception("Error in realtime manager main loop", exc_info=True)
         finally:
@@ -297,7 +402,7 @@ class RealtimeManager:
                 logging.exception("Failed to set_auth on realtime client", exc_info=True)
 
         # 1. Cluster-level Presence
-        topic = f"holmes:cluster:{self.dal.account_id}:{self.dal.cluster}"
+        topic = cluster_presence_topic(self.dal.account_id, self.dal.cluster)
         self._cluster_channel = self._client.channel(
             topic,
             {
@@ -336,14 +441,14 @@ class RealtimeManager:
         self._cluster_channel.on_postgres_changes(
             event="INSERT",
             schema="public",
-            table="Conversations",
+            table=CONVERSATIONS_TABLE,
             filter=account_id_filter,
             callback=_on_pg_change,
         )
         self._cluster_channel.on_postgres_changes(
             event="UPDATE",
             schema="public",
-            table="Conversations",
+            table=CONVERSATIONS_TABLE,
             filter=account_id_filter,
             callback=_on_pg_change,
         )
@@ -409,12 +514,15 @@ class RealtimeManager:
         )
 
     async def _join_conversation_channel(
-        self, conversation_id: str, status: str = "running"
+        self,
+        conversation_id: str,
+        request_sequence: int,
+        status: str = "running",
     ) -> None:
         if not self._client:
             return
         try:
-            topic = f"holmes:conversation:{conversation_id}"
+            topic = conversation_presence_topic(conversation_id)
             ch = self._client.channel(
                 topic,
                 {
@@ -447,12 +555,14 @@ class RealtimeManager:
                     "version": get_version(),
                     "started_at": datetime.now(timezone.utc).isoformat(),
                     "conversation_id": conversation_id,
+                    "request_sequence": request_sequence,
                     "status": status,
                 }
             )
             logging.info(
-                "Joined conversation presence channel for %s (status=%s)",
+                "Joined conversation presence channel for %s (request_sequence=%s, status=%s)",
                 conversation_id,
+                request_sequence,
                 status,
             )
         except Exception:
@@ -463,12 +573,15 @@ class RealtimeManager:
             )
 
     async def _update_conversation_channel(
-        self, conversation_id: str, status: str = "running"
+        self,
+        conversation_id: str,
+        request_sequence: int,
+        status: str = "running",
     ) -> None:
         """Re-track presence with an updated status on an existing channel."""
         if not self._client:
             return
-        topic = f"holmes:conversation:{conversation_id}"
+        topic = conversation_presence_topic(conversation_id)
         ch = self._client.channels.get(topic) or self._client.channels.get(  # type: ignore[attr-defined]
             f"realtime:{topic}"
         )
@@ -484,13 +597,15 @@ class RealtimeManager:
                     "version": get_version(),
                     "started_at": datetime.now(timezone.utc).isoformat(),
                     "conversation_id": conversation_id,
+                    "request_sequence": request_sequence,
                     "status": status,
                 }
             )
             logging.debug(
-                "Updated conversation presence for %s to status=%s",
+                "Updated conversation presence for %s to status=%s (request_sequence=%s)",
                 conversation_id,
                 status,
+                request_sequence,
             )
         except Exception:
             logging.exception(
@@ -505,7 +620,7 @@ class RealtimeManager:
         )
         if not self._client:
             return
-        topic = f"holmes:conversation:{conversation_id}"
+        topic = conversation_presence_topic(conversation_id)
         # realtime-py prefixes the channel topic with "realtime:" internally
         ch = self._client.channels.get(topic) or self._client.channels.get(  # type: ignore[attr-defined]
             f"realtime:{topic}"
