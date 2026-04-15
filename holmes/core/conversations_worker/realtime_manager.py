@@ -284,6 +284,13 @@ class RealtimeManager:
                 request_sequence,
             )
             return
+        # We are the current owner and we're leaving — remove our entry from
+        # the sequence map so it doesn't grow unbounded across many
+        # conversations.  A late-arriving OLDER-sequence call that comes in
+        # after this point would re-populate the key with an old value,
+        # but the channel is gone anyway so it's a no-op on the server.
+        with self._presence_sequences_lock:
+            self._presence_sequences.pop(conversation_id, None)
         if not (self._loop and self._loop.is_running()):
             logging.warning(
                 "leave_conversation_presence called but loop is not running (conv=%s)",
@@ -533,22 +540,44 @@ class RealtimeManager:
                 },
             )
             subscribed = asyncio.Event()
+            subscribe_ok = False
 
             def _on_sub(sub_status: Any, err: Optional[Exception] = None) -> None:
+                nonlocal subscribe_ok
                 logging.debug(
                     "Conversation presence subscribe status=%s err=%s conv=%s",
                     sub_status,
                     err,
                     conversation_id,
                 )
-                subscribed.set()
+                status_str = str(sub_status).upper()
+                if "SUBSCRIBED" in status_str:
+                    subscribe_ok = True
+                    subscribed.set()
+                elif any(
+                    s in status_str for s in ("CHANNEL_ERROR", "CLOSED", "TIMED_OUT")
+                ):
+                    # Unblock the waiter with subscribe_ok=False so track() is
+                    # skipped.
+                    subscribed.set()
 
             await ch.subscribe(_on_sub)
-            # Wait briefly for subscribe ack before tracking presence
+            # Wait for SUBSCRIBED ack before tracking presence.
             try:
                 await asyncio.wait_for(subscribed.wait(), timeout=5)
             except asyncio.TimeoutError:
-                pass
+                logging.warning(
+                    "Timed out waiting for conversation presence subscribe ack (conv=%s)",
+                    conversation_id,
+                )
+                return
+            if not subscribe_ok:
+                logging.warning(
+                    "Conversation presence subscribe did not reach SUBSCRIBED "
+                    "(conv=%s) — skipping track()",
+                    conversation_id,
+                )
+                return
             await ch.track(
                 {
                     "holmes_id": self.holmes_id,

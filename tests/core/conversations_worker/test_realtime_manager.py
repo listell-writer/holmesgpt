@@ -83,6 +83,30 @@ def test_presence_sequence_gate_advances_on_equal_or_newer():
     assert m._presence_sequences["c1"] == 10
 
 
+def test_leave_prunes_presence_sequence_entry():
+    """A successful leave must remove the conversation's sequence entry so
+    the map doesn't grow unbounded across many conversations."""
+    m = _make_manager()
+    m._loop = None  # presence channel coroutines are no-ops without loop
+    m.join_conversation_presence("c1", request_sequence=3, status="running")
+    assert "c1" in m._presence_sequences
+    # Current owner's leave prunes the entry
+    m.leave_conversation_presence("c1", request_sequence=3)
+    assert "c1" not in m._presence_sequences
+
+
+def test_stale_leave_does_not_prune_entry():
+    """A stale leave (older request_sequence) is ignored AND must not
+    remove the newer owner's entry from the map."""
+    m = _make_manager()
+    m._loop = None
+    m.join_conversation_presence("c1", request_sequence=7, status="running")
+    assert m._presence_sequences["c1"] == 7
+    # Older sequence trying to leave: rejected by the gate, must NOT prune.
+    m.leave_conversation_presence("c1", request_sequence=2)
+    assert m._presence_sequences["c1"] == 7
+
+
 def test_many_workers_race_newest_wins():
     """Simulate many concurrent calls for different sequences — only the
     highest is remembered and allowed to operate."""
