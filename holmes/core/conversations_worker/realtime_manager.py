@@ -47,14 +47,27 @@ if TYPE_CHECKING:
 # ---- channel topic helpers ----
 
 
-def cluster_presence_topic(account_id: str, cluster_id: str) -> str:
-    """Topic for the cluster-level presence / pg-changes channel."""
-    return f"holmes:cluster:{account_id}:{cluster_id}"
+# Supabase Realtime rate-limits presence broadcasts per client.  We coalesce
+# all conversation state changes into one track() call per interval, and only
+# flush when the payload actually changes — staying well under any
+# reasonable rate limit even during storms of short-lived conversations.
+_PRESENCE_FLUSH_INTERVAL_SECONDS = 2.0
 
 
-def conversation_presence_topic(account_id: str, conversation_id: str) -> str:
-    """Topic for the per-conversation presence channel."""
-    return f"holmes:conversation:{account_id}:{conversation_id}"
+def account_presence_topic(account_id: str) -> str:
+    """Single per-account channel used for cluster + conversation presence
+    and Postgres Changes subscriptions."""
+    return f"holmes:presence:{account_id}"
+
+
+def cluster_presence_key(cluster_id: str, holmes_id: str) -> str:
+    """Presence key for the cluster-level entry on the account channel."""
+    return f"cluster:{cluster_id}:{holmes_id}"
+
+
+def conversation_presence_key(conversation_id: str, holmes_id: str) -> str:
+    """Presence key for a per-conversation entry on the account channel."""
+    return f"conversation:{conversation_id}:{holmes_id}"
 
 
 def _install_proxy_patch_if_needed() -> None:
@@ -130,8 +143,8 @@ class RealtimeManager:
         self._stop_event = threading.Event()
         self._started = threading.Event()
         self._client = None
-        self._cluster_channel = None
-        # True once the cluster channel is SUBSCRIBED; flips to False if the
+        self._account_channel = None
+        # True once the account channel is SUBSCRIBED; flips to False if the
         # realtime thread crashes or the channel reports ERROR/CLOSED.
         self._connected = False
         # Last JWT we pushed to the realtime client via set_auth. Used to skip
@@ -142,6 +155,25 @@ class RealtimeManager:
         # worker can't disrupt the presence owned by the newest worker.
         self._presence_sequences: Dict[str, int] = {}
         self._presence_sequences_lock = threading.Lock()
+        # Per-conversation entries packed into the cluster presence payload
+        # under the "conversations" map.  Keys are full presence keys of the
+        # form ``conversation:{conversation_id}:{holmes_id}`` so observers can
+        # distinguish cluster (``cluster:*``) and conversation (``conversation:*``)
+        # signals by prefix, per the design spec.
+        self._conversations: Dict[str, Dict[str, Any]] = {}
+        self._conversations_lock = threading.Lock()
+        self._started_at: str = ""
+        # Debounced presence retrack.  Supabase Realtime rate-limits presence
+        # broadcasts (currently 10/sec per client); tracking on every
+        # conversation state change triggers the limiter and gets us
+        # disconnected.  Instead we set a dirty flag, and the main loop
+        # flushes one track() call per ``_PRESENCE_FLUSH_INTERVAL_SECONDS``
+        # with the latest payload.
+        self._presence_dirty = False
+        self._presence_dirty_lock = threading.Lock()
+        # Last payload successfully sent via track() — used to short-circuit
+        # the flusher when nothing actually changed.
+        self._last_flushed_payload: Optional[Dict[str, Any]] = None
 
     # ---- public ----
 
@@ -156,9 +188,13 @@ class RealtimeManager:
         self._started.clear()
         self._loop = None
         self._client = None
-        self._cluster_channel = None
+        self._account_channel = None
         self._connected = False
         self._last_auth_jwt = None
+        with self._conversations_lock:
+            self._conversations.clear()
+        with self._presence_sequences_lock:
+            self._presence_sequences.clear()
         self._thread = threading.Thread(
             target=self._thread_entry,
             daemon=True,
@@ -227,7 +263,7 @@ class RealtimeManager:
             return
         if self._loop and self._loop.is_running():
             asyncio.run_coroutine_threadsafe(
-                self._join_conversation_channel(
+                self._apply_conversation_entry(
                     conversation_id,
                     request_sequence=request_sequence,
                     status=status,
@@ -254,7 +290,7 @@ class RealtimeManager:
             return
         if self._loop and self._loop.is_running():
             asyncio.run_coroutine_threadsafe(
-                self._update_conversation_channel(
+                self._apply_conversation_entry(
                     conversation_id,
                     request_sequence=request_sequence,
                     status=status,
@@ -301,7 +337,7 @@ class RealtimeManager:
             "Scheduling leave_conversation_presence for %s", conversation_id
         )
         asyncio.run_coroutine_threadsafe(
-            self._leave_conversation_channel(conversation_id), self._loop
+            self._remove_conversation_entry(conversation_id), self._loop
         )
 
     # ---- thread entry point ----
@@ -332,7 +368,15 @@ class RealtimeManager:
                     next_refresh_at = (
                         asyncio.get_running_loop().time() + refresh_interval
                     )
-                sleep_for = max(0.01, next_refresh_at - asyncio.get_running_loop().time())
+                # Coalesced presence retrack (debounced to avoid hitting the
+                # Supabase Realtime presence rate limit).
+                await self._flush_presence_if_dirty()
+                # Wake up frequently enough to flush presence changes with
+                # low latency, but cap to the refresh deadline.
+                sleep_for = min(
+                    _PRESENCE_FLUSH_INTERVAL_SECONDS,
+                    max(0.01, next_refresh_at - asyncio.get_running_loop().time()),
+                )
                 await asyncio.sleep(sleep_for)
         except Exception:
             logging.exception("Error in realtime manager main loop", exc_info=True)
@@ -408,17 +452,20 @@ class RealtimeManager:
             except Exception:
                 logging.exception("Failed to set_auth on realtime client", exc_info=True)
 
-        # 1. Cluster-level Presence
-        topic = cluster_presence_topic(self.dal.account_id, self.dal.cluster)
-        self._cluster_channel = self._client.channel(
+        # Single per-account channel carrying both cluster presence +
+        # conversation heartbeats + Postgres Changes subscriptions.
+        topic = account_presence_topic(self.dal.account_id)
+        cluster_key = cluster_presence_key(self.dal.cluster, self.holmes_id)
+        self._account_channel = self._client.channel(
             topic,
             {
                 "config": {
-                    "presence": {"enabled": True, "key": self.holmes_id},
+                    "presence": {"enabled": True, "key": cluster_key},
                     "private": False,
                 }
             },
         )
+        self._started_at = datetime.now(timezone.utc).isoformat()
 
         def _on_pg_change(payload: Dict[str, Any]) -> None:
             try:
@@ -445,14 +492,14 @@ class RealtimeManager:
         # Realtime filters only allow a single operation, so we filter on
         # account_id here and do the cluster/status check in _on_pg_change.
         account_id_filter = f"account_id=eq.{self.dal.account_id}"
-        self._cluster_channel.on_postgres_changes(
+        self._account_channel.on_postgres_changes(
             event="INSERT",
             schema="public",
             table=CONVERSATIONS_TABLE,
             filter=account_id_filter,
             callback=_on_pg_change,
         )
-        self._cluster_channel.on_postgres_changes(
+        self._account_channel.on_postgres_changes(
             event="UPDATE",
             schema="public",
             table=CONVERSATIONS_TABLE,
@@ -491,26 +538,20 @@ class RealtimeManager:
         # Channel state changes (CHANNEL_ERROR, CLOSED, SUBSCRIBED) are surfaced
         # via the subscribe callback above. realtime-py's on_error / on_close
         # are internal lifecycle methods, not callback registration points.
-        await self._cluster_channel.subscribe(_on_subscribe_cb)
+        await self._account_channel.subscribe(_on_subscribe_cb)
         # Wait for SUBSCRIBED before tracking presence — otherwise the track
         # message is dropped by the server (silently).
         try:
             await asyncio.wait_for(subscribed.wait(), timeout=5)
         except asyncio.TimeoutError:
-            logging.warning("Timed out waiting for cluster presence subscribe ack")
+            logging.warning("Timed out waiting for account presence subscribe ack")
 
-        # Advertise presence
-        presence_state = {
-            "holmes_id": self.holmes_id,
-            "version": get_version(),
-            "started_at": datetime.now(timezone.utc).isoformat(),
-            "active_conversations": 0,
-        }
+        # Advertise initial cluster presence (no conversations yet).
         try:
-            await self._cluster_channel.track(presence_state)
+            await self._account_channel.track(self._build_presence_payload())
             logging.info(
-                "Advertised cluster presence: holmes_id=%s on %s",
-                self.holmes_id,
+                "Advertised cluster presence: key=%s on %s",
+                cluster_key,
                 topic,
             )
         except Exception:
@@ -520,166 +561,102 @@ class RealtimeManager:
             "RealtimeManager connected and subscribed to topic=%s", topic
         )
 
-    async def _join_conversation_channel(
+    def _build_presence_payload(self) -> Dict[str, Any]:
+        """
+        Build the cluster presence payload for the account channel.
+
+        The Supabase Realtime presence protocol allows one entry per client
+        per channel, so we pack the cluster entry + all per-conversation
+        entries into a single payload.  Observers (Relay/support) iterate the
+        ``conversations`` map whose keys use the
+        ``conversation:{conversation_id}:{holmes_id}`` form — matching the
+        "presence key" vocabulary of the design spec.
+        """
+        with self._conversations_lock:
+            conversations = {k: dict(v) for k, v in self._conversations.items()}
+        return {
+            "type": "cluster",
+            "holmes_id": self.holmes_id,
+            "cluster_id": self.dal.cluster,
+            "version": get_version(),
+            "started_at": self._started_at,
+            "active_conversations": len(conversations),
+            "conversations": conversations,
+        }
+
+    def _mark_presence_dirty(self) -> None:
+        """Flag that the presence payload has changed and needs to be
+        re-broadcast by the periodic flusher in ``_run``."""
+        with self._presence_dirty_lock:
+            self._presence_dirty = True
+
+    async def _flush_presence_if_dirty(self) -> None:
+        """Called from the main event loop at most once per
+        ``_PRESENCE_FLUSH_INTERVAL_SECONDS`` — broadcasts the current
+        payload if anything changed since the last flush."""
+        with self._presence_dirty_lock:
+            if not self._presence_dirty:
+                return
+            self._presence_dirty = False
+        if self._account_channel is None:
+            return
+        payload = self._build_presence_payload()
+        # Skip tracking if the payload is functionally identical to the last
+        # one we sent.  Prevents generating needless presence broadcasts when
+        # rapid state flips average out (e.g. a conversation being added and
+        # removed within the flush window).
+        if payload == self._last_flushed_payload:
+            return
+        try:
+            await self._account_channel.track(payload)
+            self._last_flushed_payload = payload
+        except Exception:
+            logging.exception(
+                "Failed to re-track account presence state", exc_info=True
+            )
+            # Put the dirty flag back so we retry on the next tick
+            with self._presence_dirty_lock:
+                self._presence_dirty = True
+
+    async def _apply_conversation_entry(
         self,
         conversation_id: str,
         request_sequence: int,
-        status: str = "running",
+        status: str,
     ) -> None:
-        if not self._client:
-            return
-        try:
-            topic = conversation_presence_topic(self.dal.account_id, conversation_id)
-            ch = self._client.channel(
-                topic,
-                {
-                    "config": {
-                        "presence": {"enabled": True, "key": self.holmes_id},
-                        "private": False,
-                    }
-                },
-            )
-            subscribed = asyncio.Event()
-            subscribe_ok = False
-
-            def _on_sub(sub_status: Any, err: Optional[Exception] = None) -> None:
-                nonlocal subscribe_ok
-                logging.debug(
-                    "Conversation presence subscribe status=%s err=%s conv=%s",
-                    sub_status,
-                    err,
-                    conversation_id,
-                )
-                status_str = str(sub_status).upper()
-                if "SUBSCRIBED" in status_str:
-                    subscribe_ok = True
-                    subscribed.set()
-                elif any(
-                    s in status_str for s in ("CHANNEL_ERROR", "CLOSED", "TIMED_OUT")
-                ):
-                    # Unblock the waiter with subscribe_ok=False so track() is
-                    # skipped.
-                    subscribed.set()
-
-            await ch.subscribe(_on_sub)
-            # Wait for SUBSCRIBED ack before tracking presence.
-            try:
-                await asyncio.wait_for(subscribed.wait(), timeout=5)
-            except asyncio.TimeoutError:
-                logging.warning(
-                    "Timed out waiting for conversation presence subscribe ack (conv=%s)",
-                    conversation_id,
-                )
-                return
-            if not subscribe_ok:
-                logging.warning(
-                    "Conversation presence subscribe did not reach SUBSCRIBED "
-                    "(conv=%s) — skipping track()",
-                    conversation_id,
-                )
-                return
-            await ch.track(
-                {
-                    "holmes_id": self.holmes_id,
-                    "version": get_version(),
-                    "started_at": datetime.now(timezone.utc).isoformat(),
-                    "conversation_id": conversation_id,
-                    "request_sequence": request_sequence,
-                    "status": status,
-                }
-            )
-            logging.info(
-                "Joined conversation presence channel for %s (request_sequence=%s, status=%s)",
-                conversation_id,
-                request_sequence,
-                status,
-            )
-        except Exception:
-            logging.exception(
-                "Failed to join conversation presence %s",
-                conversation_id,
-                exc_info=True,
-            )
-
-    async def _update_conversation_channel(
-        self,
-        conversation_id: str,
-        request_sequence: int,
-        status: str = "running",
-    ) -> None:
-        """Re-track presence with an updated status on an existing channel."""
-        if not self._client:
-            return
-        topic = conversation_presence_topic(self.dal.account_id, conversation_id)
-        ch = self._client.channels.get(topic) or self._client.channels.get(  # type: ignore[attr-defined]
-            f"realtime:{topic}"
-        )
-        if ch is None:
-            logging.warning(
-                "No conversation presence channel to update for %s", conversation_id
-            )
-            return
-        try:
-            await ch.track(
-                {
-                    "holmes_id": self.holmes_id,
-                    "version": get_version(),
-                    "started_at": datetime.now(timezone.utc).isoformat(),
-                    "conversation_id": conversation_id,
-                    "request_sequence": request_sequence,
-                    "status": status,
-                }
-            )
-            logging.debug(
-                "Updated conversation presence for %s to status=%s (request_sequence=%s)",
-                conversation_id,
-                status,
-                request_sequence,
-            )
-        except Exception:
-            logging.exception(
-                "Failed to update conversation presence %s",
-                conversation_id,
-                exc_info=True,
-            )
-
-    async def _leave_conversation_channel(self, conversation_id: str) -> None:
+        """Add or update a conversation entry on the account presence payload."""
+        key = conversation_presence_key(conversation_id, self.holmes_id)
+        with self._conversations_lock:
+            existing = self._conversations.get(key)
+            self._conversations[key] = {
+                "type": "conversation",
+                "holmes_id": self.holmes_id,
+                "conversation_id": conversation_id,
+                "request_sequence": request_sequence,
+                "status": status,
+                "started_at": existing["started_at"]
+                if existing and "started_at" in existing
+                else datetime.now(timezone.utc).isoformat(),
+                "version": get_version(),
+            }
+        self._mark_presence_dirty()
         logging.info(
-            "_leave_conversation_channel invoked for %s", conversation_id
+            "Queued conversation presence entry (conv=%s, request_sequence=%s, status=%s)",
+            conversation_id,
+            request_sequence,
+            status,
         )
-        if not self._client:
-            return
-        topic = conversation_presence_topic(self.dal.account_id, conversation_id)
-        # realtime-py prefixes the channel topic with "realtime:" internally
-        ch = self._client.channels.get(topic) or self._client.channels.get(  # type: ignore[attr-defined]
-            f"realtime:{topic}"
+
+    async def _remove_conversation_entry(self, conversation_id: str) -> None:
+        """Remove a conversation entry from the account presence payload."""
+        key = conversation_presence_key(conversation_id, self.holmes_id)
+        with self._conversations_lock:
+            self._conversations.pop(key, None)
+        self._mark_presence_dirty()
+        logging.info(
+            "Queued removal of conversation presence entry (conv=%s)",
+            conversation_id,
         )
-        if ch is None:
-            logging.warning(
-                "No conversation presence channel to leave for %s (channels=%s)",
-                conversation_id,
-                list(self._client.channels.keys()),  # type: ignore[attr-defined]
-            )
-            return
-        try:
-            # untrack removes our presence entry; unsubscribe leaves the channel
-            try:
-                await ch.untrack()
-            except Exception:
-                logging.exception(
-                    "Error calling untrack on conv presence %s", conversation_id,
-                    exc_info=True,
-                )
-            await self._client.remove_channel(ch)
-            logging.info(
-                "Left conversation presence channel for %s", conversation_id
-            )
-        except Exception:
-            logging.exception(
-                "Failed to leave conversation presence %s",
-                conversation_id,
-                exc_info=True,
-            )
 
     async def _shutdown_async(self) -> None:
         self._connected = False

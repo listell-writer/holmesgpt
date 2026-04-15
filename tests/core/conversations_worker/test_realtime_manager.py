@@ -7,6 +7,9 @@ import pytest
 from holmes.core.conversations_worker.realtime_manager import (
     RealtimeManager,
     _install_proxy_patch_if_needed,
+    account_presence_topic,
+    cluster_presence_key,
+    conversation_presence_key,
 )
 
 
@@ -81,6 +84,154 @@ def test_presence_sequence_gate_advances_on_equal_or_newer():
     # Newer sequence advances
     m.join_conversation_presence("c1", request_sequence=10, status="queued")
     assert m._presence_sequences["c1"] == 10
+
+
+def test_topic_and_key_helpers():
+    """Single per-account channel with distinct presence keys per entry type."""
+    assert account_presence_topic("acc-1") == "holmes:presence:acc-1"
+    assert (
+        cluster_presence_key("cluster-1", "h-123")
+        == "cluster:cluster-1:h-123"
+    )
+    assert (
+        conversation_presence_key("conv-abc", "h-123")
+        == "conversation:conv-abc:h-123"
+    )
+
+
+def test_presence_payload_starts_empty():
+    """Before any conversation is claimed, the payload has type=cluster and
+    no conversation entries — but active_conversations == 0 and conversations
+    is an empty dict."""
+    m = _make_manager()
+    m._started_at = "2026-04-15T00:00:00+00:00"
+    payload = m._build_presence_payload()
+    assert payload["type"] == "cluster"
+    assert payload["holmes_id"] == "h-test"
+    assert payload["cluster_id"] == "cluster-1"
+    assert payload["active_conversations"] == 0
+    assert payload["conversations"] == {}
+
+
+def test_presence_payload_includes_conversation_entries_by_key():
+    """_apply_conversation_entry adds an entry keyed by the full presence
+    key (conversation:{conversation_id}:{holmes_id}) — matching the design
+    spec's "presence key" vocabulary."""
+    import asyncio as _asyncio
+
+    m = _make_manager()
+    # _apply_conversation_entry awaits _retrack_presence which calls
+    # self._account_channel.track — stub the channel so it's a no-op.
+    m._account_channel = MagicMock()
+
+    async def _track_noop(payload):
+        return None
+
+    m._account_channel.track = _track_noop
+
+    _asyncio.run(
+        m._apply_conversation_entry("conv-abc", request_sequence=1, status="queued")
+    )
+    _asyncio.run(
+        m._apply_conversation_entry("conv-xyz", request_sequence=2, status="running")
+    )
+
+    key_abc = "conversation:conv-abc:h-test"
+    key_xyz = "conversation:conv-xyz:h-test"
+    assert key_abc in m._conversations
+    assert key_xyz in m._conversations
+    assert m._conversations[key_abc]["type"] == "conversation"
+    assert m._conversations[key_abc]["conversation_id"] == "conv-abc"
+    assert m._conversations[key_abc]["status"] == "queued"
+    assert m._conversations[key_xyz]["status"] == "running"
+
+    payload = m._build_presence_payload()
+    assert payload["type"] == "cluster"
+    assert payload["active_conversations"] == 2
+    assert key_abc in payload["conversations"]
+    assert key_xyz in payload["conversations"]
+
+
+def test_presence_flush_is_debounced():
+    """Multiple rapid conversation state changes should only produce a single
+    track() call when the flusher runs — this is what keeps us under the
+    Supabase Realtime presence rate limit."""
+    import asyncio as _asyncio
+
+    m = _make_manager()
+    m._account_channel = MagicMock()
+    track_calls = []
+
+    async def _track_recording(payload):
+        track_calls.append(payload)
+
+    m._account_channel.track = _track_recording
+
+    # Many rapid state changes — each sets the dirty flag but doesn't track
+    for i in range(50):
+        _asyncio.run(
+            m._apply_conversation_entry(
+                f"conv-{i}", request_sequence=1, status="running"
+            )
+        )
+    # At this point: 0 track calls yet (they're only buffered via dirty flag)
+    assert len(track_calls) == 0
+    assert m._presence_dirty is True
+
+    # One flush call writes ONE track with all 50 entries in it
+    _asyncio.run(m._flush_presence_if_dirty())
+    assert len(track_calls) == 1
+    assert track_calls[0]["active_conversations"] == 50
+    assert m._presence_dirty is False
+
+    # A second flush with no new changes is a no-op
+    _asyncio.run(m._flush_presence_if_dirty())
+    assert len(track_calls) == 1
+
+
+def test_presence_flush_retries_on_failure():
+    """If track() throws (e.g., transient ws error), the dirty flag is put
+    back so the next tick retries."""
+    import asyncio as _asyncio
+
+    m = _make_manager()
+    m._account_channel = MagicMock()
+
+    async def _track_raise(payload):
+        raise RuntimeError("boom")
+
+    m._account_channel.track = _track_raise
+
+    _asyncio.run(
+        m._apply_conversation_entry("conv-1", request_sequence=1, status="running")
+    )
+    assert m._presence_dirty is True
+    _asyncio.run(m._flush_presence_if_dirty())
+    # Still dirty because the track() call failed
+    assert m._presence_dirty is True
+
+
+def test_presence_payload_removed_on_leave():
+    """_remove_conversation_entry removes the entry from the map so the
+    next track() call advertises the absence."""
+    import asyncio as _asyncio
+
+    m = _make_manager()
+    m._account_channel = MagicMock()
+
+    async def _track_noop(payload):
+        return None
+
+    m._account_channel.track = _track_noop
+
+    _asyncio.run(
+        m._apply_conversation_entry("conv-abc", request_sequence=1, status="running")
+    )
+    key = "conversation:conv-abc:h-test"
+    assert key in m._conversations
+    _asyncio.run(m._remove_conversation_entry("conv-abc"))
+    assert key not in m._conversations
+    assert m._build_presence_payload()["active_conversations"] == 0
 
 
 def test_leave_prunes_presence_sequence_entry():
