@@ -5279,6 +5279,7 @@
 </span><span id="__span-1-11"><a id="__codelineno-1-11" name="__codelineno-1-11" href="#__codelineno-1-11"></a><span class="w">      </span><span class="c1"># Optional</span>
 </span><span id="__span-1-12"><a id="__codelineno-1-12" name="__codelineno-1-12" href="#__codelineno-1-12"></a><span class="w">      </span><span class="nt">api_key_header</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">x-sn-apikey</span><span class="w">  </span><span class="c1"># HTTP header name for the API key (default: x-sn-apikey)</span>
 </span><span id="__span-1-13"><a id="__codelineno-1-13" name="__codelineno-1-13" href="#__codelineno-1-13"></a><span class="w">      </span><span class="nt">health_check_table</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">sys_user</span><span class="w">  </span><span class="c1"># Table used to verify connectivity on startup (default: sys_user)</span>
+</span><span id="__span-1-14"><a id="__codelineno-1-14" name="__codelineno-1-14" href="#__codelineno-1-14"></a><span class="w">      </span><span class="nt">api_version</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">v2</span><span class="w">  </span><span class="c1"># Table API version: &#39;v2&#39; (default) or &#39;&#39; for unversioned path</span>
 </span></code></pre></div>
 <p>After making changes to your configuration, run:
 <div class="language-bash highlight"><pre><span></span><code><span id="__span-2-1"><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a>holmes<span class="w"> </span>toolset<span class="w"> </span>refresh
@@ -5302,6 +5303,7 @@
 </span><span id="__span-4-12"><a id="__codelineno-4-12" name="__codelineno-4-12" href="#__codelineno-4-12"></a><span class="w">        </span><span class="c1"># Optional</span>
 </span><span id="__span-4-13"><a id="__codelineno-4-13" name="__codelineno-4-13" href="#__codelineno-4-13"></a><span class="w">        </span><span class="nt">api_key_header</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">x-sn-apikey</span><span class="w">  </span><span class="c1"># HTTP header name for the API key (default: x-sn-apikey)</span>
 </span><span id="__span-4-14"><a id="__codelineno-4-14" name="__codelineno-4-14" href="#__codelineno-4-14"></a><span class="w">        </span><span class="nt">health_check_table</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">sys_user</span><span class="w">  </span><span class="c1"># Table used to verify connectivity on startup (default: sys_user)</span>
+</span><span id="__span-4-15"><a id="__codelineno-4-15" name="__codelineno-4-15" href="#__codelineno-4-15"></a><span class="w">        </span><span class="nt">api_version</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">v2</span><span class="w">  </span><span class="c1"># Table API version: &#39;v2&#39; (default) or &#39;&#39; for unversioned path</span>
 </span></code></pre></div>
 </div>
 </div>
@@ -5325,6 +5327,11 @@
 <td><code>health_check_table</code></td>
 <td><code>sys_user</code></td>
 <td>Table queried on startup to verify connectivity and permissions. Change this if your API key doesn't have access to the default table.</td>
+</tr>
+<tr>
+<td><code>api_version</code></td>
+<td><code>v2</code></td>
+<td>Table API version segment. Defaults to <code>v2</code> (<code>api/now/v2/table/...</code>). Set to empty string to use the unversioned path (<code>api/now/table/...</code>) if your instance doesn't support v2.</td>
 </tr>
 </tbody>
 </table>
