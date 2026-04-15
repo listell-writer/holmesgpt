@@ -493,6 +493,288 @@ class FetchResourceIssuesMetadata(Tool):
         return f"Robusta: Fetch Resource Issues {params}"
 
 
+class FetchServicesMetadata(Tool):
+    """
+    Discover services (workloads) across one or more clusters using lightweight
+    metadata only (no container/env/volume config). Intended for discovery:
+    "does workload X exist in cluster B?", "is it healthy?", "which clusters run
+    this operator?". Use fetch_service_config for the full spec.
+    """
+
+    _dal: Optional[SupabaseDal]
+
+    def __init__(self, dal: Optional[SupabaseDal]):
+        super().__init__(
+            name="fetch_services_metadata",
+            description=(
+                "List Kubernetes workloads (Deployments, StatefulSets, DaemonSets, "
+                "Jobs, etc.) tracked by Robusta, filterable by cluster, namespace, "
+                "name pattern, kind, health, and Helm-release status. Returns "
+                "lightweight rows (no container/env/volume detail) - use "
+                "fetch_service_config to retrieve the full spec for a specific "
+                "workload. "
+                "CROSS-CLUSTER COMPARISON: pass clusters=['cluster-a', 'cluster-b'] "
+                "to check whether the same workload exists and is healthy in both "
+                "clusters. This is the first step when the user asks to compare "
+                "workload behavior between clusters - after confirming both sides "
+                "exist, call fetch_service_config with the same clusters list to "
+                "diff container images, env vars, resources, labels, and volumes. "
+                "CLUSTER SCOPE: defaults to the current cluster. Set all_clusters=true "
+                "to query every cluster in the account."
+            ),
+            parameters={
+                "namespace": ToolParameter(
+                    description="Filter by Kubernetes namespace (exact match).",
+                    type="string",
+                    required=False,
+                ),
+                "name_pattern": ToolParameter(
+                    description=(
+                        "Filter by workload name. Supports SQL LIKE patterns "
+                        "('%' as wildcard, e.g. '%operator%' matches any name "
+                        "containing 'operator')."
+                    ),
+                    type="string",
+                    required=False,
+                ),
+                "service_type": ToolParameter(
+                    description=(
+                        "Filter by Kubernetes kind (e.g. 'Deployment', "
+                        "'StatefulSet', 'DaemonSet', 'Job')."
+                    ),
+                    type="string",
+                    required=False,
+                ),
+                "only_unhealthy": ToolParameter(
+                    description=(
+                        "If true, only return workloads where ready_pods < total_pods. "
+                        "Useful when the user asks 'which services are unhealthy in "
+                        "cluster X'."
+                    ),
+                    type="boolean",
+                    required=False,
+                ),
+                "is_helm_release": ToolParameter(
+                    description="Filter by whether the workload is part of a Helm release.",
+                    type="boolean",
+                    required=False,
+                ),
+                "include_deleted": ToolParameter(
+                    description=(
+                        "If true, include workloads that have been deleted from the "
+                        "cluster (Robusta retains a historical record). Default false."
+                    ),
+                    type="boolean",
+                    required=False,
+                ),
+                "limit": ToolParameter(
+                    description="Maximum number of rows to return (default 100, max 500).",
+                    type="integer",
+                    required=False,
+                ),
+                "all_clusters": ToolParameter(
+                    description=(
+                        "If true, search across ALL clusters in the account instead "
+                        "of just the current cluster. Default false."
+                    ),
+                    type="boolean",
+                    required=False,
+                ),
+                "clusters": ToolParameter(
+                    description=(
+                        "Optional list of specific cluster names to query. If provided, "
+                        "overrides all_clusters. Use this for cross-cluster comparison, "
+                        "e.g. ['prod-us-east', 'prod-us-west']."
+                    ),
+                    type="array",
+                    items=ToolParameter(type="string"),
+                    required=False,
+                ),
+            },
+        )
+        self._dal = dal
+
+    def _invoke(self, params: dict, context: ToolInvokeContext) -> StructuredToolResult:
+        if not self._dal or not self._dal.enabled:
+            msg = "Robusta data access layer is not enabled."
+            return StructuredToolResult(
+                status=StructuredToolResultStatus.ERROR, error=msg, params=params
+            )
+        try:
+            clusters = _parse_cluster_scope(params)
+            rows = self._dal.get_services_metadata(
+                clusters=clusters,
+                namespace=params.get("namespace"),
+                name_pattern=params.get("name_pattern"),
+                service_type=params.get("service_type"),
+                only_unhealthy=bool(params.get("only_unhealthy")),
+                is_helm_release=params.get("is_helm_release"),
+                include_deleted=bool(params.get("include_deleted")),
+                limit=params.get("limit") or 100,
+            )
+            if rows:
+                return StructuredToolResult(
+                    status=StructuredToolResultStatus.SUCCESS,
+                    data=rows,
+                    params=params,
+                )
+            return StructuredToolResult(
+                status=StructuredToolResultStatus.NO_DATA,
+                data=f"No services found matching filters: {params}",
+                params=params,
+            )
+        except Exception as e:
+            msg = f"Error fetching services metadata for {params}: {e}"
+            logging.exception(msg)
+            return StructuredToolResult(
+                status=StructuredToolResultStatus.ERROR, error=msg, params=params
+            )
+
+    def get_parameterized_one_liner(self, params: Dict) -> str:
+        return f"Robusta: List Services {params}"
+
+
+class FetchServiceConfig(Tool):
+    """
+    Fetch the full config (labels, containers/images/env/resources/ports,
+    volumes, pod counts) for a specific workload in one or more clusters.
+    Pass multiple clusters to get the same workload across clusters in one
+    call - the caller is expected to diff the resulting rows.
+    """
+
+    _dal: Optional[SupabaseDal]
+
+    def __init__(self, dal: Optional[SupabaseDal]):
+        super().__init__(
+            name="fetch_service_config",
+            description=(
+                "Retrieve the full config for a specific Kubernetes workload "
+                "tracked by Robusta, including labels, all containers (name, image, "
+                "env vars, CPU/memory requests & limits, ports), volumes (incl. PVCs), "
+                "replica counts, health, and Helm-release status. "
+                "CROSS-CLUSTER COMPARISON: pass clusters=['cluster-a', 'cluster-b'] "
+                "(2+ clusters) to fetch the SAME workload from each cluster in a "
+                "single call. The response contains one row per cluster - compare "
+                "them yourself to explain differences in image tags, env vars, "
+                "resource allocations, labels, volumes, or replica health. This is "
+                "the primary tool for answering 'why does this operator work in "
+                "cluster A but not cluster B?'. "
+                "LOOKUP: provide either service_key ('{namespace}/{type}/{name}', e.g. "
+                "'kube-system/Deployment/coredns') OR all three of namespace + name + "
+                "service_type. "
+                "If the workload doesn't exist in one of the clusters you listed, the "
+                "response will be missing a row for that cluster - use "
+                "fetch_services_metadata first to confirm the workload is present "
+                "and find the closest-matching name."
+            ),
+            parameters={
+                "service_key": ToolParameter(
+                    description=(
+                        "Composite service identifier in the format "
+                        "'{namespace}/{type}/{name}', e.g. 'prod/Deployment/api-gateway'. "
+                        "Either service_key OR (namespace + name + service_type) is required."
+                    ),
+                    type="string",
+                    required=False,
+                ),
+                "namespace": ToolParameter(
+                    description="Kubernetes namespace (required if service_key not provided).",
+                    type="string",
+                    required=False,
+                ),
+                "name": ToolParameter(
+                    description="Workload name (required if service_key not provided).",
+                    type="string",
+                    required=False,
+                ),
+                "service_type": ToolParameter(
+                    description=(
+                        "Kubernetes kind, e.g. 'Deployment', 'StatefulSet', "
+                        "'DaemonSet', 'Job' (required if service_key not provided)."
+                    ),
+                    type="string",
+                    required=False,
+                ),
+                "all_clusters": ToolParameter(
+                    description=(
+                        "If true, fetch the workload from every cluster in the account. "
+                        "Default false (current cluster only)."
+                    ),
+                    type="boolean",
+                    required=False,
+                ),
+                "clusters": ToolParameter(
+                    description=(
+                        "Optional list of specific cluster names to fetch from. If provided, "
+                        "overrides all_clusters. Use this for cross-cluster comparison, e.g. "
+                        "['prod-us-east', 'prod-us-west']. Returns one row per cluster where "
+                        "the workload exists."
+                    ),
+                    type="array",
+                    items=ToolParameter(type="string"),
+                    required=False,
+                ),
+            },
+        )
+        self._dal = dal
+
+    def _invoke(self, params: dict, context: ToolInvokeContext) -> StructuredToolResult:
+        if not self._dal or not self._dal.enabled:
+            msg = "Robusta data access layer is not enabled."
+            return StructuredToolResult(
+                status=StructuredToolResultStatus.ERROR, error=msg, params=params
+            )
+
+        service_key = params.get("service_key")
+        namespace = params.get("namespace")
+        name = params.get("name")
+        service_type = params.get("service_type")
+
+        if not service_key and not (namespace and name and service_type):
+            return StructuredToolResult(
+                status=StructuredToolResultStatus.ERROR,
+                error=(
+                    "Must provide either 'service_key' or all three of "
+                    "'namespace', 'name', and 'service_type'."
+                ),
+                params=params,
+            )
+
+        try:
+            clusters = _parse_cluster_scope(params)
+            rows = self._dal.get_service_configs(
+                clusters=clusters,
+                service_key=service_key,
+                namespace=namespace,
+                name=name,
+                service_type=service_type,
+            )
+            if rows:
+                return StructuredToolResult(
+                    status=StructuredToolResultStatus.SUCCESS,
+                    data=rows,
+                    params=params,
+                )
+            return StructuredToolResult(
+                status=StructuredToolResultStatus.NO_DATA,
+                data=(
+                    f"No service found for {params}. If comparing across clusters, "
+                    "the workload may not exist in some of them - try "
+                    "fetch_services_metadata to find the closest match."
+                ),
+                params=params,
+            )
+        except Exception as e:
+            msg = f"Error fetching service config for {params}: {e}"
+            logging.exception(msg)
+            return StructuredToolResult(
+                status=StructuredToolResultStatus.ERROR, error=msg, params=params
+            )
+
+    def get_parameterized_one_liner(self, params: Dict) -> str:
+        return f"Robusta: Fetch Service Config {params}"
+
+
 class RobustaToolset(Toolset):
     def __init__(self, dal: Optional[SupabaseDal]):
         dal_prereq = StaticPrerequisite(
@@ -509,6 +791,8 @@ class RobustaToolset(Toolset):
             FetchConfigurationChangesMetadata(dal),
             FetchResourceRecommendation(dal),
             FetchResourceIssuesMetadata(dal),
+            FetchServicesMetadata(dal),
+            FetchServiceConfig(dal),
         ]
 
         super().__init__(
