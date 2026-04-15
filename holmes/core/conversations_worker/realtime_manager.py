@@ -52,9 +52,9 @@ def cluster_presence_topic(account_id: str, cluster_id: str) -> str:
     return f"holmes:cluster:{account_id}:{cluster_id}"
 
 
-def conversation_presence_topic(conversation_id: str) -> str:
+def conversation_presence_topic(account_id: str, conversation_id: str) -> str:
     """Topic for the per-conversation presence channel."""
-    return f"holmes:conversation:{conversation_id}"
+    return f"holmes:conversation:{account_id}:{conversation_id}"
 
 
 def _install_proxy_patch_if_needed() -> None:
@@ -522,7 +522,7 @@ class RealtimeManager:
         if not self._client:
             return
         try:
-            topic = conversation_presence_topic(conversation_id)
+            topic = conversation_presence_topic(self.dal.account_id, conversation_id)
             ch = self._client.channel(
                 topic,
                 {
@@ -581,7 +581,7 @@ class RealtimeManager:
         """Re-track presence with an updated status on an existing channel."""
         if not self._client:
             return
-        topic = conversation_presence_topic(conversation_id)
+        topic = conversation_presence_topic(self.dal.account_id, conversation_id)
         ch = self._client.channels.get(topic) or self._client.channels.get(  # type: ignore[attr-defined]
             f"realtime:{topic}"
         )
@@ -620,7 +620,7 @@ class RealtimeManager:
         )
         if not self._client:
             return
-        topic = conversation_presence_topic(conversation_id)
+        topic = conversation_presence_topic(self.dal.account_id, conversation_id)
         # realtime-py prefixes the channel topic with "realtime:" internally
         ch = self._client.channels.get(topic) or self._client.channels.get(  # type: ignore[attr-defined]
             f"realtime:{topic}"
