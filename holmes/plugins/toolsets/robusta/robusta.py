@@ -495,10 +495,10 @@ class FetchResourceIssuesMetadata(Tool):
 
 class FetchServicesMetadata(Tool):
     """
-    Discover services (workloads) across one or more clusters using lightweight
-    metadata only (no container/env/volume config). Intended for discovery:
-    "does workload X exist in cluster B?", "is it healthy?", "which clusters run
-    this operator?". Use fetch_service_config for the full spec.
+    Discover services (workloads) across one or more clusters, returning
+    identity only (namespace, name, kind, cluster, service_key). Intended
+    for discovery: "does workload X exist in cluster B?", "which clusters
+    run this operator?". Use fetch_service_config for the spec.
     """
 
     _dal: Optional[SupabaseDal]
@@ -509,18 +509,20 @@ class FetchServicesMetadata(Tool):
             description=(
                 "List Kubernetes workloads (Deployments, StatefulSets, DaemonSets, "
                 "Jobs, etc.) tracked by Robusta, filterable by cluster, namespace, "
-                "name pattern, kind, health, and Helm-release status. Returns "
-                "lightweight rows (no container/env/volume detail) - use "
-                "fetch_service_config to retrieve the full spec for a specific "
-                "workload. "
+                "name pattern, and kind. Returns identity-only rows (namespace, "
+                "name, kind, cluster, service_key) - no container/env/volume spec "
+                "and no runtime status. Use fetch_service_config to retrieve the "
+                "spec for a specific workload. If you need live runtime state "
+                "(pod readiness, replica counts, health), query Kubernetes "
+                "directly - do not rely on this tool for that. "
                 "CROSS-CLUSTER COMPARISON: pass clusters=['cluster-a', 'cluster-b'] "
-                "to check whether the same workload exists and is healthy in both "
-                "clusters. This is the first step when the user asks to compare "
-                "workload behavior between clusters - after confirming both sides "
-                "exist, call fetch_service_config with the same clusters list to "
-                "diff container images, env vars, resources, labels, and volumes. "
-                "CLUSTER SCOPE: defaults to the current cluster. Set all_clusters=true "
-                "to query every cluster in the account."
+                "to check whether the same workload exists in both clusters. "
+                "This is the first step when the user asks to compare workload "
+                "behavior between clusters - after confirming both sides exist, "
+                "call fetch_service_config with the same clusters list to diff "
+                "container images, env vars, resources, labels, and volumes. "
+                "CLUSTER SCOPE: defaults to the current cluster. Set "
+                "all_clusters=true to query every cluster in the account."
             ),
             parameters={
                 "namespace": ToolParameter(
@@ -543,28 +545,6 @@ class FetchServicesMetadata(Tool):
                         "'StatefulSet', 'DaemonSet', 'Job')."
                     ),
                     type="string",
-                    required=False,
-                ),
-                "only_unhealthy": ToolParameter(
-                    description=(
-                        "If true, only return workloads where ready_pods < total_pods. "
-                        "Useful when the user asks 'which services are unhealthy in "
-                        "cluster X'."
-                    ),
-                    type="boolean",
-                    required=False,
-                ),
-                "is_helm_release": ToolParameter(
-                    description="Filter by whether the workload is part of a Helm release.",
-                    type="boolean",
-                    required=False,
-                ),
-                "include_deleted": ToolParameter(
-                    description=(
-                        "If true, include workloads that have been deleted from the "
-                        "cluster (Robusta retains a historical record). Default false."
-                    ),
-                    type="boolean",
                     required=False,
                 ),
                 "limit": ToolParameter(
@@ -607,9 +587,6 @@ class FetchServicesMetadata(Tool):
                 namespace=params.get("namespace"),
                 name_pattern=params.get("name_pattern"),
                 service_type=params.get("service_type"),
-                only_unhealthy=bool(params.get("only_unhealthy")),
-                is_helm_release=params.get("is_helm_release"),
-                include_deleted=bool(params.get("include_deleted")),
                 limit=params.get("limit") or 100,
             )
             if rows:
@@ -636,10 +613,11 @@ class FetchServicesMetadata(Tool):
 
 class FetchServiceConfig(Tool):
     """
-    Fetch the full config (labels, containers/images/env/resources/ports,
-    volumes, pod counts) for a specific workload in one or more clusters.
-    Pass multiple clusters to get the same workload across clusters in one
-    call - the caller is expected to diff the resulting rows.
+    Fetch the config (labels, containers/images/env/resources/ports, volumes)
+    for a specific workload in one or more clusters. Pass multiple clusters
+    to get the same workload across clusters in one call - the caller is
+    expected to diff the resulting rows. Runtime status is intentionally
+    excluded.
     """
 
     _dal: Optional[SupabaseDal]
@@ -648,17 +626,19 @@ class FetchServiceConfig(Tool):
         super().__init__(
             name="fetch_service_config",
             description=(
-                "Retrieve the full config for a specific Kubernetes workload "
-                "tracked by Robusta, including labels, all containers (name, image, "
-                "env vars, CPU/memory requests & limits, ports), volumes (incl. PVCs), "
-                "replica counts, health, and Helm-release status. "
+                "Retrieve the config for a specific Kubernetes workload tracked "
+                "by Robusta: labels, all containers (name, image, env vars, "
+                "CPU/memory requests & limits, ports), and volumes (incl. PVCs). "
+                "Runtime status (pod readiness, replica counts, health) is NOT "
+                "returned - this tool is for config/spec comparison only. For "
+                "live runtime state, query Kubernetes directly. "
                 "CROSS-CLUSTER COMPARISON: pass clusters=['cluster-a', 'cluster-b'] "
                 "(2+ clusters) to fetch the SAME workload from each cluster in a "
                 "single call. The response contains one row per cluster - compare "
                 "them yourself to explain differences in image tags, env vars, "
-                "resource allocations, labels, volumes, or replica health. This is "
-                "the primary tool for answering 'why does this operator work in "
-                "cluster A but not cluster B?'. "
+                "resource allocations, labels, or volumes. This is the primary "
+                "tool for answering 'why does this operator work in cluster A "
+                "but not cluster B?'. "
                 "LOOKUP: provide either service_key ('{namespace}/{type}/{name}', e.g. "
                 "'kube-system/Deployment/coredns') OR all three of namespace + name + "
                 "service_type. "

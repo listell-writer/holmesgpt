@@ -413,16 +413,19 @@ class SupabaseDal:
         namespace: Optional[str] = None,
         name_pattern: Optional[str] = None,
         service_type: Optional[str] = None,
-        only_unhealthy: bool = False,
-        is_helm_release: Optional[bool] = None,
-        include_deleted: bool = False,
         limit: int = 100,
     ) -> Optional[List[Dict]]:
         """
-        Fetch lightweight service metadata from the Services table.
+        Fetch lightweight service identity rows from the Services table.
 
-        Does NOT include the full `config` JSON (containers/env/volumes/labels).
-        Use get_service_configs() when the full config is required.
+        Returns ONLY identity / config-oriented fields (name, namespace, type,
+        cluster, service_key, classification, update_time). Runtime state
+        fields like ready_pods/total_pods/healthy/is_helm_release are
+        intentionally excluded because they can be stale - callers should
+        fetch live cluster state from Kubernetes directly when runtime status
+        matters.
+
+        Always excludes rows marked deleted=true.
 
         Args:
             clusters: List of cluster names. None => current cluster only.
@@ -430,13 +433,10 @@ class SupabaseDal:
             namespace: Filter by Kubernetes namespace (exact match).
             name_pattern: Filter by service name. Supports SQL LIKE, e.g. "%operator%".
             service_type: Filter by Kubernetes kind, e.g. "Deployment", "StatefulSet".
-            only_unhealthy: If True, only return services where ready_pods < total_pods.
-            is_helm_release: Filter by Helm release flag.
-            include_deleted: If False (default), exclude services marked deleted=true.
             limit: Max rows to return (capped at MAX_SERVICES_FETCH_ROWS).
 
         Returns:
-            List of service metadata rows, or None if no data / error.
+            List of service identity rows, or None if no data / error.
         """
         if not self.enabled:
             return []
@@ -452,15 +452,11 @@ class SupabaseDal:
                     "namespace",
                     "cluster",
                     "classification",
-                    "deleted",
                     "service_key",
-                    "total_pods",
-                    "ready_pods",
-                    "is_helm_release",
-                    "healthy",
                     "update_time",
                 )
                 .eq("account_id", self.account_id)
+                .eq("deleted", False)
             )
 
             if target_clusters is not None:
@@ -471,12 +467,6 @@ class SupabaseDal:
                 query = query.like("name", name_pattern)
             if service_type:
                 query = query.eq("type", service_type)
-            if is_helm_release is not None:
-                query = query.eq("is_helm_release", is_helm_release)
-            if only_unhealthy:
-                query = query.eq("healthy", False)
-            if not include_deleted:
-                query = query.eq("deleted", False)
 
             query = query.limit(min(limit, MAX_SERVICES_FETCH_ROWS))
 
@@ -498,11 +488,16 @@ class SupabaseDal:
         service_type: Optional[str] = None,
     ) -> Optional[List[Dict]]:
         """
-        Fetch full service config rows (including the `config` JSON with
-        containers, images, env vars, resources, labels, volumes).
+        Fetch config-only service rows (the `config` JSON with labels,
+        containers, env vars, resource requests/limits, ports, volumes) for a
+        specific workload. Runtime state (ready_pods/total_pods/healthy/
+        is_helm_release) is intentionally excluded - that data can be stale
+        and callers should consult live Kubernetes state when runtime status
+        matters.
 
         Either `service_key` OR (`namespace` + `name` + `service_type`) must be
         provided. Returns one row per cluster where the service exists.
+        Always excludes rows marked deleted=true.
 
         Args:
             clusters: List of cluster names. None => current cluster only.
@@ -513,7 +508,7 @@ class SupabaseDal:
                          must be provided together.
 
         Returns:
-            List of service rows with full config, or None if no data / error.
+            List of service rows with config, or None if no data / error.
         """
         if not self.enabled:
             return []
@@ -529,8 +524,18 @@ class SupabaseDal:
 
             query = (
                 self.client.table(SERVICES_TABLE)
-                .select("*")
+                .select(
+                    "name",
+                    "type",
+                    "namespace",
+                    "cluster",
+                    "classification",
+                    "service_key",
+                    "config",
+                    "update_time",
+                )
                 .eq("account_id", self.account_id)
+                .eq("deleted", False)
             )
 
             if target_clusters is not None:

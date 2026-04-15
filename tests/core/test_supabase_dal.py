@@ -527,9 +527,6 @@ class TestServicesMethods:
                 "type": "Deployment",
                 "namespace": "prod",
                 "cluster": "test-cluster",
-                "healthy": True,
-                "ready_pods": 3,
-                "total_pods": 3,
                 "service_key": "prod/Deployment/api",
             }
         ]
@@ -540,6 +537,42 @@ class TestServicesMethods:
         assert result == rows
         chain.in_.assert_any_call("cluster", ["test-cluster"])
         chain.eq.assert_any_call("deleted", False)
+
+    def test_metadata_select_excludes_runtime_fields(self, mock_dal):
+        """Runtime fields (healthy/pods/helm) must not be in the SELECT list.
+
+        The Services table in Robusta stores runtime state that can be stale;
+        the tool contract is config-only.
+        """
+        self._setup_services_chain(mock_dal, [])
+        mock_dal.get_services_metadata()
+
+        services_table = mock_dal.client.table("Services")
+        select_calls = services_table.select.call_args_list
+        assert len(select_calls) >= 1
+        selected_fields = set(select_calls[0].args)
+        assert "config" not in selected_fields  # metadata is lightweight
+        forbidden = {"healthy", "ready_pods", "total_pods", "is_helm_release"}
+        assert forbidden.isdisjoint(selected_fields), (
+            f"runtime fields leaked into metadata SELECT: "
+            f"{forbidden & selected_fields}"
+        )
+
+    def test_config_select_excludes_runtime_fields(self, mock_dal):
+        """get_service_configs must not select runtime fields either."""
+        self._setup_services_chain(mock_dal, [])
+        mock_dal.get_service_configs(service_key="prod/Deployment/api")
+
+        services_table = mock_dal.client.table("Services")
+        select_calls = services_table.select.call_args_list
+        assert len(select_calls) >= 1
+        selected_fields = set(select_calls[0].args)
+        assert "config" in selected_fields  # config IS the payload here
+        forbidden = {"healthy", "ready_pods", "total_pods", "is_helm_release"}
+        assert forbidden.isdisjoint(selected_fields), (
+            f"runtime fields leaked into config SELECT: "
+            f"{forbidden & selected_fields}"
+        )
 
     def test_metadata_all_clusters(self, mock_dal):
         rows = [
@@ -571,15 +604,21 @@ class TestServicesMethods:
             namespace="kube-system",
             name_pattern="%operator%",
             service_type="Deployment",
-            only_unhealthy=True,
-            is_helm_release=True,
         )
 
         chain.eq.assert_any_call("namespace", "kube-system")
         chain.like.assert_any_call("name", "%operator%")
         chain.eq.assert_any_call("type", "Deployment")
-        chain.eq.assert_any_call("healthy", False)
-        chain.eq.assert_any_call("is_helm_release", True)
+        # deleted=false filter is always applied
+        chain.eq.assert_any_call("deleted", False)
+        # runtime fields must never be used as filters
+        for call in chain.eq.call_args_list:
+            assert call.args[0] not in (
+                "healthy",
+                "is_helm_release",
+                "ready_pods",
+                "total_pods",
+            )
 
     def test_metadata_limit_capped(self, mock_dal):
         chain = self._setup_services_chain(mock_dal, [])
