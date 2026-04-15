@@ -1052,22 +1052,35 @@ class SupabaseDal:
         if not self.enabled:
             return []
 
-        try:
-            res = self.client.rpc(
-                "get_conversation_events",
-                {
-                    "_account_id": self.account_id,
-                    "_conversation_id": conversation_id,
-                    "_include_compacted": include_compacted,
-                    "_min_seq": min_seq,
-                },
-            ).execute()
-            return res.data or []
-        except Exception:
-            logging.exception(
-                "Supabase error while fetching conversation events", exc_info=True
-            )
-            return []
+        # Retry a few times on transient infrastructure errors (DNS/cache
+        # overflows in the Supabase proxy, 5xx gateway errors, etc.).  The
+        # caller's fallback when this returns [] is to mark the conversation
+        # failed for lack of a user question, so a transient hiccup here
+        # would cause a spurious permanent failure.
+        import time as _time
+
+        last_err: Optional[Exception] = None
+        for attempt in range(3):
+            try:
+                res = self.client.rpc(
+                    "get_conversation_events",
+                    {
+                        "_account_id": self.account_id,
+                        "_conversation_id": conversation_id,
+                        "_include_compacted": include_compacted,
+                        "_min_seq": min_seq,
+                    },
+                ).execute()
+                return res.data or []
+            except Exception as e:
+                last_err = e
+                if attempt < 2:
+                    _time.sleep(0.5 * (2 ** attempt))  # 0.5s, 1s
+        logging.exception(
+            "Supabase error while fetching conversation events (after retries)",
+            exc_info=last_err,
+        )
+        return []
 
     def finish_scheduled_prompt_run(
         self,

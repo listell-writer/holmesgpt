@@ -55,9 +55,18 @@ _PRESENCE_FLUSH_INTERVAL_SECONDS = 2.0
 
 
 def account_presence_topic(account_id: str) -> str:
-    """Single per-account channel used for cluster + conversation presence
-    and Postgres Changes subscriptions."""
+    """Single per-account channel carrying cluster + per-conversation presence.
+
+    Separate from the pg-changes channel so that a presence rate-limit
+    disconnect does not kill the Postgres Changes subscription used for
+    claiming new conversations.
+    """
     return f"holmes:presence:{account_id}"
+
+
+def pg_changes_topic(account_id: str, cluster_id: str) -> str:
+    """Dedicated per-cluster channel for Conversations Postgres Changes."""
+    return f"holmes:pgchanges:{account_id}:{cluster_id}"
 
 
 def cluster_presence_key(cluster_id: str, holmes_id: str) -> str:
@@ -144,8 +153,15 @@ class RealtimeManager:
         self._started = threading.Event()
         self._client = None
         self._account_channel = None
-        # True once the account channel is SUBSCRIBED; flips to False if the
-        # realtime thread crashes or the channel reports ERROR/CLOSED.
+        # Separate channel for Postgres Changes subscriptions. Kept distinct
+        # from the presence channel so that a presence rate-limit disconnect
+        # on one doesn't also kill the pg-changes subscription that drives
+        # conversation claiming.
+        self._pg_channel = None
+        # True once the pg-changes channel is SUBSCRIBED (drives
+        # is_connected() and the claim-loop's realtime-vs-poll decision).
+        # Presence-channel state is tracked separately but doesn't gate
+        # claiming.
         self._connected = False
         # Last JWT we pushed to the realtime client via set_auth. Used to skip
         # the network call on the common case where the token hasn't rotated.
@@ -189,8 +205,10 @@ class RealtimeManager:
         self._loop = None
         self._client = None
         self._account_channel = None
+        self._pg_channel = None
         self._connected = False
         self._last_auth_jwt = None
+        self._last_flushed_payload = None
         with self._conversations_lock:
             self._conversations.clear()
         with self._presence_sequences_lock:
@@ -452,18 +470,27 @@ class RealtimeManager:
             except Exception:
                 logging.exception("Failed to set_auth on realtime client", exc_info=True)
 
-        # Single per-account channel carrying both cluster presence +
-        # conversation heartbeats + Postgres Changes subscriptions.
-        topic = account_presence_topic(self.dal.account_id)
+        # Two separate channels so that a rate-limit or error on one
+        # doesn't break the other:
+        #   1. ``holmes:presence:{account_id}`` — cluster + conversation
+        #      presence entries (liveness signal for Relay)
+        #   2. ``holmes:pgchanges:{account_id}:{cluster_id}`` — Postgres
+        #      Changes notifications that drive conversation claiming
+        presence_topic = account_presence_topic(self.dal.account_id)
+        pg_topic = pg_changes_topic(self.dal.account_id, self.dal.cluster)
         cluster_key = cluster_presence_key(self.dal.cluster, self.holmes_id)
         self._account_channel = self._client.channel(
-            topic,
+            presence_topic,
             {
                 "config": {
                     "presence": {"enabled": True, "key": cluster_key},
                     "private": False,
                 }
             },
+        )
+        self._pg_channel = self._client.channel(
+            pg_topic,
+            {"config": {"private": False}},
         )
         self._started_at = datetime.now(timezone.utc).isoformat()
 
@@ -474,32 +501,28 @@ class RealtimeManager:
                     "RealtimeManager: Postgres change notification: %s",
                     change.get("type"),
                 )
-                # Supabase Realtime only supports a single-column filter per
-                # subscription, so we filter by account_id on the server and
-                # narrow to our cluster + pending rows here. For an UPDATE
-                # payload the new row is under "record"; for INSERT it's also
-                # "record". Older realtime payload shapes used "new".
-                row = change.get("record") or change.get("new") or {}
-                if row.get("cluster_id") != self.dal.cluster:
-                    return
-                if row.get("status") != "pending":
-                    return
+                # Any change to Conversations for our account is a signal to
+                # try claiming.  We intentionally don't pre-filter on
+                # cluster_id or status here: Supabase Realtime payloads
+                # occasionally omit columns (schema changes, partial
+                # updates), and ``claim_conversations`` is a cheap RPC that
+                # already filters server-side to pending rows for our
+                # cluster.  False positives cost nothing.
                 self.on_new_pending()
             except Exception:
                 logging.exception("Error in realtime pg change callback", exc_info=True)
 
-        # Subscribe to Postgres Changes on Conversations for this cluster.
-        # Realtime filters only allow a single operation, so we filter on
-        # account_id here and do the cluster/status check in _on_pg_change.
+        # Postgres Changes subscription on its OWN channel so that presence
+        # rate limits on the presence channel don't kill our claim pipeline.
         account_id_filter = f"account_id=eq.{self.dal.account_id}"
-        self._account_channel.on_postgres_changes(
+        self._pg_channel.on_postgres_changes(
             event="INSERT",
             schema="public",
             table=CONVERSATIONS_TABLE,
             filter=account_id_filter,
             callback=_on_pg_change,
         )
-        self._account_channel.on_postgres_changes(
+        self._pg_channel.on_postgres_changes(
             event="UPDATE",
             schema="public",
             table=CONVERSATIONS_TABLE,
@@ -507,18 +530,21 @@ class RealtimeManager:
             callback=_on_pg_change,
         )
 
-        subscribed = asyncio.Event()
+        pg_subscribed = asyncio.Event()
 
-        def _on_subscribe_cb(status: Any, err: Optional[Exception] = None) -> None:
+        def _on_pg_subscribe_cb(status: Any, err: Optional[Exception] = None) -> None:
+            """pg-changes subscribe callback — this is what drives
+            ``self._connected`` because the claim-loop's realtime-vs-poll
+            decision depends on whether we're getting pg-changes events."""
             logging.info(
-                "RealtimeManager subscribe status=%s err=%s",
+                "PG changes subscribe status=%s err=%s",
                 status,
                 err,
             )
             status_str = str(status).upper()
             if "SUBSCRIBED" in status_str:
                 self._connected = True
-                subscribed.set()
+                pg_subscribed.set()
                 # Trigger a claim to cover any missed events during subscription
                 # setup or reconnects
                 try:
@@ -535,16 +561,27 @@ class RealtimeManager:
                 except Exception:
                     pass
 
-        # Channel state changes (CHANNEL_ERROR, CLOSED, SUBSCRIBED) are surfaced
-        # via the subscribe callback above. realtime-py's on_error / on_close
-        # are internal lifecycle methods, not callback registration points.
-        await self._account_channel.subscribe(_on_subscribe_cb)
-        # Wait for SUBSCRIBED before tracking presence — otherwise the track
-        # message is dropped by the server (silently).
+        def _on_presence_subscribe_cb(
+            status: Any, err: Optional[Exception] = None
+        ) -> None:
+            """Presence subscribe callback — drives track()-readiness.
+            Does NOT modify ``self._connected``: the claim loop doesn't
+            depend on presence."""
+            logging.info(
+                "Account presence subscribe status=%s err=%s",
+                status,
+                err,
+            )
+
+        await self._pg_channel.subscribe(_on_pg_subscribe_cb)
+        await self._account_channel.subscribe(_on_presence_subscribe_cb)
+
+        # Wait for pg-changes SUBSCRIBED so the first claim pass is covered
+        # by realtime events rather than the slower polling fallback.
         try:
-            await asyncio.wait_for(subscribed.wait(), timeout=5)
+            await asyncio.wait_for(pg_subscribed.wait(), timeout=5)
         except asyncio.TimeoutError:
-            logging.warning("Timed out waiting for account presence subscribe ack")
+            logging.warning("Timed out waiting for pg-changes subscribe ack")
 
         # Advertise initial cluster presence (no conversations yet).
         try:
@@ -552,13 +589,15 @@ class RealtimeManager:
             logging.info(
                 "Advertised cluster presence: key=%s on %s",
                 cluster_key,
-                topic,
+                presence_topic,
             )
         except Exception:
             logging.exception("Failed to track presence state", exc_info=True)
 
         logging.info(
-            "RealtimeManager connected and subscribed to topic=%s", topic
+            "RealtimeManager connected: presence=%s pg_changes=%s",
+            presence_topic,
+            pg_topic,
         )
 
     def _build_presence_payload(self) -> Dict[str, Any]:
