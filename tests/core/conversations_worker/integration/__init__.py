@@ -322,7 +322,11 @@ def supabase_fx() -> SupabaseFixture:
             if conv["status"] in ("pending", "queued", "running"):
                 fx.stop_conversation(cid)
         except Exception:
-            pass
+            logging.warning(
+                "Failed to stop conversation %s during teardown",
+                cid,
+                exc_info=True,
+            )
         try:
             client.table("ConversationEvents").delete().eq(
                 "conversation_id", cid
@@ -331,4 +335,8 @@ def supabase_fx() -> SupabaseFixture:
                 "conversation_id", cid
             ).execute()
         except Exception:
-            logging.warning("Failed to clean up conversation %s", cid)
+            logging.warning(
+                "Failed to delete conversation %s during teardown",
+                cid,
+                exc_info=True,
+            )
