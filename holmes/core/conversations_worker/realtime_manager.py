@@ -151,6 +151,8 @@ class RealtimeManager:
         self._connected = False
         # Last JWT we pushed to the realtime client via set_auth.
         self._last_auth_jwt: Optional[str] = None
+        # Set from the async loop to wake the sleep in _run() on stop().
+        self._async_stop: Optional[asyncio.Event] = None
 
     # ---- public ----
 
@@ -167,6 +169,7 @@ class RealtimeManager:
         self._channel = None
         self._connected = False
         self._last_auth_jwt = None
+        self._async_stop = None
         self._thread = threading.Thread(
             target=self._thread_entry,
             daemon=True,
@@ -179,6 +182,10 @@ class RealtimeManager:
         self._stop_event.set()
         if self._loop and self._loop.is_running():
             try:
+                # Wake the async sleep so _run() exits promptly instead of
+                # blocking for up to the refresh interval.
+                if self._async_stop is not None:
+                    self._loop.call_soon_threadsafe(self._async_stop.set)
                 asyncio.run_coroutine_threadsafe(self._shutdown_async(), self._loop)
             except Exception:
                 logging.exception("Error scheduling shutdown coro", exc_info=True)
@@ -195,10 +202,10 @@ class RealtimeManager:
 
     async def _run(self) -> None:
         self._loop = asyncio.get_running_loop()
+        self._async_stop = asyncio.Event()
         self._started.set()
         try:
             await self._connect_and_subscribe()
-            # Main loop drives periodic JWT refresh.
             refresh_interval = CONVERSATION_WORKER_AUTH_REFRESH_INTERVAL_SECONDS
             next_refresh_at = asyncio.get_running_loop().time() + refresh_interval
             while not self._stop_event.is_set():
@@ -212,7 +219,16 @@ class RealtimeManager:
                     0.01,
                     next_refresh_at - asyncio.get_running_loop().time(),
                 )
-                await asyncio.sleep(sleep_for)
+                # wait_for with _async_stop allows stop() to wake us
+                # immediately via call_soon_threadsafe instead of blocking
+                # for the full refresh interval.
+                try:
+                    await asyncio.wait_for(
+                        self._async_stop.wait(), timeout=sleep_for
+                    )
+                    break  # _async_stop was set → exit loop
+                except asyncio.TimeoutError:
+                    pass  # normal wake — check refresh and loop
         except Exception:
             logging.exception("Error in realtime manager main loop", exc_info=True)
         finally:

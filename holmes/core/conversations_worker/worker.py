@@ -277,11 +277,13 @@ class ConversationWorker:
                     continue
                 except Exception:
                     logging.exception(
-                        "Error transitioning conversation %s to running",
+                        "Error transitioning conversation %s to running — requeuing",
                         task.conversation_id,
                         exc_info=True,
                     )
-                    continue
+                    with self._queued_lock:
+                        self._queued_tasks.appendleft(task)
+                    break
 
                 with self._active_lock:
                     self._active_conversation_ids.add(task.conversation_id)

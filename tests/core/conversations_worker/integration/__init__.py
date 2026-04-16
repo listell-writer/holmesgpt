@@ -17,6 +17,7 @@ import base64
 import json
 import logging
 import os
+import threading
 import time
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
@@ -117,8 +118,6 @@ class SupabaseFixture:
         the sync test code can schedule coroutines on it."""
         if self._broadcast_ch is not None:
             return
-
-        import threading
 
         ready = threading.Event()
 
