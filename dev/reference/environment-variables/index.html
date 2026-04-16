@@ -4935,6 +4935,34 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#remote-mcp-servers" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Remote MCP Servers
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Remote MCP Servers">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#mcp_tool_call_timeout_sec" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        MCP_TOOL_CALL_TIMEOUT_SEC
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#testing-and-development" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -5721,6 +5749,34 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#remote-mcp-servers" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Remote MCP Servers
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Remote MCP Servers">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#mcp_tool_call_timeout_sec" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        MCP_TOOL_CALL_TIMEOUT_SEC
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#testing-and-development" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -6082,26 +6138,34 @@
 <ul>
 <li><code>SLAB_API_KEY</code> - API key for Slab integration</li>
 </ul>
+<h2 id="remote-mcp-servers">Remote MCP Servers<a class="headerlink" href="#remote-mcp-servers" title="Permanent link">&para;</a></h2>
+<h3 id="mcp_tool_call_timeout_sec">MCP_TOOL_CALL_TIMEOUT_SEC<a class="headerlink" href="#mcp_tool_call_timeout_sec" title="Permanent link">&para;</a></h3>
+<p><strong>Default:</strong> <code>120</code> (falls back to <code>SSE_READ_TIMEOUT</code>)</p>
+<p>Per-request timeout, in seconds, for MCP tool calls. Forwarded to the MCP SDK's <code>ClientSession.call_tool(read_timeout_seconds=...)</code>, which enforces it via <code>anyio.fail_after</code> around the response-stream receive. Without a bound here, streamable-http tool calls can hang indefinitely if the MCP server dies mid-response (the httpx/anyio stream EOF does not reliably wake pending response futures).</p>
+<p>On expiry the SDK raises <code>McpError(code=REQUEST_TIMEOUT)</code>, which Holmes surfaces as a <code>StructuredToolResultStatus.ERROR</code> result with the message <code>Timed out while waiting for response to ClientRequest. Waited N seconds.</code></p>
+<p><strong>Example:</strong>
+<div class="language-bash highlight"><pre><span></span><code><span id="__span-13-1"><a id="__codelineno-13-1" name="__codelineno-13-1" href="#__codelineno-13-1"></a><span class="nb">export</span><span class="w"> </span><span class="nv">MCP_TOOL_CALL_TIMEOUT_SEC</span><span class="o">=</span><span class="m">60</span>
+</span></code></pre></div></p>
 <h2 id="testing-and-development">Testing and Development<a class="headerlink" href="#testing-and-development" title="Permanent link">&para;</a></h2>
 <h3 id="run_live">RUN_LIVE<a class="headerlink" href="#run_live" title="Permanent link">&para;</a></h3>
 <p>Enables live execution of commands in tests. Defaults to <code>true</code>.</p>
 <p><strong>Example:</strong>
-<div class="language-bash highlight"><pre><span></span><code><span id="__span-13-1"><a id="__codelineno-13-1" name="__codelineno-13-1" href="#__codelineno-13-1"></a><span class="nb">export</span><span class="w"> </span><span class="nv">RUN_LIVE</span><span class="o">=</span><span class="nb">true</span>
+<div class="language-bash highlight"><pre><span></span><code><span id="__span-14-1"><a id="__codelineno-14-1" name="__codelineno-14-1" href="#__codelineno-14-1"></a><span class="nb">export</span><span class="w"> </span><span class="nv">RUN_LIVE</span><span class="o">=</span><span class="nb">true</span>
 </span></code></pre></div></p>
 <h3 id="model">MODEL<a class="headerlink" href="#model" title="Permanent link">&para;</a></h3>
 <p>Override the default LLM model for testing.</p>
 <p><strong>Example:</strong>
-<div class="language-bash highlight"><pre><span></span><code><span id="__span-14-1"><a id="__codelineno-14-1" name="__codelineno-14-1" href="#__codelineno-14-1"></a><span class="nb">export</span><span class="w"> </span><span class="nv">MODEL</span><span class="o">=</span><span class="s2">&quot;anthropic/claude-sonnet-4-20250514&quot;</span>
+<div class="language-bash highlight"><pre><span></span><code><span id="__span-15-1"><a id="__codelineno-15-1" name="__codelineno-15-1" href="#__codelineno-15-1"></a><span class="nb">export</span><span class="w"> </span><span class="nv">MODEL</span><span class="o">=</span><span class="s2">&quot;anthropic/claude-sonnet-4-20250514&quot;</span>
 </span></code></pre></div></p>
 <h3 id="classifier_model">CLASSIFIER_MODEL<a class="headerlink" href="#classifier_model" title="Permanent link">&para;</a></h3>
 <p>Model to use for scoring test answers (defaults to MODEL if not set). Required when using Anthropic models as the primary model since Anthropic models cannot be used as classifiers.</p>
 <p><strong>Example:</strong>
-<div class="language-bash highlight"><pre><span></span><code><span id="__span-15-1"><a id="__codelineno-15-1" name="__codelineno-15-1" href="#__codelineno-15-1"></a><span class="nb">export</span><span class="w"> </span><span class="nv">CLASSIFIER_MODEL</span><span class="o">=</span><span class="s2">&quot;gpt-4.1&quot;</span>
+<div class="language-bash highlight"><pre><span></span><code><span id="__span-16-1"><a id="__codelineno-16-1" name="__codelineno-16-1" href="#__codelineno-16-1"></a><span class="nb">export</span><span class="w"> </span><span class="nv">CLASSIFIER_MODEL</span><span class="o">=</span><span class="s2">&quot;gpt-4.1&quot;</span>
 </span></code></pre></div></p>
 <h3 id="iterations">ITERATIONS<a class="headerlink" href="#iterations" title="Permanent link">&para;</a></h3>
 <p>Number of times to run each test for reliability testing.</p>
 <p><strong>Example:</strong>
-<div class="language-bash highlight"><pre><span></span><code><span id="__span-16-1"><a id="__codelineno-16-1" name="__codelineno-16-1" href="#__codelineno-16-1"></a><span class="nb">export</span><span class="w"> </span><span class="nv">ITERATIONS</span><span class="o">=</span><span class="m">10</span>
+<div class="language-bash highlight"><pre><span></span><code><span id="__span-17-1"><a id="__codelineno-17-1" name="__codelineno-17-1" href="#__codelineno-17-1"></a><span class="nb">export</span><span class="w"> </span><span class="nv">ITERATIONS</span><span class="o">=</span><span class="m">10</span>
 </span></code></pre></div></p>
 <h3 id="braintrust_api_key">BRAINTRUST_API_KEY<a class="headerlink" href="#braintrust_api_key" title="Permanent link">&para;</a></h3>
 <p>API key for Braintrust integration to track test results.</p>
