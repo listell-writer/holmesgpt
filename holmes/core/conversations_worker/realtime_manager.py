@@ -407,7 +407,10 @@ class RealtimeManager:
             try:
                 self.on_new_pending()
             except Exception:
-                pass
+                logging.debug(
+                    "on_new_pending callback failed during shutdown",
+                    exc_info=True,
+                )
 
     async def _maybe_refresh_auth(self) -> None:
         """
@@ -552,7 +555,10 @@ class RealtimeManager:
                 try:
                     self.on_new_pending()
                 except Exception:
-                    pass
+                    logging.debug(
+                        "on_new_pending callback failed in pg subscribe",
+                        exc_info=True,
+                    )
             elif any(
                 s in status_str for s in ("CHANNEL_ERROR", "CLOSED", "TIMED_OUT")
             ):
@@ -561,7 +567,10 @@ class RealtimeManager:
                 try:
                     self.on_new_pending()
                 except Exception:
-                    pass
+                    logging.debug(
+                        "on_new_pending callback failed in pg error handler",
+                        exc_info=True,
+                    )
 
         def _on_presence_subscribe_cb(
             status: Any, err: Optional[Exception] = None
