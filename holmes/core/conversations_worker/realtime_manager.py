@@ -328,25 +328,20 @@ class RealtimeManager:
         otherwise a stale worker cleaning up would tear down the newer
         worker's presence.
         """
-        # Check without updating: we only care whether this caller is still
-        # the current owner. A newer sequence having joined means the current
-        # channel belongs to them, so don't disrupt it.
-        if not self._is_newest_sequence(
-            conversation_id, request_sequence, update=False
-        ):
-            logging.info(
-                "Skipping stale leave_conversation_presence "
-                "(conv=%s, request_sequence=%s < current)",
-                conversation_id,
-                request_sequence,
-            )
-            return
-        # We are the current owner and we're leaving — remove our entry from
-        # the sequence map so it doesn't grow unbounded across many
-        # conversations.  A late-arriving OLDER-sequence call that comes in
-        # after this point would re-populate the key with an old value,
-        # but the channel is gone anyway so it's a no-op on the server.
+        # Atomically check-and-pop under one lock acquisition to avoid
+        # TOCTOU: a newer join_conversation_presence could land between a
+        # separate check and pop, and we'd delete the newer entry.
         with self._presence_sequences_lock:
+            current = self._presence_sequences.get(conversation_id, -1)
+            if request_sequence < current:
+                logging.info(
+                    "Skipping stale leave_conversation_presence "
+                    "(conv=%s, request_sequence=%s < current=%s)",
+                    conversation_id,
+                    request_sequence,
+                    current,
+                )
+                return
             self._presence_sequences.pop(conversation_id, None)
         if not (self._loop and self._loop.is_running()):
             logging.warning(
