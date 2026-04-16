@@ -1,8 +1,12 @@
 """Unit tests for RealtimeManager's testable (non-async) surface."""
+import asyncio
 import os
+import random
+import threading
 from unittest.mock import MagicMock
 
 import pytest
+import realtime._async.client as rt_client
 
 from holmes.core.conversations_worker.realtime_manager import (
     RealtimeManager,
@@ -111,7 +115,6 @@ def test_presence_payload_includes_conversation_entries_by_key():
     """_apply_conversation_entry adds an entry keyed by the full presence
     key (conversation:{conversation_id}:{holmes_id}) — matching the design
     spec's "presence key" vocabulary."""
-    import asyncio as _asyncio
 
     m = _make_manager()
     # _apply_conversation_entry awaits _retrack_presence which calls
@@ -123,10 +126,10 @@ def test_presence_payload_includes_conversation_entries_by_key():
 
     m._account_channel.track = _track_noop
 
-    _asyncio.run(
+    asyncio.run(
         m._apply_conversation_entry("conv-abc", request_sequence=1, status="queued")
     )
-    _asyncio.run(
+    asyncio.run(
         m._apply_conversation_entry("conv-xyz", request_sequence=2, status="running")
     )
 
@@ -149,7 +152,6 @@ def test_presence_flush_is_debounced():
     """Multiple rapid conversation state changes should only produce a single
     track() call when the flusher runs — this is what keeps us under the
     Supabase Realtime presence rate limit."""
-    import asyncio as _asyncio
 
     m = _make_manager()
     m._account_channel = MagicMock()
@@ -162,7 +164,7 @@ def test_presence_flush_is_debounced():
 
     # Many rapid state changes — each sets the dirty flag but doesn't track
     for i in range(50):
-        _asyncio.run(
+        asyncio.run(
             m._apply_conversation_entry(
                 f"conv-{i}", request_sequence=1, status="running"
             )
@@ -172,20 +174,19 @@ def test_presence_flush_is_debounced():
     assert m._presence_dirty is True
 
     # One flush call writes ONE track with all 50 entries in it
-    _asyncio.run(m._flush_presence_if_dirty())
+    asyncio.run(m._flush_presence_if_dirty())
     assert len(track_calls) == 1
     assert track_calls[0]["active_conversations"] == 50
     assert m._presence_dirty is False
 
     # A second flush with no new changes is a no-op
-    _asyncio.run(m._flush_presence_if_dirty())
+    asyncio.run(m._flush_presence_if_dirty())
     assert len(track_calls) == 1
 
 
 def test_presence_flush_retries_on_failure():
     """If track() throws (e.g., transient ws error), the dirty flag is put
     back so the next tick retries."""
-    import asyncio as _asyncio
 
     m = _make_manager()
     m._account_channel = MagicMock()
@@ -195,11 +196,11 @@ def test_presence_flush_retries_on_failure():
 
     m._account_channel.track = _track_raise
 
-    _asyncio.run(
+    asyncio.run(
         m._apply_conversation_entry("conv-1", request_sequence=1, status="running")
     )
     assert m._presence_dirty is True
-    _asyncio.run(m._flush_presence_if_dirty())
+    asyncio.run(m._flush_presence_if_dirty())
     # Still dirty because the track() call failed
     assert m._presence_dirty is True
 
@@ -207,7 +208,6 @@ def test_presence_flush_retries_on_failure():
 def test_presence_payload_removed_on_leave():
     """_remove_conversation_entry removes the entry from the map so the
     next track() call advertises the absence."""
-    import asyncio as _asyncio
 
     m = _make_manager()
     m._account_channel = MagicMock()
@@ -217,12 +217,12 @@ def test_presence_payload_removed_on_leave():
 
     m._account_channel.track = _track_noop
 
-    _asyncio.run(
+    asyncio.run(
         m._apply_conversation_entry("conv-abc", request_sequence=1, status="running")
     )
     key = "conversation:conv-abc:h-test"
     assert key in m._conversations
-    _asyncio.run(m._remove_conversation_entry("conv-abc"))
+    asyncio.run(m._remove_conversation_entry("conv-abc"))
     assert key not in m._conversations
     assert m._build_presence_payload()["active_conversations"] == 0
 
@@ -254,22 +254,20 @@ def test_stale_leave_does_not_prune_entry():
 def test_many_workers_race_newest_wins():
     """Simulate many concurrent calls for different sequences — only the
     highest is remembered and allowed to operate."""
-    import threading as _threading
-    import random as _random
 
     m = _make_manager()
     m._loop = None
 
     sequences = list(range(1, 21))  # 20 "workers"
-    _random.shuffle(sequences)
+    random.shuffle(sequences)
 
-    barrier = _threading.Barrier(len(sequences))
+    barrier = threading.Barrier(len(sequences))
 
     def _join(seq: int):
         barrier.wait()
         m.join_conversation_presence("c1", request_sequence=seq, status="queued")
 
-    threads = [_threading.Thread(target=_join, args=(s,)) for s in sequences]
+    threads = [threading.Thread(target=_join, args=(s,)) for s in sequences]
     for t in threads:
         t.start()
     for t in threads:
@@ -289,14 +287,14 @@ def test_install_proxy_patch_does_nothing_without_env(monkeypatch):
     """Patch installer must be a no-op when https_proxy is unset."""
     monkeypatch.delenv("https_proxy", raising=False)
     monkeypatch.delenv("HTTPS_PROXY", raising=False)
-    import realtime._async.client as rt
+
 
     # Reset patch state
-    rt._holmes_proxy_patched = False
-    original_connect = rt.connect
+    rt_client._holmes_proxy_patched = False
+    original_connect = rt_client.connect
     _install_proxy_patch_if_needed()
-    assert rt.connect is original_connect
-    assert not getattr(rt, "_holmes_proxy_patched", False)
+    assert rt_client.connect is original_connect
+    assert not getattr(rt_client, "_holmes_proxy_patched", False)
 
 
 def test_install_proxy_patch_is_idempotent(monkeypatch):
@@ -304,16 +302,16 @@ def test_install_proxy_patch_is_idempotent(monkeypatch):
     monkeypatch.setenv(
         "https_proxy", "http://user:pass@proxy.internal:8888"
     )
-    import realtime._async.client as rt
 
-    rt._holmes_proxy_patched = False
-    original_connect = rt.connect
+
+    rt_client._holmes_proxy_patched = False
+    original_connect = rt_client.connect
     _install_proxy_patch_if_needed()
-    first_patched = rt.connect
+    first_patched = rt_client.connect
     _install_proxy_patch_if_needed()
-    second_patched = rt.connect
+    second_patched = rt_client.connect
     assert first_patched is second_patched, "patch was reinstalled unexpectedly"
 
     # Cleanup: restore the original connect fn
-    rt.connect = original_connect
-    rt._holmes_proxy_patched = False
+    rt_client.connect = original_connect
+    rt_client._holmes_proxy_patched = False
