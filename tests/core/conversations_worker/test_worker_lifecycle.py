@@ -299,25 +299,50 @@ def test_process_conversation_safe_dispatches_queued_after_completion():
 
 
 def test_notify_event_wakes_claim_loop():
-    """The claim loop should wake quickly when notify_event is set."""
+    """The claim loop should wake quickly when notify_event is set.
+
+    When _realtime_manager is set, the initial claim is deferred until
+    the SUBSCRIBED callback fires on_new_pending (which sets _notify_event).
+    This test simulates that by setting the event externally.
+    """
     w = _bare_worker()
     w._realtime_manager = MagicMock()
-    w._realtime_manager.is_connected.return_value = True  # long idle
+    w._realtime_manager.is_connected.return_value = True
 
     call_count = {"n": 0}
 
     def fake_claim():
         call_count["n"] += 1
-        # after first call from startup, stop the loop
-        if call_count["n"] >= 2:
+        if call_count["n"] >= 1:
             w._running = False
 
     w._try_claim_and_dispatch = fake_claim
 
     t = threading.Thread(target=w._claim_loop)
     t.start()
-    # wake it up
+    # Simulate the SUBSCRIBED callback firing on_new_pending
     w._notify_event.set()
     t.join(timeout=3)
     assert not t.is_alive(), "claim loop did not exit after notify"
-    assert call_count["n"] == 2
+    assert call_count["n"] == 1
+
+
+def test_claim_loop_initial_claim_without_realtime():
+    """When _realtime_manager is None, the claim loop does an immediate
+    initial claim without waiting for a notification."""
+    w = _bare_worker()
+    w._realtime_manager = None
+
+    call_count = {"n": 0}
+
+    def fake_claim():
+        call_count["n"] += 1
+        w._running = False
+
+    w._try_claim_and_dispatch = fake_claim
+
+    t = threading.Thread(target=w._claim_loop)
+    t.start()
+    t.join(timeout=3)
+    assert not t.is_alive()
+    assert call_count["n"] == 1

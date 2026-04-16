@@ -3,7 +3,7 @@ from unittest.mock import MagicMock
 
 from holmes.core.conversations_worker.worker import (
     ConversationWorker,
-    _REALTIME_CONNECTED_IDLE_SECONDS,
+    _REALTIME_CONNECTED_POLL_SECONDS,
 )
 
 
@@ -39,7 +39,8 @@ def test_realtime_connected_false_when_is_connected_raises():
     assert worker._realtime_connected() is False
 
 
-def test_idle_seconds_is_large_enough_to_avoid_polling():
-    # Sanity check: the idle timeout when realtime is connected should be much
-    # larger than a reasonable polling interval so the loop relies on events.
-    assert _REALTIME_CONNECTED_IDLE_SECONDS >= 600
+def test_connected_poll_is_reasonable_safety_net():
+    # When realtime is connected, we still poll as a safety net for missed
+    # notifications. The interval should be large enough to avoid spam but
+    # small enough that missed events are caught in reasonable time.
+    assert 30 <= _REALTIME_CONNECTED_POLL_SECONDS <= 300

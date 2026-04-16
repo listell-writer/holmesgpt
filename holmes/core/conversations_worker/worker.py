@@ -45,10 +45,10 @@ ChatFunction = Callable[
     [ChatRequest, Request], Union["ChatResponse", "StreamingResponse"]
 ]
 
-# When Realtime is connected we do not poll at all — Postgres Changes events
-# drive claims. A large safety-net sleep value is used so the loop simply
-# blocks until the realtime manager signals activity (e.g. reconnect).
-_REALTIME_CONNECTED_IDLE_SECONDS = 3600
+# When Realtime is connected we still poll periodically as a safety net —
+# Supabase Realtime has at-most-once delivery and notifications can be
+# missed.  This caps the maximum latency for a missed notification.
+_REALTIME_CONNECTED_POLL_SECONDS = 120
 
 
 class ConversationWorker:
@@ -179,19 +179,18 @@ class ConversationWorker:
     # ---- claim loop ----
 
     def _claim_loop(self) -> None:
-        # Initial claim on startup to pick up any pending missed during downtime
-        self._try_claim_and_dispatch()
+        # When Realtime is enabled, the SUBSCRIBED callback fires
+        # on_new_pending() which wakes this loop for the first claim —
+        # guaranteeing the subscription is established before we try to
+        # claim.  On reconnects the same callback fires again, ensuring
+        # we re-claim any conversations missed during disconnection.
+        # When Realtime is disabled, claim immediately on startup.
+        if self._realtime_manager is None:
+            self._try_claim_and_dispatch()
 
         while self._running:
-            # Timeout depends on realtime state:
-            #  - Realtime not enabled: poll at WITHOUT_REALTIME interval
-            #  - Realtime enabled but not connected: poll at same interval as a
-            #    fallback while the realtime manager retries its WebSocket
-            #  - Realtime enabled and connected: don't poll; Postgres Changes
-            #    notifications set the event. A very large safety sleep keeps
-            #    the loop responsive to shutdown.
             if self._realtime_connected():
-                timeout = _REALTIME_CONNECTED_IDLE_SECONDS
+                timeout = _REALTIME_CONNECTED_POLL_SECONDS
             else:
                 timeout = CONVERSATION_WORKER_POLL_INTERVAL_SECONDS_WITHOUT_REALTIME
 

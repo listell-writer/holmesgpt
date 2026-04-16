@@ -40,7 +40,7 @@ except ImportError:  # pragma: no cover — optional dependency
 
 from holmes.common.env_vars import (
     CONVERSATION_WORKER_AUTH_REFRESH_INTERVAL_SECONDS,
-    CONVERSATION_WORKER_USE_PGCHANGES,
+    CONVERSATION_WORKER_USE_REALTIME_BROADCAST,
 )
 from holmes.core.supabase_dal import CONVERSATIONS_TABLE
 
@@ -134,12 +134,12 @@ class RealtimeManager:
         holmes_id: str,
         on_new_pending: Callable[[], None],
         *,
-        use_pgchanges: bool = CONVERSATION_WORKER_USE_PGCHANGES,
+        use_broadcast: bool = CONVERSATION_WORKER_USE_REALTIME_BROADCAST,
     ) -> None:
         self.dal = dal
         self.holmes_id = holmes_id
         self.on_new_pending = on_new_pending
-        self._use_pgchanges = use_pgchanges
+        self._use_broadcast = use_broadcast
         self._loop: Optional[asyncio.AbstractEventLoop] = None
         self._thread: Optional[threading.Thread] = None
         self._stop_event = threading.Event()
@@ -280,10 +280,10 @@ class RealtimeManager:
                 logging.exception("Failed to set_auth on realtime client", exc_info=True)
 
         # Subscribe using the configured mode.
-        if self._use_pgchanges:
-            await self._subscribe_via_pgchanges()
-        else:
+        if self._use_broadcast:
             await self._subscribe_via_broadcast()
+        else:
+            await self._subscribe_via_pgchanges()
 
     async def _subscribe_via_pgchanges(self) -> None:
         """Option 1: Postgres Changes on the Conversations table.

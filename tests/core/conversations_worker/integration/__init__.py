@@ -148,8 +148,6 @@ class SupabaseFixture:
                 "new_conversation",
                 {"conversation_id": conversation_id},
             )
-            # Brief delay to ensure the message is delivered before we close
-            await asyncio.sleep(0.5)
             await rt.close()
 
         asyncio.run(_send())
@@ -273,8 +271,9 @@ def supabase_fx() -> SupabaseFixture:
     client.auth.set_session(res.session.access_token, res.session.refresh_token)
     client.postgrest.auth(res.session.access_token)
 
-    use_pgchanges_str = os.environ.get("CONVERSATION_WORKER_USE_PGCHANGES", "true")
-    use_pgchanges = use_pgchanges_str.lower() not in ("false", "0", "no")
+    use_broadcast_str = os.environ.get("CONVERSATION_WORKER_USE_REALTIME_BROADCAST", "false")
+    use_broadcast = use_broadcast_str.lower() in ("true", "1", "yes")
+    use_pgchanges = not use_broadcast
 
     fx = SupabaseFixture(
         client=client,
