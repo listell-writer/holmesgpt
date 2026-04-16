@@ -1,7 +1,7 @@
 """Unit tests for worker lifecycle / claim-loop / error handling."""
 import threading
 from collections import deque
-from unittest.mock import MagicMock, patch, call
+from unittest.mock import MagicMock, patch
 
 import pytest
 
@@ -167,31 +167,11 @@ def test_dispatch_queued_skips_if_transition_fails():
     assert "c1" not in w._active_conversation_ids
 
 
-def test_dispatch_queued_with_presence_on_skip():
-    """When transition fails, presence should be left."""
-    w = _bare_worker()
-    rt = MagicMock()
-    w._realtime_manager = rt
-    w.dal.update_conversation_status.return_value = False
-    task = ConversationTask(
-        conversation_id="c1",
-        account_id="a1",
-        cluster_id="cl1",
-        origin="chat",
-        request_sequence=1,
-    )
-    w._queued_tasks.append(task)
-    w._dispatch_queued()
-    rt.leave_conversation_presence.assert_called_once_with("c1", request_sequence=1)
-
-
 def test_dispatch_queued_handles_mismatch_during_transition():
     """If the queued→running transition raises ConversationReassignedError
     (e.g. stop_conversation bumped request_sequence while queued), the task
-    must be skipped and presence left — not submitted to executor."""
+    must be skipped — not submitted to executor."""
     w = _bare_worker()
-    rt = MagicMock()
-    w._realtime_manager = rt
     w.dal.update_conversation_status.side_effect = ConversationReassignedError(
         "MISMATCH Request sequence expected 1, got 2"
     )
@@ -206,47 +186,6 @@ def test_dispatch_queued_handles_mismatch_during_transition():
     w._dispatch_queued()
     w._executor.submit.assert_not_called()
     assert "c1" not in w._active_conversation_ids
-    rt.leave_conversation_presence.assert_called_once_with("c1", request_sequence=1)
-
-
-def test_try_claim_joins_presence_with_queued_status():
-    """Presence should be joined immediately on claim with status=queued."""
-    w = _bare_worker()
-    rt = MagicMock()
-    w._realtime_manager = rt
-    w.dal.claim_conversations.return_value = [
-        {
-            "conversation_id": "c1",
-            "account_id": "a1",
-            "cluster_id": "cl1",
-            "origin": "chat",
-            "request_sequence": 1,
-            "metadata": {},
-        }
-    ]
-    w._try_claim_and_dispatch()
-    rt.join_conversation_presence.assert_called_once_with(
-        "c1", request_sequence=1, status="queued"
-    )
-
-
-def test_dispatch_queued_updates_presence_to_running():
-    """When transitioning to running, presence should be updated."""
-    w = _bare_worker()
-    rt = MagicMock()
-    w._realtime_manager = rt
-    task = ConversationTask(
-        conversation_id="c1",
-        account_id="a1",
-        cluster_id="cl1",
-        origin="chat",
-        request_sequence=1,
-    )
-    w._queued_tasks.append(task)
-    w._dispatch_queued()
-    rt.update_conversation_presence.assert_called_once_with(
-        "c1", request_sequence=1, status="running"
-    )
 
 
 def test_process_conversation_safe_marks_failed_on_exception():
@@ -286,10 +225,8 @@ def test_process_conversation_safe_marks_failed_on_exception():
     assert "c1" not in w._active_conversation_ids
 
 
-def test_process_conversation_safe_leaves_presence():
+def test_process_conversation_safe_clears_active_on_success():
     w = _bare_worker()
-    rt = MagicMock()
-    w._realtime_manager = rt
     task = ConversationTask(
         conversation_id="c1",
         account_id="a1",
@@ -297,26 +234,17 @@ def test_process_conversation_safe_leaves_presence():
         origin="chat",
         request_sequence=1,
     )
-    # _process_conversation is a no-op for this test
     with patch.object(ConversationWorker, "_process_conversation", lambda self, t: None):
         w._process_conversation_safe(task)
 
-    rt.leave_conversation_presence.assert_called_once_with("c1", request_sequence=1)
     assert "c1" not in w._active_conversation_ids
 
 
-def test_process_conversation_safe_always_leaves_presence_on_error():
-    """On ConversationReassignedError the worker must:
-     - leave the per-conversation presence channel (finally)
-     - NOT call update_conversation_status — the conversation's state is already
-       being handled by whoever reassigned it (e.g. stop_conversation bumped
-       request_sequence, or another Holmes took over). A stale
-       update_conversation_status call would either fail the RPC's status guard or
-       race with the new owner.
-    """
+def test_process_conversation_safe_no_status_update_on_reassignment():
+    """On ConversationReassignedError the worker must NOT call
+    update_conversation_status — the conversation's state is already
+    being handled by whoever reassigned it."""
     w = _bare_worker()
-    rt = MagicMock()
-    w._realtime_manager = rt
     task = ConversationTask(
         conversation_id="c1",
         account_id="a1",
@@ -331,12 +259,9 @@ def test_process_conversation_safe_always_leaves_presence_on_error():
     with patch.object(ConversationWorker, "_process_conversation", boom):
         w._process_conversation_safe(task)
 
-    # leave must run in the finally even after a reassignment
-    rt.leave_conversation_presence.assert_called_once_with("c1", request_sequence=1)
-    # Critically: we must NOT mark a reassigned conversation as failed
     w.dal.update_conversation_status.assert_not_called()
-    # And no error event should be posted either
     w.dal.post_conversation_events.assert_not_called()
+    assert "c1" not in w._active_conversation_ids
 
 
 def test_process_conversation_safe_dispatches_queued_after_completion():

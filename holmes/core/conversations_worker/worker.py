@@ -228,21 +228,6 @@ class ConversationWorker:
             task = self._build_task_from_conversation_row(conv)
             if task is None:
                 continue
-            # Join presence immediately (while still queued) so Relay can see
-            # this conversation has a live Holmes assigned.
-            if self._realtime_manager is not None:
-                try:
-                    self._realtime_manager.join_conversation_presence(
-                        task.conversation_id,
-                        request_sequence=task.request_sequence,
-                        status="queued",
-                    )
-                except Exception:
-                    logging.exception(
-                        "Failed to join conversation presence for %s",
-                        task.conversation_id,
-                        exc_info=True,
-                    )
             with self._queued_lock:
                 self._queued_tasks.append(task)
 
@@ -284,17 +269,11 @@ class ConversationWorker:
                             "Failed to transition conversation %s to running — skipping",
                             task.conversation_id,
                         )
-                        self._leave_presence_quietly(
-                            task.conversation_id, task.request_sequence
-                        )
                         continue
                 except ConversationReassignedError:
                     logging.warning(
                         "Conversation %s was reassigned while queued — skipping",
                         task.conversation_id,
-                    )
-                    self._leave_presence_quietly(
-                        task.conversation_id, task.request_sequence
                     )
                     continue
                 except Exception:
@@ -303,41 +282,11 @@ class ConversationWorker:
                         task.conversation_id,
                         exc_info=True,
                     )
-                    self._leave_presence_quietly(
-                        task.conversation_id, task.request_sequence
-                    )
                     continue
-
-                # Update presence to reflect running status
-                if self._realtime_manager is not None:
-                    try:
-                        self._realtime_manager.update_conversation_presence(
-                            task.conversation_id,
-                            request_sequence=task.request_sequence,
-                            status="running",
-                        )
-                    except Exception:
-                        logging.exception(
-                            "Failed to update conversation presence to running for %s",
-                            task.conversation_id,
-                            exc_info=True,
-                        )
 
                 with self._active_lock:
                     self._active_conversation_ids.add(task.conversation_id)
                 self._executor.submit(self._process_conversation_safe, task)
-
-    def _leave_presence_quietly(
-        self, conversation_id: str, request_sequence: int
-    ) -> None:
-        """Leave conversation presence, swallowing any errors."""
-        if self._realtime_manager is not None:
-            try:
-                self._realtime_manager.leave_conversation_presence(
-                    conversation_id, request_sequence=request_sequence
-                )
-            except Exception:
-                pass
 
     def _build_task_from_conversation_row(
         self, conv: Dict[str, Any]
@@ -437,19 +386,6 @@ class ConversationWorker:
                 task, "An internal error occurred while processing your request"
             )
         finally:
-            # Leave the conversation Presence channel regardless of outcome
-            if self._realtime_manager is not None:
-                try:
-                    self._realtime_manager.leave_conversation_presence(
-                        task.conversation_id,
-                        request_sequence=task.request_sequence,
-                    )
-                except Exception:
-                    logging.exception(
-                        "Failed to leave conversation presence for %s",
-                        task.conversation_id,
-                        exc_info=True,
-                    )
             with self._active_lock:
                 self._active_conversation_ids.discard(task.conversation_id)
             # A slot freed up — try to dispatch the next queued task.

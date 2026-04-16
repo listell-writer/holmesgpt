@@ -389,9 +389,9 @@ class TestStress:
 
 
 # ---------------------------------------------------------------------------
-# 7. Conversation presence metadata
+# 7. Status lifecycle
 # ---------------------------------------------------------------------------
-class TestPresence:
+class TestStatusLifecycle:
 
     def test_conversation_status_transitions(self, supabase_fx: SupabaseFixture):
         """Verify the full status lifecycle: pending → running → completed."""
@@ -415,14 +415,13 @@ class TestPresence:
 
 
 # ---------------------------------------------------------------------------
-# 8. Presence race safety with request_sequence
+# 8. Rapid multi-turn follow-ups
 # ---------------------------------------------------------------------------
-class TestPresenceRaceSafety:
-    """Drive many back-to-back follow-ups so turn N's presence leave
-    races with turn N+1's presence join.  The request_sequence gate must
-    keep the newest worker's presence intact through every turn."""
+class TestRapidFollowups:
+    """Drive many back-to-back follow-ups to stress the claim/dispatch
+    cycle and verify no turns are lost."""
 
-    def test_rapid_followups_dont_break_presence(
+    def test_rapid_followups_all_complete(
         self, supabase_fx: SupabaseFixture
     ):
         # More than 2 turns to increase the race-condition surface area.
