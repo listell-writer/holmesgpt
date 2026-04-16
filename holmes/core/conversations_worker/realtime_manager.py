@@ -585,16 +585,9 @@ class RealtimeManager:
         except asyncio.TimeoutError:
             logging.warning("Timed out waiting for pg-changes subscribe ack")
 
-        # Advertise initial presence (no conversations yet).
-        try:
-            await self._account_channel.track(self._build_presence_payload())
-            logging.info(
-                "Advertised presence: holmes_id=%s on %s",
-                self.holmes_id,
-                presence_topic,
-            )
-        except Exception:
-            logging.exception("Failed to track presence state", exc_info=True)
+        # No initial track() call — presence is only advertised once there
+        # are active conversations.  The debounced flusher in _run() will
+        # call track() when the first conversation is claimed.
 
         logging.info(
             "RealtimeManager connected: presence=%s pg_changes=%s",
@@ -645,8 +638,15 @@ class RealtimeManager:
         # removed within the flush window).
         if payload == self._last_flushed_payload:
             return
+        # Don't advertise an empty presence — only track when we have active
+        # conversations.  When the last conversation leaves, untrack to remove
+        # our entry from the channel entirely.
         try:
-            await self._account_channel.track(payload)
+            if payload["active_conversations"] > 0:
+                await self._account_channel.track(payload)
+            elif self._last_flushed_payload is not None:
+                # Had conversations before, now empty → untrack
+                await self._account_channel.untrack()
             self._last_flushed_payload = payload
         except Exception:
             logging.exception(
