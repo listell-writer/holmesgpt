@@ -2,8 +2,8 @@
 Integration tests for the M2 Conversation Worker.
 
 Requires a running Holmes server with ENABLE_CONVERSATION_WORKER=true and:
-    ROBUSTA_UI_TOKEN   – base64 JSON with Supabase credentials
-    CLUSTER_NAME       – target cluster
+    ROBUSTA_UI_TOKEN   - base64 JSON with Supabase credentials
+    CLUSTER_NAME       - target cluster
 
 Run:
     poetry run pytest tests/core/conversations_worker/integration/ \
