@@ -1,9 +1,16 @@
 """
 Realtime manager for the ConversationWorker.
 
-Runs an asyncio event loop in a background daemon thread. Manages:
- - Postgres Changes subscription on Conversations table: triggers a claim
-   when new pending rows appear for this cluster
+Runs an asyncio event loop in a background daemon thread. Manages a Supabase
+Realtime subscription that notifies the worker when new pending conversations
+appear.  Two subscription modes are supported (selected via the
+``CONVERSATION_WORKER_USE_PGCHANGES`` env var):
+
+ 1. **Postgres Changes** (default) — subscribes to INSERT/UPDATE on the
+    Conversations table filtered by ``account_id``.
+ 2. **Broadcast** — subscribes to a per-account-per-cluster Broadcast channel
+    ``holmes:submit:{account_id}:{cluster_id}``.  The initiator (Frontend /
+    Relay) must send a broadcast after creating the conversation.
 
 Communication with the sync ConversationWorker is via a callback that is
 invoked when a pending-conversation notification arrives. The callback MUST
@@ -33,6 +40,7 @@ except ImportError:  # pragma: no cover — optional dependency
 
 from holmes.common.env_vars import (
     CONVERSATION_WORKER_AUTH_REFRESH_INTERVAL_SECONDS,
+    CONVERSATION_WORKER_USE_PGCHANGES,
 )
 from holmes.core.supabase_dal import CONVERSATIONS_TABLE
 
@@ -44,13 +52,17 @@ if TYPE_CHECKING:
 
 
 def pg_changes_topic(account_id: str) -> str:
-    """Per-account channel for Conversations Postgres Changes.
-
-    Filtered server-side by ``account_id``; the callback does NOT further
-    filter on ``cluster_id`` because ``claim_conversations`` already does
-    that in the RPC.
-    """
+    """Per-account channel for Conversations Postgres Changes."""
     return f"holmes:pgchanges:{account_id}"
+
+
+def broadcast_submit_topic(account_id: str, cluster_id: str) -> str:
+    """Per-account-per-cluster Broadcast channel for conversation submissions.
+
+    No WAL replication overhead — the initiator sends a broadcast message
+    after creating the conversation via RPC.
+    """
+    return f"holmes:submit:{account_id}:{cluster_id}"
 
 
 def _install_proxy_patch_if_needed() -> None:
@@ -121,21 +133,23 @@ class RealtimeManager:
         dal: "SupabaseDal",
         holmes_id: str,
         on_new_pending: Callable[[], None],
+        *,
+        use_pgchanges: bool = CONVERSATION_WORKER_USE_PGCHANGES,
     ) -> None:
         self.dal = dal
         self.holmes_id = holmes_id
         self.on_new_pending = on_new_pending
+        self._use_pgchanges = use_pgchanges
         self._loop: Optional[asyncio.AbstractEventLoop] = None
         self._thread: Optional[threading.Thread] = None
         self._stop_event = threading.Event()
         self._started = threading.Event()
         self._client = None
-        self._pg_channel = None
-        # True once the pg-changes channel is SUBSCRIBED (drives
+        self._channel = None
+        # True once the subscription channel is SUBSCRIBED (drives
         # is_connected() and the claim-loop's realtime-vs-poll decision).
         self._connected = False
-        # Last JWT we pushed to the realtime client via set_auth. Used to skip
-        # the network call on the common case where the token hasn't rotated.
+        # Last JWT we pushed to the realtime client via set_auth.
         self._last_auth_jwt: Optional[str] = None
 
     # ---- public ----
@@ -146,12 +160,11 @@ class RealtimeManager:
     def start(self) -> None:
         if self._thread and self._thread.is_alive():
             return
-        # Clear lifecycle events so a restart (after stop()) runs cleanly.
         self._stop_event.clear()
         self._started.clear()
         self._loop = None
         self._client = None
-        self._pg_channel = None
+        self._channel = None
         self._connected = False
         self._last_auth_jwt = None
         self._thread = threading.Thread(
@@ -160,7 +173,6 @@ class RealtimeManager:
             name="realtime-manager",
         )
         self._thread.start()
-        # Wait briefly for loop to start
         self._started.wait(timeout=5)
 
     def stop(self) -> None:
@@ -205,7 +217,6 @@ class RealtimeManager:
             logging.exception("Error in realtime manager main loop", exc_info=True)
         finally:
             self._connected = False
-            # Wake the worker so it falls back to polling
             try:
                 self.on_new_pending()
             except Exception:
@@ -215,16 +226,7 @@ class RealtimeManager:
                 )
 
     async def _maybe_refresh_auth(self) -> None:
-        """
-        Supabase access tokens expire (default 1h). The Supabase Python client
-        auto-refreshes its stored session, but the realtime WebSocket doesn't
-        pick up the new token automatically — we must re-call ``set_auth``
-        with the current JWT. If we skip this, RLS-scoped Postgres Changes
-        subscriptions silently stop delivering events once the original JWT
-        expires.
-
-        Called periodically from ``_run``. Cheap when the token is unchanged.
-        """
+        """Re-push the Supabase JWT to the realtime client if it rotated."""
         if not self._client:
             return
         try:
@@ -239,6 +241,8 @@ class RealtimeManager:
             logging.debug("Refreshed realtime client auth token")
         except Exception:
             logging.exception("Failed to refresh realtime auth token", exc_info=True)
+
+    # ---- connect + subscribe ----
 
     async def _connect_and_subscribe(self) -> None:
         _install_proxy_patch_if_needed()
@@ -275,11 +279,21 @@ class RealtimeManager:
             except Exception:
                 logging.exception("Failed to set_auth on realtime client", exc_info=True)
 
-        # Postgres Changes channel — listens for Conversations table changes
-        # filtered by account_id. The callback triggers a claim attempt.
-        pg_topic = pg_changes_topic(self.dal.account_id)
-        self._pg_channel = self._client.channel(
-            pg_topic,
+        # Subscribe using the configured mode.
+        if self._use_pgchanges:
+            await self._subscribe_via_pgchanges()
+        else:
+            await self._subscribe_via_broadcast()
+
+    async def _subscribe_via_pgchanges(self) -> None:
+        """Option 1: Postgres Changes on the Conversations table.
+
+        Subscribes to INSERT/UPDATE filtered by ``account_id``.  Every
+        Conversations row change triggers a claim attempt.
+        """
+        topic = pg_changes_topic(self.dal.account_id)
+        self._channel = self._client.channel(
+            topic,
             {"config": {"private": False}},
         )
 
@@ -290,24 +304,19 @@ class RealtimeManager:
                     "RealtimeManager: Postgres change notification: %s",
                     change.get("type"),
                 )
-                # Any change to Conversations for our account is a signal to
-                # try claiming.  We intentionally don't pre-filter on
-                # cluster_id or status here: Supabase Realtime payloads
-                # occasionally omit columns, and ``claim_conversations`` is a
-                # cheap RPC that already filters server-side.
                 self.on_new_pending()
             except Exception:
                 logging.exception("Error in realtime pg change callback", exc_info=True)
 
         account_id_filter = f"account_id=eq.{self.dal.account_id}"
-        self._pg_channel.on_postgres_changes(
+        self._channel.on_postgres_changes(
             event="INSERT",
             schema="public",
             table=CONVERSATIONS_TABLE,
             filter=account_id_filter,
             callback=_on_pg_change,
         )
-        self._pg_channel.on_postgres_changes(
+        self._channel.on_postgres_changes(
             event="UPDATE",
             schema="public",
             table=CONVERSATIONS_TABLE,
@@ -315,18 +324,14 @@ class RealtimeManager:
             callback=_on_pg_change,
         )
 
-        pg_subscribed = asyncio.Event()
+        subscribed = asyncio.Event()
 
-        def _on_pg_subscribe_cb(status: Any, err: Optional[Exception] = None) -> None:
-            logging.info(
-                "PG changes subscribe status=%s err=%s",
-                status,
-                err,
-            )
+        def _on_subscribe(status: Any, err: Optional[Exception] = None) -> None:
+            logging.info("PG changes subscribe status=%s err=%s", status, err)
             status_str = str(status).upper()
             if "SUBSCRIBED" in status_str:
                 self._connected = True
-                pg_subscribed.set()
+                subscribed.set()
                 try:
                     self.on_new_pending()
                 except Exception:
@@ -346,15 +351,77 @@ class RealtimeManager:
                         exc_info=True,
                     )
 
-        await self._pg_channel.subscribe(_on_pg_subscribe_cb)
+        await self._channel.subscribe(_on_subscribe)
         try:
-            await asyncio.wait_for(pg_subscribed.wait(), timeout=5)
+            await asyncio.wait_for(subscribed.wait(), timeout=5)
         except asyncio.TimeoutError:
             logging.warning("Timed out waiting for pg-changes subscribe ack")
 
-        logging.info(
-            "RealtimeManager connected: pg_changes=%s", pg_topic
+        logging.info("RealtimeManager connected: mode=pgchanges topic=%s", topic)
+
+    async def _subscribe_via_broadcast(self) -> None:
+        """Option 2: Broadcast channel per account + cluster.
+
+        Subscribes to ``holmes:submit:{account_id}:{cluster_id}``.  The
+        initiator sends a broadcast after creating the conversation via RPC.
+        No WAL replication overhead — the message goes directly through the
+        Realtime WebSocket.
+        """
+        topic = broadcast_submit_topic(self.dal.account_id, self.dal.cluster)
+        self._channel = self._client.channel(
+            topic,
+            {"config": {"private": False}},
         )
+
+        def _on_broadcast(payload: Dict[str, Any]) -> None:
+            try:
+                logging.info(
+                    "RealtimeManager: Broadcast notification: %s",
+                    payload.get("event"),
+                )
+                self.on_new_pending()
+            except Exception:
+                logging.exception("Error in broadcast callback", exc_info=True)
+
+        self._channel.on_broadcast(
+            event="new_conversation",
+            callback=_on_broadcast,
+        )
+
+        subscribed = asyncio.Event()
+
+        def _on_subscribe(status: Any, err: Optional[Exception] = None) -> None:
+            logging.info("Broadcast subscribe status=%s err=%s", status, err)
+            status_str = str(status).upper()
+            if "SUBSCRIBED" in status_str:
+                self._connected = True
+                subscribed.set()
+                try:
+                    self.on_new_pending()
+                except Exception:
+                    logging.debug(
+                        "on_new_pending callback failed in broadcast subscribe",
+                        exc_info=True,
+                    )
+            elif any(
+                s in status_str for s in ("CHANNEL_ERROR", "CLOSED", "TIMED_OUT")
+            ):
+                self._connected = False
+                try:
+                    self.on_new_pending()
+                except Exception:
+                    logging.debug(
+                        "on_new_pending callback failed in broadcast error handler",
+                        exc_info=True,
+                    )
+
+        await self._channel.subscribe(_on_subscribe)
+        try:
+            await asyncio.wait_for(subscribed.wait(), timeout=5)
+        except asyncio.TimeoutError:
+            logging.warning("Timed out waiting for broadcast subscribe ack")
+
+        logging.info("RealtimeManager connected: mode=broadcast topic=%s", topic)
 
     async def _shutdown_async(self) -> None:
         self._connected = False

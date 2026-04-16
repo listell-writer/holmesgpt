@@ -201,3 +201,11 @@ CONVERSATION_WORKER_REALTIME_ENABLED = load_bool(
 CONVERSATION_WORKER_AUTH_REFRESH_INTERVAL_SECONDS = float(
     os.environ.get("CONVERSATION_WORKER_AUTH_REFRESH_INTERVAL_SECONDS", 60)
 )
+# When True, Holmes subscribes to Postgres Changes on the Conversations table
+# to detect new pending conversations. When False, Holmes subscribes to a
+# Broadcast channel (holmes:submit:{account_id}:{cluster_id}) instead —
+# the initiator (Frontend/Relay) must send a broadcast after creating the
+# conversation. Broadcast avoids WAL replication overhead at scale.
+CONVERSATION_WORKER_USE_PGCHANGES = load_bool(
+    "CONVERSATION_WORKER_USE_PGCHANGES", True
+)

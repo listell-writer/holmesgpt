@@ -12,6 +12,7 @@ Run with:
 """
 from __future__ import annotations
 
+import asyncio
 import base64
 import json
 import logging
@@ -22,8 +23,13 @@ from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
 
 import pytest
+from realtime._async.client import AsyncRealtimeClient
 from supabase import create_client, Client
 from supabase.lib.client_options import ClientOptions
+
+from holmes.core.conversations_worker.realtime_manager import (
+    broadcast_submit_topic,
+)
 
 
 def _decode_token() -> dict:
@@ -41,6 +47,12 @@ class SupabaseFixture:
     account_id: str
     cluster_id: str
     user_id: str
+    _store_url: str = ""
+    _api_key: str = ""
+    # When True the server uses Postgres Changes; when False the server uses
+    # Broadcast and the test must send a broadcast after creating each
+    # conversation.  Set from CONVERSATION_WORKER_USE_PGCHANGES env var.
+    use_pgchanges: bool = True
 
     # Track conversation IDs for cleanup
     _created_conversations: list = field(default_factory=list)
@@ -71,6 +83,9 @@ class SupabaseFixture:
             },
         ).execute().data
         self._created_conversations.append(conv["conversation_id"])
+        # In broadcast mode, the initiator must notify Holmes explicitly.
+        if not self.use_pgchanges:
+            self.broadcast_submit(conv["conversation_id"])
         return conv
 
     def post_followup(
@@ -79,7 +94,7 @@ class SupabaseFixture:
         events: List[Dict[str, Any]],
         metadata: Optional[Dict[str, Any]] = None,
     ) -> Dict[str, Any]:
-        return self.client.rpc(
+        result = self.client.rpc(
             "post_conversation_followup",
             {
                 "_account_id": self.account_id,
@@ -88,6 +103,56 @@ class SupabaseFixture:
                 "_metadata": metadata or {},
             },
         ).execute().data
+        # In broadcast mode, notify Holmes after the follow-up too —
+        # followups re-pend the conversation just like initial creation.
+        if not self.use_pgchanges:
+            self.broadcast_submit(conversation_id)
+        return result
+
+    def broadcast_submit(self, conversation_id: str) -> None:
+        """Send a Broadcast message on the Holmes submit channel.
+
+        Used when testing the Broadcast subscription mode — the initiator
+        must send this after creating a conversation so Holmes picks it up.
+        """
+        topic = broadcast_submit_topic(self.account_id, self.cluster_id)
+
+        async def _send() -> None:
+            # Build the WS URL from the store URL
+            store_url = self._store_url.rstrip("/")
+            if store_url.startswith("https://"):
+                ws_url = "wss://" + store_url[len("https://"):]
+            elif store_url.startswith("http://"):
+                ws_url = "ws://" + store_url[len("http://"):]
+            else:
+                ws_url = store_url
+            ws_url = f"{ws_url}/realtime/v1/websocket"
+
+            rt = AsyncRealtimeClient(
+                url=ws_url, token=self._api_key, auto_reconnect=False
+            )
+            await rt.connect()
+            ch = rt.channel(topic, {"config": {"private": False}})
+            subscribed = asyncio.Event()
+
+            def _on_sub(status: Any, err: Any = None) -> None:
+                if "SUBSCRIBED" in str(status).upper():
+                    subscribed.set()
+
+            await ch.subscribe(_on_sub)
+            try:
+                await asyncio.wait_for(subscribed.wait(), timeout=5)
+            except asyncio.TimeoutError:
+                pass
+            await ch.send_broadcast(
+                "new_conversation",
+                {"conversation_id": conversation_id},
+            )
+            # Brief delay to ensure the message is delivered before we close
+            await asyncio.sleep(0.5)
+            await rt.close()
+
+        asyncio.run(_send())
 
     def stop_conversation(self, conversation_id: str) -> None:
         self.client.rpc(
@@ -208,11 +273,17 @@ def supabase_fx() -> SupabaseFixture:
     client.auth.set_session(res.session.access_token, res.session.refresh_token)
     client.postgrest.auth(res.session.access_token)
 
+    use_pgchanges_str = os.environ.get("CONVERSATION_WORKER_USE_PGCHANGES", "true")
+    use_pgchanges = use_pgchanges_str.lower() not in ("false", "0", "no")
+
     fx = SupabaseFixture(
         client=client,
         account_id=decoded["account_id"],
         cluster_id=cluster_id,
         user_id=res.user.id,
+        _store_url=decoded["store_url"],
+        _api_key=decoded["api_key"],
+        use_pgchanges=use_pgchanges,
     )
     yield fx
 

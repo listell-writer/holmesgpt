@@ -8,6 +8,7 @@ import realtime._async.client as rt_client
 from holmes.core.conversations_worker.realtime_manager import (
     RealtimeManager,
     _install_proxy_patch_if_needed,
+    broadcast_submit_topic,
     pg_changes_topic,
 )
 
@@ -33,8 +34,12 @@ def test_is_connected_reflects_connection_flag():
     assert m.is_connected() is False
 
 
-def test_topic_helper():
+def test_topic_helpers():
     assert pg_changes_topic("acc-1") == "holmes:pgchanges:acc-1"
+    assert (
+        broadcast_submit_topic("acc-1", "cluster-1")
+        == "holmes:submit:acc-1:cluster-1"
+    )
 
 
 def test_install_proxy_patch_does_nothing_without_env(monkeypatch):
