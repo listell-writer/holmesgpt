@@ -49,13 +49,15 @@ class SupabaseFixture:
     user_id: str
     _store_url: str = ""
     _api_key: str = ""
-    # When True the server uses Postgres Changes; when False the server uses
-    # Broadcast and the test must send a broadcast after creating each
-    # conversation.  Set from CONVERSATION_WORKER_USE_PGCHANGES env var.
     use_pgchanges: bool = True
 
     # Track conversation IDs for cleanup
     _created_conversations: list = field(default_factory=list)
+
+    # Persistent Realtime connection for broadcast mode (lazy-initialized).
+    _broadcast_loop: Any = field(default=None, repr=False)
+    _broadcast_thread: Any = field(default=None, repr=False)
+    _broadcast_ch: Any = field(default=None, repr=False)
 
     # ---- conversation helpers ----
 
@@ -109,48 +111,75 @@ class SupabaseFixture:
             self.broadcast_submit(conversation_id)
         return result
 
+    def _ensure_broadcast_channel(self) -> None:
+        """Lazy-initialize a persistent Realtime connection + channel for
+        broadcast mode.  Runs an asyncio event loop in a daemon thread so
+        the sync test code can schedule coroutines on it."""
+        if self._broadcast_ch is not None:
+            return
+
+        import threading
+
+        ready = threading.Event()
+
+        def _run_loop() -> None:
+            loop = asyncio.new_event_loop()
+            self._broadcast_loop = loop
+
+            async def _setup() -> None:
+                store_url = self._store_url.rstrip("/")
+                if store_url.startswith("https://"):
+                    ws_url = "wss://" + store_url[len("https://"):]
+                elif store_url.startswith("http://"):
+                    ws_url = "ws://" + store_url[len("http://"):]
+                else:
+                    ws_url = store_url
+                ws_url = f"{ws_url}/realtime/v1/websocket"
+
+                topic = broadcast_submit_topic(self.account_id, self.cluster_id)
+                rt = AsyncRealtimeClient(
+                    url=ws_url, token=self._api_key, auto_reconnect=True
+                )
+                await rt.connect()
+                ch = rt.channel(topic, {"config": {"private": False}})
+                subscribed = asyncio.Event()
+
+                def _on_sub(status: Any, err: Any = None) -> None:
+                    if "SUBSCRIBED" in str(status).upper():
+                        subscribed.set()
+
+                await ch.subscribe(_on_sub)
+                try:
+                    await asyncio.wait_for(subscribed.wait(), timeout=5)
+                except asyncio.TimeoutError:
+                    pass
+                self._broadcast_ch = ch
+                ready.set()
+                # Keep the loop alive so the WS stays open
+                while True:
+                    await asyncio.sleep(1)
+
+            loop.run_until_complete(_setup())
+
+        t = threading.Thread(target=_run_loop, daemon=True)
+        t.start()
+        self._broadcast_thread = t
+        ready.wait(timeout=10)
+
     def broadcast_submit(self, conversation_id: str) -> None:
         """Send a Broadcast message on the Holmes submit channel.
 
-        Used when testing the Broadcast subscription mode — the initiator
-        must send this after creating a conversation so Holmes picks it up.
+        Uses a persistent Realtime connection (one WS for all broadcasts).
         """
-        topic = broadcast_submit_topic(self.account_id, self.cluster_id)
-
-        async def _send() -> None:
-            # Build the WS URL from the store URL
-            store_url = self._store_url.rstrip("/")
-            if store_url.startswith("https://"):
-                ws_url = "wss://" + store_url[len("https://"):]
-            elif store_url.startswith("http://"):
-                ws_url = "ws://" + store_url[len("http://"):]
-            else:
-                ws_url = store_url
-            ws_url = f"{ws_url}/realtime/v1/websocket"
-
-            rt = AsyncRealtimeClient(
-                url=ws_url, token=self._api_key, auto_reconnect=False
-            )
-            await rt.connect()
-            ch = rt.channel(topic, {"config": {"private": False}})
-            subscribed = asyncio.Event()
-
-            def _on_sub(status: Any, err: Any = None) -> None:
-                if "SUBSCRIBED" in str(status).upper():
-                    subscribed.set()
-
-            await ch.subscribe(_on_sub)
-            try:
-                await asyncio.wait_for(subscribed.wait(), timeout=5)
-            except asyncio.TimeoutError:
-                pass
-            await ch.send_broadcast(
+        self._ensure_broadcast_channel()
+        future = asyncio.run_coroutine_threadsafe(
+            self._broadcast_ch.send_broadcast(
                 "new_conversation",
                 {"conversation_id": conversation_id},
-            )
-            await rt.close()
-
-        asyncio.run(_send())
+            ),
+            self._broadcast_loop,
+        )
+        future.result(timeout=5)
 
     def stop_conversation(self, conversation_id: str) -> None:
         self.client.rpc(
