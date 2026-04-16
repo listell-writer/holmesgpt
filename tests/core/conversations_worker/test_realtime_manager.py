@@ -8,8 +8,8 @@ from holmes.core.conversations_worker.realtime_manager import (
     RealtimeManager,
     _install_proxy_patch_if_needed,
     account_presence_topic,
-    cluster_presence_key,
     conversation_presence_key,
+    pg_changes_topic,
 )
 
 
@@ -87,12 +87,9 @@ def test_presence_sequence_gate_advances_on_equal_or_newer():
 
 
 def test_topic_and_key_helpers():
-    """Single per-account channel with distinct presence keys per entry type."""
+    """Per-account channels with conversation presence keys."""
     assert account_presence_topic("acc-1") == "holmes:presence:acc-1"
-    assert (
-        cluster_presence_key("cluster-1", "h-123")
-        == "cluster:cluster-1:h-123"
-    )
+    assert pg_changes_topic("acc-1") == "holmes:pgchanges:acc-1"
     assert (
         conversation_presence_key("conv-abc", "h-123")
         == "conversation:conv-abc:h-123"
@@ -100,13 +97,10 @@ def test_topic_and_key_helpers():
 
 
 def test_presence_payload_starts_empty():
-    """Before any conversation is claimed, the payload has type=cluster and
-    no conversation entries — but active_conversations == 0 and conversations
-    is an empty dict."""
+    """Before any conversation is claimed, the payload has
+    active_conversations == 0 and conversations is an empty dict."""
     m = _make_manager()
-    m._started_at = "2026-04-15T00:00:00+00:00"
     payload = m._build_presence_payload()
-    assert payload["type"] == "cluster"
     assert payload["holmes_id"] == "h-test"
     assert payload["cluster_id"] == "cluster-1"
     assert payload["active_conversations"] == 0
@@ -146,7 +140,6 @@ def test_presence_payload_includes_conversation_entries_by_key():
     assert m._conversations[key_xyz]["status"] == "running"
 
     payload = m._build_presence_payload()
-    assert payload["type"] == "cluster"
     assert payload["active_conversations"] == 2
     assert key_abc in payload["conversations"]
     assert key_xyz in payload["conversations"]

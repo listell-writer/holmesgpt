@@ -64,14 +64,14 @@ def account_presence_topic(account_id: str) -> str:
     return f"holmes:presence:{account_id}"
 
 
-def pg_changes_topic(account_id: str, cluster_id: str) -> str:
-    """Dedicated per-cluster channel for Conversations Postgres Changes."""
-    return f"holmes:pgchanges:{account_id}:{cluster_id}"
+def pg_changes_topic(account_id: str) -> str:
+    """Dedicated per-account channel for Conversations Postgres Changes.
 
-
-def cluster_presence_key(cluster_id: str, holmes_id: str) -> str:
-    """Presence key for the cluster-level entry on the account channel."""
-    return f"cluster:{cluster_id}:{holmes_id}"
+    Filtered server-side by ``account_id``; the callback does NOT further
+    filter on ``cluster_id`` because ``claim_conversations`` already does
+    that in the RPC.
+    """
+    return f"holmes:pgchanges:{account_id}"
 
 
 def conversation_presence_key(conversation_id: str, holmes_id: str) -> str:
@@ -178,7 +178,6 @@ class RealtimeManager:
         # signals by prefix, per the design spec.
         self._conversations: Dict[str, Dict[str, Any]] = {}
         self._conversations_lock = threading.Lock()
-        self._started_at: str = ""
         # Debounced presence retrack.  Supabase Realtime rate-limits presence
         # broadcasts (currently 10/sec per client); tracking on every
         # conversation state change triggers the limiter and gets us
@@ -472,18 +471,17 @@ class RealtimeManager:
 
         # Two separate channels so that a rate-limit or error on one
         # doesn't break the other:
-        #   1. ``holmes:presence:{account_id}`` — cluster + conversation
-        #      presence entries (liveness signal for Relay)
-        #   2. ``holmes:pgchanges:{account_id}:{cluster_id}`` — Postgres
-        #      Changes notifications that drive conversation claiming
+        #   1. ``holmes:presence:{account_id}`` — per-conversation presence
+        #      entries (liveness signal for Relay)
+        #   2. ``holmes:pgchanges:{account_id}`` — Postgres Changes
+        #      notifications that drive conversation claiming
         presence_topic = account_presence_topic(self.dal.account_id)
-        pg_topic = pg_changes_topic(self.dal.account_id, self.dal.cluster)
-        cluster_key = cluster_presence_key(self.dal.cluster, self.holmes_id)
+        pg_topic = pg_changes_topic(self.dal.account_id)
         self._account_channel = self._client.channel(
             presence_topic,
             {
                 "config": {
-                    "presence": {"enabled": True, "key": cluster_key},
+                    "presence": {"enabled": True, "key": self.holmes_id},
                     "private": False,
                 }
             },
@@ -492,7 +490,7 @@ class RealtimeManager:
             pg_topic,
             {"config": {"private": False}},
         )
-        self._started_at = datetime.now(timezone.utc).isoformat()
+
 
         def _on_pg_change(payload: Dict[str, Any]) -> None:
             try:
@@ -583,12 +581,12 @@ class RealtimeManager:
         except asyncio.TimeoutError:
             logging.warning("Timed out waiting for pg-changes subscribe ack")
 
-        # Advertise initial cluster presence (no conversations yet).
+        # Advertise initial presence (no conversations yet).
         try:
             await self._account_channel.track(self._build_presence_payload())
             logging.info(
-                "Advertised cluster presence: key=%s on %s",
-                cluster_key,
+                "Advertised presence: holmes_id=%s on %s",
+                self.holmes_id,
                 presence_topic,
             )
         except Exception:
@@ -602,23 +600,20 @@ class RealtimeManager:
 
     def _build_presence_payload(self) -> Dict[str, Any]:
         """
-        Build the cluster presence payload for the account channel.
+        Build the presence payload for the account channel.
 
         The Supabase Realtime presence protocol allows one entry per client
-        per channel, so we pack the cluster entry + all per-conversation
-        entries into a single payload.  Observers (Relay/support) iterate the
-        ``conversations`` map whose keys use the
-        ``conversation:{conversation_id}:{holmes_id}`` form — matching the
-        "presence key" vocabulary of the design spec.
+        per channel, so we pack all per-conversation entries into a single
+        payload.  Observers (Relay/support) iterate the ``conversations``
+        map whose keys use the ``conversation:{conversation_id}:{holmes_id}``
+        form — matching the "presence key" vocabulary of the design spec.
         """
         with self._conversations_lock:
             conversations = {k: dict(v) for k, v in self._conversations.items()}
         return {
-            "type": "cluster",
             "holmes_id": self.holmes_id,
             "cluster_id": self.dal.cluster,
             "version": get_version(),
-            "started_at": self._started_at,
             "active_conversations": len(conversations),
             "conversations": conversations,
         }
