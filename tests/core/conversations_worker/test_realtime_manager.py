@@ -298,19 +298,32 @@ def test_install_proxy_patch_does_nothing_without_env(monkeypatch):
 
 
 def test_install_proxy_patch_is_idempotent(monkeypatch):
-    """Calling install twice should not double-patch."""
+    """Calling install twice should not double-patch.
+
+    Monkeypatches ``_SocksProxy`` so the patching logic actually runs even
+    when python-socks is not installed.
+    """
+    import holmes.core.conversations_worker.realtime_manager as _rm
+
     monkeypatch.setenv(
         "https_proxy", "http://user:pass@proxy.internal:8888"
     )
-
+    # Ensure the patcher doesn't bail on _SocksProxy being None
+    monkeypatch.setattr(_rm, "_SocksProxy", MagicMock())
 
     rt_client._holmes_proxy_patched = False
     original_connect = rt_client.connect
     _install_proxy_patch_if_needed()
+    # After first call: connect must be replaced and flag set
     first_patched = rt_client.connect
+    assert first_patched is not original_connect, "patch was not applied"
+    assert getattr(rt_client, "_holmes_proxy_patched", False) is True
+
     _install_proxy_patch_if_needed()
+    # After second call: connect must be unchanged (idempotent)
     second_patched = rt_client.connect
     assert first_patched is second_patched, "patch was reinstalled unexpectedly"
+    assert getattr(rt_client, "_holmes_proxy_patched", False) is True
 
     # Cleanup: restore the original connect fn
     rt_client.connect = original_connect

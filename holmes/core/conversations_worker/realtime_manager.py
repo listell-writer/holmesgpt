@@ -104,12 +104,16 @@ def _install_proxy_patch_if_needed() -> None:
         return
 
     p = urllib.parse.urlparse(proxy_url)
-    if p.username:
-        proxy_connect_url = (
-            f"http://{p.username}:{p.password}@{p.hostname}:{p.port}"
-        )
-    else:
-        proxy_connect_url = f"http://{p.hostname}:{p.port}"
+    if not p.hostname:
+        logging.warning("https_proxy has no hostname; skipping proxy patch")
+        return
+    proxy_connect_url = f"http://{p.hostname}"
+    if p.username and p.password:
+        proxy_connect_url = f"http://{p.username}:{p.password}@{p.hostname}"
+    elif p.username:
+        proxy_connect_url = f"http://{p.username}@{p.hostname}"
+    if p.port is not None:
+        proxy_connect_url += f":{p.port}"
 
     async def _proxied_connect(url: str, *args: Any, **kwargs: Any) -> Any:
         parsed = urllib.parse.urlparse(url)
