@@ -1,0 +1,40 @@
+7 datasources loaded | 1.8s
+Model: openrouter/anthropic/claude-haiku-4.5, 200K context, 40K max response (configured via $MODEL)
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+Type /help for commands, /config to configure, /exit to quit
+╭──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╮
+│ Try one of these questions to get started:                                                                           │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╯
+    1. Find surprising or unusual things in my Kubernetes cluster
+    2. Are any of my pods unhealthy? If so, why?
+    3. Check my cluster for security misconfigurations
+    4. Scan my cluster for resource issues (high CPU, memory, disk pressure)
+    5. What's rUser:
+
+
+
+
+
+
+
+
+
+
+
+      /run echo hi-from-run-123User: /run echo hi-from-run-123
+Running: echo hi-from-run-123
+✓ Command succeeded (exit code: 0)
+╭─ Command Output ─────────────────────────────────────────────────────────────────────────────────────────────────────╮
+│                                                                                                                      │
+│  hi-from-run-123                                                                                                     │
+│                                                                                                                      │
+│                                                                                                                      │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╯
+Share ran a command with LLM? (Y/n):
+
+
+
+
+
+
+

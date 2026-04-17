@@ -1,0 +1,40 @@
+
+
+
+
+
+      /contextUser: /context
+No conversation context yet.
+User:
+
+
+
+
+
+
+
+
+
+
+
+      What is 2 plus 2? Answer with just the number.User: What is 2 plus 2? Answer with just the number.
+
+╭─ AI Response ────────────────────────────────────────────────────────────────────────────────────────────────────────╮
+│                                                                                                                      │
+│  4                                                                                                                   │
+│                                                                                                                      │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╯
+
+User:
+
+
+
+
+
+
+
+
+
+
+
+

@@ -1,0 +1,40 @@
+
+
+
+
+
+
+
+
+
+
+
+      /autoUser: /auto
+Auto-display of tool outputs enabled.
+User:
+
+
+
+
+
+
+
+
+
+
+
+      /lastUser: /last
+No tool calls available from the last response.
+User:
+
+
+
+
+
+
+
+
+
+
+
+

@@ -1,0 +1,40 @@
+Running without kube-config! e=Invalid kube-config file. No configuration found.
+7 datasources loaded | 2.3s
+Model: openrouter/anthropic/claude-haiku-4.5, 200K context, 40K max response (configured via $MODEL)
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+Type /help for commands, /config to configure, /exit to quit
+╭──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╮
+│ Try one of these questions to get started:                                                                           │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╯
+    1. Find surprising or unusual things in my Kubernetes cluster
+    2. Are any of my pods unhealthy? If so, why?
+    3. Check my cluster for security misconfigurations
+    4. Scan my cluster for resource issues (high CPU, memory, disk pressure)
+    5. What's rUser:
+
+
+
+
+
+
+
+
+
+
+
+      /exitUser: /exit
+Exiting interactive mode.
+EXIT=0
+
+
+
+
+
+
+
+
+
+
+
+
+

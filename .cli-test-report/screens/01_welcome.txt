@@ -1,0 +1,40 @@
+Running without kube-config! e=Invalid kube-config file. No configuration found.
+Toolset 'kubernetes/kube-lineage-extras' is enabled but was excluded because its tags ['cluster'] don't match the
+current mode's tags ['core', 'cli']
+14 datasources loaded | 22 failed | 6.1s
+  ✗ argocd/core: Environment variable ARGOCD_AUTH_TOKEN was not set
+  ✗ inspektor-gadget/node: Environment variable ENABLE_INSPEKTOR_GADGET was not set
+  ✗ inspektor-gadget/tcpdump: Environment variable ENABLE_INSPEKTOR_GADGET was not set
+  ✗ aks/node-health: `az account show` returned 127
+  ✗ aks/core: `az account show` returned 127
+  ✗ cilium/core: `cilium status` returned 127
+  ✗ hubble/observability: `hubble version` returned 127
+  ✗ helm/core: `helm version` returned 127
+  ✗ slab: Environment variable SLAB_API_KEY was not set
+  ✗ robusta: Integration with Robusta cloud is disabled
+  ✗ notion: Notion toolset is misconfigured. Authorization header is required.
+  ✗ opensearch/query_assist: Environment variable OPENSEARCH_URL was not set
+  ✗ kubernetes/live-metrics: `kubectl top nodes` returned 127
+  ✗ kubernetes/logs: kubectl command not found
+  ✗ kubernetes/core: `kubectl version --client` returned 127
+  ✗ kubevela/core: `vela version` returned 127
+  ✗ kubernetes/krew-extras: `kubectl version --client && kubectl lineage --version` returned 127
+  ✗ openshift/core: `oc version --client` returned 127
+  ✗ openshift/security: `oc version --client` returned 127
+  ✗ openshift/live-metrics: `oc adm top nodes` returned 127
+  ✗ openshift/logs: `oc version --client` returned 127
+  ✗ docker/core: `docker version` returned 1
+Model: openrouter/anthropic/claude-haiku-4.5, 200K context, 40K max response (configured via $MODEL)
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+Type /help for commands, /config to configure, /exit to quit
+╭──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╮
+│ Try one of these questions to get started:                                                                           │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╯
+    1. Find surprising or unusual things in my Kubernetes cluster
+    2. Are any of my pods unhealthy? If so, why?
+    3. Check my cluster for security misconfigurations
+    4. Scan my cluster for resource issues (high CPU, memory, disk pressure)
+    5. What's running in my cluster and is anything misconfigured?
+  > 6. Ask my own question...
+
+  Esc to cancel

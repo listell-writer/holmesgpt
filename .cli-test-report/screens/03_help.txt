@@ -1,0 +1,40 @@
+    3. Check my cluster for security misconfigurations
+    4. Scan my cluster for resource issues (high CPU, memory, disk pressure)
+    5. What's rUser:
+
+
+
+
+
+
+
+
+
+
+
+      /helpUser: /help
+Available commands:
+  /config - Open interactive toolset configuration editor
+  /exit - Exit interactive mode
+  /help - Show help message with all commands
+  /clear - Clear screen and reset conversation context
+  /tools - Show available toolsets and their status
+  /auto - Toggle auto-display of tool outputs after responses
+  /last - Show all tool outputs from last response
+  /run - Run a bash command and optionally share with LLM
+  /shell - Drop into interactive shell, then optionally share session with LLM
+  /context - Show conversation context size and token count
+  /show - Show specific tool output in scrollable view
+User:
+
+
+
+
+
+
+
+
+
+
+
+

@@ -1,0 +1,40 @@
+User:
+
+
+
+
+
+
+
+
+
+
+
+      /last/configUser: /config
+  Select a toolset to configure
+
+                                                                               r
+    internet                            [enabled]
+    grafana/loki                        [disabled]
+    grafana/tempo                       [disabled]
+    newrelic                            [disabled]
+    grafana/dashboards                  [disabled]
+    notion                              [failed]
+    kafka/admin                         [disabled]
+    datadog/logs                        [disabled]
+    datadog/general                     [disabled]
+    datadog/metrics                     [disabled]
+    datadog/traces                      [disabled]
+    coralogix                           [disabled]
+    rabbitmq/core                       [disabled]
+    bash                                [enabled]
+    confluence                          [disabled]
+    MongoDBAtlas                        [disabled]
+    azure/sql                           [disabled]
+    servicenow/tables                   [disabled]
+    database/sql                        [disabled]
+    elasticsearch/data                  [disabled]
+    elasticsearch/cluster               [disabled]
+    prometheus/metrics                  [disabled]
+
+  Up/Down to navigate, Enter to select, Esc to cancel

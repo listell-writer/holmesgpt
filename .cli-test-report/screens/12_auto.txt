@@ -1,0 +1,40 @@
+│                                                                                                                      │
+│  hi-from-run-123                                                                                                     │
+│                                                                                                                      │
+│                                                                                                                      │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╯
+Share ran a command with LLM? (Y/n):
+
+
+
+
+
+
+                                      nShare ran a command with LLM? (Y/n): n
+User:
+
+
+
+
+
+
+
+
+
+
+
+      /autoUser: /auto
+Auto-display of tool outputs enabled.
+User:
+
+
+
+
+
+
+
+
+
+
+
+

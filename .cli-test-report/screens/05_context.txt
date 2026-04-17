@@ -1,0 +1,40 @@
+│                                  │          │          │      │ --version` returned 127                              │
+│ kubevela/core                    │ failed   │ built-in │      │ `vela version` returned 127                          │
+│ openshift/core                   │ failed   │ built-in │      │ `oc version --client` returned 127                   │
+│ openshift/logs                   │ failed   │ built-in │      │ `oc version --client` returned 127                   │
+│ openshift/live-metrics           │ failed   │ built-in │      │ `oc adm top nodes` returned 127                      │
+│ openshift/security               │ failed   │ built-in │      │ `oc version --client` returned 127                   │
+│ slab                             │ failed   │ built-in │      │ Environment variable SLAB_API_KEY was not set        │
+│ robusta                          │ failed   │ built-in │      │ Integration with Robusta cloud is disabled           │
+│ notion                           │ failed   │ built-in │      │ Notion toolset is misconfigured. Authorization       │
+│                                  │          │          │      │ header is required.                                  │
+│ opensearch/query_assist          │ failed   │ built-in │      │ Environment variable OPENSEARCH_URL was not set      │
+│ kubernetes/logs                  │ failed   │ built-in │      │ kubectl command not found                            │
+└──────────────────────────────────┴──────────┴──────────┴──────┴──────────────────────────────────────────────────────┘
+User:
+
+
+
+
+
+
+
+
+
+
+
+      /contextUser: /context
+No conversation context yet.
+User:
+
+
+
+
+
+
+
+
+
+
+
+

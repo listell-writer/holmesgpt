@@ -1,0 +1,40 @@
+
+
+
+
+
+      What is 2 plus 2? Answer with just the number.User: What is 2 plus 2? Answer with just the number.
+
+╭─ AI Response ────────────────────────────────────────────────────────────────────────────────────────────────────────╮
+│                                                                                                                      │
+│  4                                                                                                                   │
+│                                                                                                                      │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╯
+
+User:
+
+
+
+
+
+
+
+
+
+
+
+      /clearUser: /clear
+Screen cleared and context reset. You can now ask a new question.
+User:
+
+
+
+
+
+
+
+
+
+
+
+
