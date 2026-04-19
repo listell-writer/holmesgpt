@@ -1303,14 +1303,14 @@
   
   
     <li class="md-nav__item">
-      <a href="../../ai-providers/azure-openai/" class="md-nav__link">
+      <a href="../../ai-providers/azure-ai-foundry/" class="md-nav__link">
         
   
   
   <span class="md-ellipsis">
     
   
-    Azure OpenAI
+    Azure AI Foundry
   
 
     
@@ -4834,21 +4834,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#3-rbac-permissions" class="md-nav__link">
+  <a href="#3-unclear-prompts" class="md-nav__link">
     <span class="md-ellipsis">
       
-        3. RBAC Permissions
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#4-unclear-prompts" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        4. Unclear Prompts
+        3. Unclear Prompts
       
     </span>
   </a>
@@ -4969,21 +4958,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#3-rbac-permissions" class="md-nav__link">
+  <a href="#3-unclear-prompts" class="md-nav__link">
     <span class="md-ellipsis">
       
-        3. RBAC Permissions
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#4-unclear-prompts" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        4. Unclear Prompts
+        3. Unclear Prompts
       
     </span>
   </a>
@@ -5108,20 +5086,7 @@
 <li>Verify toolset configuration connects to Prometheus/Grafana/logs</li>
 <li>Test connectivity: <code>kubectl exec -it &lt;holmes-pod&gt; -- curl http://prometheus:9090/api/v1/query?query=up</code></li>
 </ul>
-<h2 id="3-rbac-permissions">3. RBAC Permissions<a class="headerlink" href="#3-rbac-permissions" title="Permanent link">&para;</a></h2>
-<p>Service account lacks Kubernetes API permissions.</p>
-<p><strong>Error Example:</strong>
-<div class="language-text highlight"><pre><span></span><code><span id="__span-0-1"><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a>pods is forbidden: User &quot;system:serviceaccount:default:holmesgpt&quot; cannot get resource &quot;pods&quot;
-</span></code></pre></div></p>
-<p><strong>Solution:</strong>
-<div class="language-yaml highlight"><pre><span></span><code><span id="__span-1-1"><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a><span class="nt">rbac</span><span class="p">:</span>
-</span><span id="__span-1-2"><a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a><span class="w">  </span><span class="nt">create</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">true</span>
-</span><span id="__span-1-3"><a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a><span class="nt">rbacRules</span><span class="p">:</span>
-</span><span id="__span-1-4"><a id="__codelineno-1-4" name="__codelineno-1-4" href="#__codelineno-1-4"></a><span class="w">  </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">apiGroups</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">[</span><span class="s">&quot;&quot;</span><span class="p p-Indicator">]</span>
-</span><span id="__span-1-5"><a id="__codelineno-1-5" name="__codelineno-1-5" href="#__codelineno-1-5"></a><span class="w">    </span><span class="nt">resources</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">[</span><span class="s">&quot;pods&quot;</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="s">&quot;services&quot;</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="s">&quot;events&quot;</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="s">&quot;nodes&quot;</span><span class="p p-Indicator">]</span>
-</span><span id="__span-1-6"><a id="__codelineno-1-6" name="__codelineno-1-6" href="#__codelineno-1-6"></a><span class="w">    </span><span class="nt">verbs</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">[</span><span class="s">&quot;get&quot;</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="s">&quot;list&quot;</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="s">&quot;watch&quot;</span><span class="p p-Indicator">]</span>
-</span></code></pre></div></p>
-<h2 id="4-unclear-prompts">4. Unclear Prompts<a class="headerlink" href="#4-unclear-prompts" title="Permanent link">&para;</a></h2>
+<h2 id="3-unclear-prompts">3. Unclear Prompts<a class="headerlink" href="#3-unclear-prompts" title="Permanent link">&para;</a></h2>
 <p>Vague questions produce poor results.</p>
 <p><strong>Bad:</strong></p>
 <ul>
@@ -5139,10 +5104,10 @@
 <h2 id="5-model-issues">5. Model Issues<a class="headerlink" href="#5-model-issues" title="Permanent link">&para;</a></h2>
 <p>Older LLM models lack reasoning capability for complex problems.</p>
 <p><strong>Solution:</strong>
-<div class="language-yaml highlight"><pre><span></span><code><span id="__span-2-1"><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a><span class="nt">config</span><span class="p">:</span>
-</span><span id="__span-2-2"><a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a><span class="w">  </span><span class="nt">model</span><span class="p">:</span><span class="w"> </span><span class="s">&quot;gpt-4.1&quot;</span><span class="w">  </span><span class="c1"># or anthropic/claude-sonnet-4-20250514</span>
-</span><span id="__span-2-3"><a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a><span class="w">  </span><span class="nt">temperature</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">0.1</span>
-</span><span id="__span-2-4"><a id="__codelineno-2-4" name="__codelineno-2-4" href="#__codelineno-2-4"></a><span class="w">  </span><span class="nt">maxTokens</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">2000</span>
+<div class="language-yaml highlight"><pre><span></span><code><span id="__span-0-1"><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="nt">config</span><span class="p">:</span>
+</span><span id="__span-0-2"><a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a><span class="w">  </span><span class="nt">model</span><span class="p">:</span><span class="w"> </span><span class="s">&quot;gpt-4.1&quot;</span><span class="w">  </span><span class="c1"># or anthropic/claude-sonnet-4-20250514</span>
+</span><span id="__span-0-3"><a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a><span class="w">  </span><span class="nt">temperature</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">0.1</span>
+</span><span id="__span-0-4"><a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a><span class="w">  </span><span class="nt">maxTokens</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">2000</span>
 </span></code></pre></div></p>
 <p><strong>Recommended Models:</strong></p>
 <ul>

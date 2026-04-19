@@ -1305,14 +1305,14 @@
   
   
     <li class="md-nav__item">
-      <a href="../azure-openai/" class="md-nav__link">
+      <a href="../azure-ai-foundry/" class="md-nav__link">
         
   
   
   <span class="md-ellipsis">
     
   
-    Azure OpenAI
+    Azure AI Foundry
   
 
     
@@ -5028,7 +5028,11 @@
 
 
 <h1 id="openai-compatible-models">OpenAI-Compatible Models<a class="headerlink" href="#openai-compatible-models" title="Permanent link">&para;</a></h1>
-<p>HolmesGPT works with <strong>any OpenAI-compatible API endpoint</strong>. This includes API gateways, proxy servers, and local inference servers—as long as they expose an OpenAI-compatible interface with function calling support.</p>
+<p>HolmesGPT works with <strong>any OpenAI-compatible API endpoint</strong>. This includes <a href="https://docs.litellm.ai/docs/simple_proxy" target="_blank"><strong>LiteLLM Proxy</strong></a>, other API gateways and proxy servers, and local inference servers — as long as they expose an OpenAI-compatible interface with function calling support.</p>
+<div class="admonition tip">
+<p class="admonition-title">Using LiteLLM Proxy (or another proxy)?</p>
+<p>This is the right page. Configure your proxy's URL as <code>OPENAI_API_BASE</code>, the proxy token as <code>OPENAI_API_KEY</code>, and set <code>model: openai/&lt;name-your-proxy-exposes&gt;</code> in <code>modelList</code>. See the example below.</p>
+</div>
 <div class="admonition warning">
 <p class="admonition-title">Function Calling Required</p>
 <p>Your model and inference server must support function calling (tool calling). Models that lack this capability may produce incorrect results.</p>
