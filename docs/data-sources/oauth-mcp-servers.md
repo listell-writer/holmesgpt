@@ -3,7 +3,7 @@
 !!! warning "Alpha Feature"
     OAuth MCP server support is a new feature and will experience rapid improvements. Configuration and behavior may change between releases.
 
-Some MCP servers support OAuth-based authentication natively — you only need to set `oauth.enabled: true` and Holmes handles the rest. When Holmes connects to an OAuth-enabled MCP server, it automatically discovers the server's OAuth endpoints, opens a browser for login, and caches the token for the session.
+Some MCP servers support OAuth-based authentication natively — you only need to set `oauth.enabled: true` and Holmes handles the rest. When Holmes connects to an OAuth-enabled MCP server, it automatically discovers the server's OAuth endpoints, opens a browser for login, and persists the token for future use.
 
 ## Setup
 
@@ -87,4 +87,4 @@ To add an OAuth MCP server, set `mode: streamable-http` and `oauth.enabled: true
 2. Holmes discovers the server's OAuth configuration automatically via the MCP protocol
 3. The user is prompted to authenticate via their browser
 4. After login, Holmes exchanges the authorization code for an access token
-5. The token is cached for the session and used for all subsequent requests to that server
+5. The token is persisted and refreshed automatically — users only need to authenticate once
