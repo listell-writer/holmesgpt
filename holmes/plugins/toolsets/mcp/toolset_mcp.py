@@ -5,6 +5,7 @@ import os
 import threading
 import time
 from contextlib import asynccontextmanager
+from datetime import timedelta
 from enum import Enum
 from typing import Any, ClassVar, Dict, List, Optional, TextIO, Tuple, Type, Union
 from urllib.parse import urlparse
@@ -17,7 +18,7 @@ from mcp.client.streamable_http import streamablehttp_client
 from mcp.types import Tool as MCP_Tool
 from pydantic import AnyUrl, BaseModel, Field, model_validator
 
-from holmes.common.env_vars import SSE_READ_TIMEOUT
+from holmes.common.env_vars import MCP_TOOL_CALL_TIMEOUT_SEC, SSE_READ_TIMEOUT
 from holmes.core.oauth_config import (
     MCPOAuthConfig,
     OAuthEndpoints,
@@ -41,6 +42,7 @@ from holmes.core.tools import (
     ToolInvokeContext,
     ToolParameter,
     Toolset,
+    ToolsetType,
 )
 from holmes.plugins.toolsets.mcp.oauth_token_manager import _get_user_id
 from holmes.utils.header_rendering import render_header_templates
@@ -241,13 +243,17 @@ async def get_initialized_mcp_session(
         async with sse_client(
             url,
             rendered_headers,
-            sse_read_timeout=SSE_READ_TIMEOUT,
+            sse_read_timeout=MCP_TOOL_CALL_TIMEOUT_SEC,
             httpx_client_factory=httpx_factory,
         ) as (
             read_stream,
             write_stream,
         ):
-            async with ClientSession(read_stream, write_stream) as session:
+            async with ClientSession(
+                read_stream,
+                write_stream,
+                read_timeout_seconds=timedelta(seconds=MCP_TOOL_CALL_TIMEOUT_SEC),
+            ) as session:
                 _ = await session.initialize()
                 yield session
     else:
@@ -257,14 +263,18 @@ async def get_initialized_mcp_session(
         async with streamablehttp_client(
             url,
             headers=rendered_headers,
-            sse_read_timeout=SSE_READ_TIMEOUT,
+            sse_read_timeout=MCP_TOOL_CALL_TIMEOUT_SEC,
             httpx_client_factory=httpx_factory,
         ) as (
             read_stream,
             write_stream,
             _,
         ):
-            async with ClientSession(read_stream, write_stream) as session:
+            async with ClientSession(
+                read_stream,
+                write_stream,
+                read_timeout_seconds=timedelta(seconds=MCP_TOOL_CALL_TIMEOUT_SEC),
+            ) as session:
                 _ = await session.initialize()
                 yield session
 
@@ -440,7 +450,8 @@ class RemoteMCPTool(Tool):
 
         return StructuredToolResult(
             status=(
-                StructuredToolResultStatus.ERROR if is_error
+                StructuredToolResultStatus.ERROR
+                if is_error
                 else StructuredToolResultStatus.SUCCESS
             ),
             data=merged_text,
@@ -523,7 +534,10 @@ class RemoteMCPTool(Tool):
                                             if req not in reqs:
                                                 reqs.append(req)
                                     elif k == "type":
-                                        if "type" not in merged or merged["type"] == "null":
+                                        if (
+                                            "type" not in merged
+                                            or merged["type"] == "null"
+                                        ):
                                             merged["type"] = v
                                     else:
                                         merged[k] = v
@@ -580,7 +594,9 @@ class RemoteMCPTool(Tool):
         any_of_params = None
         if "anyOf" in schema and isinstance(schema["anyOf"], list):
             branches = schema["anyOf"]
-            non_null = [b for b in branches if isinstance(b, dict) and b.get("type") != "null"]
+            non_null = [
+                b for b in branches if isinstance(b, dict) and b.get("type") != "null"
+            ]
             if len(non_null) > 1:
                 # True union — parse each branch as a ToolParameter
                 has_null = any(
@@ -596,8 +612,10 @@ class RemoteMCPTool(Tool):
                     type="anyOf",
                     required=required if not has_null else False,
                     any_of=any_of_params,
-                    json_schema_extra={k: v for k, v in schema.items()
-                                       if k in {"default"}} or None,
+                    json_schema_extra={
+                        k: v for k, v in schema.items() if k in {"default"}
+                    }
+                    or None,
                 )
 
         param_type = schema.get("type", "string")
@@ -640,13 +658,20 @@ class RemoteMCPTool(Tool):
         # OpenAI-formatted schema so the LLM sees constraints like array
         # length limits, numeric ranges, and string patterns.
         _PASSTHROUGH_KEYWORDS = {
-            "minItems", "maxItems",
-            "minimum", "maximum", "exclusiveMinimum", "exclusiveMaximum",
-            "minLength", "maxLength",
+            "minItems",
+            "maxItems",
+            "minimum",
+            "maximum",
+            "exclusiveMinimum",
+            "exclusiveMaximum",
+            "minLength",
+            "maxLength",
             "pattern",
             "default",
         }
-        json_schema_extra = {k: v for k, v in schema.items() if k in _PASSTHROUGH_KEYWORDS}
+        json_schema_extra = {
+            k: v for k, v in schema.items() if k in _PASSTHROUGH_KEYWORDS
+        }
 
         return ToolParameter(
             description=schema.get("description"),
@@ -757,6 +782,7 @@ class RemoteMCPToolset(Toolset):
         return final_headers if final_headers else None
 
     def model_post_init(self, __context: Any) -> None:
+        self.type = ToolsetType.MCP
         self.prerequisites = [
             CallablePrerequisite(callable=self.prerequisites_callable)
         ]
