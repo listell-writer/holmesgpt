@@ -9,6 +9,8 @@ import logging
 import threading
 from typing import Any, Dict, List, Optional, Tuple
 
+import httpx
+
 from holmes.core.oauth_config import (
     OAuthDecisionCode,
     OAuthTokenExchangeError,
@@ -208,7 +210,6 @@ class OAuthToolConnector:
     @staticmethod
     def _is_auth_error(exc: BaseException) -> bool:
         """Check if an exception (possibly wrapped in ExceptionGroup) is a 401/403."""
-        import httpx
         current: BaseException = exc
         while hasattr(current, "exceptions") and current.exceptions:
             current = current.exceptions[0]

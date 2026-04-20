@@ -47,7 +47,7 @@ class OAuthTokenManager:
 
     def __init__(self) -> None:
         self._cache = OAuthTokenCache()
-        self._store: TokenStore = DiskTokenStore()
+        self._store: Optional[TokenStore] = None
 
         # Background sweep thread
         self._shutdown_event = threading.Event()
@@ -59,6 +59,10 @@ class OAuthTokenManager:
         self._sweep_thread.start()
 
     # ── Configuration ──────────────────────────────────────────────────
+
+    def enable_disk_store(self) -> None:
+        """Enable disk-based token storage. Called in CLI mode only."""
+        self._store = DiskTokenStore()
 
     def set_dal(self, dal: Any) -> None:
         """Switch to DB-backed storage. Called during server startup."""
@@ -75,6 +79,8 @@ class OAuthTokenManager:
         refreshing them before expiry. Without preloading, tokens only enter
         the cache on the first user request.
         """
+        if not self._store:
+            return
         preloaded = self._store.get_all_for_preload()
         if not preloaded:
             return
@@ -144,6 +150,8 @@ class OAuthTokenManager:
             return refreshed
 
         # 3. Check persistent store
+        if not self._store:
+            return None
         provider_name = oauth_config.authorization_url or (disk_key or "unknown")
         stored_token = self._store.get_token(provider_name, user_id=user_id, provider_aliases=provider_aliases)
         if stored_token and stored_token.get("access_token"):
@@ -202,13 +210,14 @@ class OAuthTokenManager:
             user_id=user_id,
         )
 
-        self._store.store_token(
-            oauth_config.authorization_url or "unknown",
-            token_data,
-            user_id=user_id,
-            token_url=oauth_config.token_url,
-            client_id=oauth_config.client_id,
-        )
+        if self._store:
+            self._store.store_token(
+                oauth_config.authorization_url or "unknown",
+                token_data,
+                user_id=user_id,
+                token_url=oauth_config.token_url,
+                client_id=oauth_config.client_id,
+            )
 
         logger.debug(
             "OAuthTokenManager: token stored (cache_key=%s, expires_in=%s, has_refresh=%s)",
@@ -276,33 +285,35 @@ class OAuthTokenManager:
             result = self._do_refresh_request(entry.token_url, entry.client_id, refresh_token, cache_key)
             if result:
                 token_data, _access_token, _expires_in = result
-                self._store.store_token(
-                    entry.authorization_url or "unknown",
-                    token_data,
-                    user_id=entry.user_id,
-                    token_url=entry.token_url,
-                    client_id=entry.client_id,
-                )
+                if self._store:
+                    self._store.store_token(
+                        entry.authorization_url or "unknown",
+                        token_data,
+                        user_id=entry.user_id,
+                        token_url=entry.token_url,
+                        client_id=entry.client_id,
+                    )
                 logger.info("OAuthTokenManager: sweep refreshed token (cache_key=%s)", cache_key)
                 return
 
         # No refresh token or refresh failed — try reloading from store
-        if entry.authorization_url and entry.user_id:
-            stored = self._store.get_token(entry.authorization_url, user_id=entry.user_id)
-            if stored and stored.get("access_token"):
-                expires_in = stored.get("_remaining_ttl", stored.get("expires_in", 300))
-                self._cache.set(
-                    cache_key,
-                    stored["access_token"],
-                    expires_in=expires_in,
-                    refresh_token=stored.get("refresh_token"),
-                    refresh_expires_in=stored.get("refresh_expires_in"),
-                    token_url=entry.token_url,
-                    client_id=entry.client_id,
-                    authorization_url=entry.authorization_url,
-                    user_id=entry.user_id,
-                )
-                logger.info("OAuthTokenManager: sweep reloaded token from store (cache_key=%s)", cache_key)
+        if not self._store or not entry.authorization_url or not entry.user_id:
+            return
+        stored = self._store.get_token(entry.authorization_url, user_id=entry.user_id)
+        if stored and stored.get("access_token"):
+            expires_in = stored.get("_remaining_ttl", stored.get("expires_in", 300))
+            self._cache.set(
+                cache_key,
+                stored["access_token"],
+                expires_in=expires_in,
+                refresh_token=stored.get("refresh_token"),
+                refresh_expires_in=stored.get("refresh_expires_in"),
+                token_url=entry.token_url,
+                client_id=entry.client_id,
+                authorization_url=entry.authorization_url,
+                user_id=entry.user_id,
+            )
+            logger.info("OAuthTokenManager: sweep reloaded token from store (cache_key=%s)", cache_key)
 
     # ── Synchronous (reactive) refresh ─────────────────────────────────
 
@@ -319,13 +330,14 @@ class OAuthTokenManager:
                 return None
 
             token_data, access_token, expires_in = result
-            self._store.store_token(
-                oauth_config.authorization_url or "unknown",
-                token_data,
-                user_id=user_id,
-                token_url=oauth_config.token_url,
-                client_id=oauth_config.client_id,
-            )
+            if self._store:
+                self._store.store_token(
+                    oauth_config.authorization_url or "unknown",
+                    token_data,
+                    user_id=user_id,
+                    token_url=oauth_config.token_url,
+                    client_id=oauth_config.client_id,
+                )
             return access_token
         except Exception:
             logger.warning("OAuthTokenManager: refresh failed (cache_key=%s)", cache_key, exc_info=True)
