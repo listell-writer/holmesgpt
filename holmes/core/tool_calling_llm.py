@@ -33,7 +33,7 @@ from holmes.core.models import (
     ToolApprovalDecision,
     ToolCallResult,
 )
-from holmes.core.oauth_config import OAuthTokenExchangeError, parse_oauth_decision
+from holmes.core.oauth_config import OAuthTokenExchangeError, _get_exchange_manager, parse_oauth_decision
 from holmes.core.safeguards import prevent_overly_repeated_tool_call
 from holmes.core.tools import (
     StructuredToolResult,
@@ -156,7 +156,6 @@ def extract_bash_session_prefixes(messages: List[Dict[str, Any]]) -> List[str]:
 
 def _try_process_oauth_decision(tool_call_id, oauth_code, request_context) -> bool:
     """Exchange an OAuth authorization code for tokens. Returns True on success."""
-    from holmes.core.oauth_config import _get_exchange_manager
     try:
         _get_exchange_manager().complete_exchange(tool_call_id, oauth_code, request_context)
         return True

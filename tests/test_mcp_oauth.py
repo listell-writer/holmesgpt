@@ -172,8 +172,9 @@ class TestRequiresApproval:
         _get_token_manager().cache.evict(cache_key)
 
         params = {"a": 1}
-        with patch.object(_get_token_manager()._store, "get_token", return_value=None):
-            result = tool.requires_approval(params, context)
+        _get_token_manager()._store = MagicMock()
+        _get_token_manager()._store.get_token.return_value = None
+        result = tool.requires_approval(params, context)
 
         assert result is not None
         assert result.needs_approval is True
@@ -308,12 +309,13 @@ class TestExchangeCodeForToken:
 
         request_context = {"user_id": "user-db-test"}
 
-        with patch("holmes.core.oauth_utils.httpx.post", return_value=mock_response), \
-             patch.object(_get_token_manager()._store, "store_token") as mock_store:
+        mock_store = MagicMock()
+        _get_token_manager()._store = mock_store
+        with patch("holmes.core.oauth_utils.httpx.post", return_value=mock_response):
             _get_exchange_manager().complete_exchange(tool_call_id, oauth_code, request_context)
 
-            mock_store.assert_called_once()
-            args, kwargs = mock_store.call_args
+            mock_store.store_token.assert_called_once()
+            args, kwargs = mock_store.store_token.call_args
             # Positional: provider_name, token_data
             assert args[0] == "http://idp/authorize"
             assert args[1]["access_token"] == "db-access-tok"
@@ -1690,6 +1692,10 @@ class TestBackgroundSweep:
     def _make_manager(self) -> OAuthTokenManager:
         manager = OAuthTokenManager()
         manager._shutdown_event.set()  # prevent background thread from running
+        mock_store = MagicMock()
+        mock_store.get_token.return_value = None
+        mock_store.get_all_for_preload.return_value = []
+        manager._store = mock_store
         return manager
 
     def test_sweep_refreshes_expiring_token_with_refresh_token(self):

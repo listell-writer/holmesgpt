@@ -43,6 +43,11 @@ def _get_token_manager():
     return _token_manager
 
 
+def enable_disk_token_store() -> None:
+    """Enable disk-based OAuth token persistence. Called in CLI mode only."""
+    _get_token_manager().enable_disk_store()
+
+
 def set_oauth_dal(dal: Any) -> None:
     """Set the DAL instance for OAuth DB operations. Called during server startup."""
     _get_token_manager().set_dal(dal)
