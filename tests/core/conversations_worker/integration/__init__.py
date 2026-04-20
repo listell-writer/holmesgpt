@@ -173,7 +173,7 @@ class SupabaseFixture:
         self._ensure_broadcast_channel()
         future = asyncio.run_coroutine_threadsafe(
             self._broadcast_ch.send_broadcast(
-                "new_conversation",
+                "pending_conversations",
                 {"conversation_id": conversation_id},
             ),
             self._broadcast_loop,
