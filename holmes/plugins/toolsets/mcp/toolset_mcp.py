@@ -756,7 +756,7 @@ class RemoteMCPToolset(Toolset):
             cached_token = _get_token_manager().get_access_token(oauth_config, request_context)
             if cached_token:
                 final_headers["Authorization"] = f"Bearer {cached_token}"
-                logger.info("OAuth token injected for MCP server %s", self.name)
+                logger.debug("OAuth token injected for MCP server %s", self.name)
             else:
                 logger.warning("OAuth MCP server %s: no cached token — request will likely 401", self.name)
 
@@ -967,11 +967,11 @@ class RemoteMCPToolset(Toolset):
         # DCR deferred to runtime — we don't know redirect_uri at startup
         if not oauth_config.client_id:
             if oauth_config.registration_endpoint:
-                logging.info("OAuth discovery %s: no client_id, DCR deferred to runtime", self.name)
+                logging.debug("OAuth discovery %s: no client_id, DCR deferred to runtime", self.name)
             else:
                 logging.warning("OAuth discovery %s: no client_id and no DCR endpoint", self.name)
 
-        logging.info(
+        logging.debug(
             "OAuth discovery %s complete: authorization_url=%s, token_url=%s, client_id=%s",
             self.name, oauth_config.authorization_url, oauth_config.token_url, oauth_config.client_id,
         )

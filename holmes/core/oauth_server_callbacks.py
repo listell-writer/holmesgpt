@@ -66,6 +66,11 @@ def process_oauth_callback(
         toolsets, request.toolset_name, token_manager, request.client_id,
     )
 
+    # Persist DCR client_id from frontend onto the oauth config so store_token
+    # includes it in the encrypted payload (needed for token refresh)
+    if client_id and not oauth.client_id:
+        oauth.client_id = client_id
+
     logger.info("OAuth exchange: token_url=%s client_id=%s", oauth.token_url, client_id)
     token_data = exchange_code_for_tokens(
         token_url=oauth.token_url,

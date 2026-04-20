@@ -312,7 +312,7 @@ def discover_auth_server_from_prm(
             auth_servers = prm.get("authorization_servers", [])
             if auth_servers:
                 scopes = prm.get("scopes_supported")
-                logging.info("OAuth discovery %s: found auth server via PRM %s: %s", server_name, prm_url, auth_servers[0])
+                logging.debug("OAuth discovery %s: found auth server via PRM %s: %s", server_name, prm_url, auth_servers[0])
                 return str(auth_servers[0]).rstrip("/"), scopes
         except Exception:
             continue
@@ -336,7 +336,7 @@ def fetch_oauth_metadata(
         try:
             resp = httpx.get(url, timeout=10, verify=verify_ssl)
             if resp.status_code == 200:
-                logging.info("OAuth discovery %s: fetched metadata from %s", server_name, url)
+                logging.debug("OAuth discovery %s: fetched metadata from %s", server_name, url)
                 return resp.json()
         except Exception:
             continue

@@ -271,7 +271,7 @@ class DalTokenStore(TokenStore):
                 token_expiry=expiry,
                 user_id=user_id,
             )
-            logger.info("Token stored to DB (provider=%s, user_id=%s)", provider_name, user_id)
+            logger.debug("Token stored to DB (provider=%s, user_id=%s)", provider_name, user_id)
             return True
         except Exception:
             logger.warning("Failed to store token to DB", exc_info=True)

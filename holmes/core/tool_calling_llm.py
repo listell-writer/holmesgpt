@@ -846,8 +846,9 @@ class ToolCallingLLM:
                     request_context=request_context,
                 )
 
-            tool = self.tool_executor.get_tool_by_name(tool_name)
-            toolset_name = self.tool_executor.get_toolset_name(tool_name)
+            user_id = (request_context or {}).get("user_id")
+            tool = self.tool_executor.get_tool_by_name(tool_name, user_id=user_id)
+            toolset_name = self.tool_executor.get_toolset_name(tool_name, user_id=user_id)
             tool_call_result = ToolCallResult(
                 tool_call_id=tool_id,
                 tool_name=tool_name,
