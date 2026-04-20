@@ -694,7 +694,7 @@ class ToolCallingLLM:
 
             # Store OAuth tools discovered by a _connect placeholder
             if tool_response.oauth_tools:
-                toolset_name = self.tool_executor.get_toolset_name(tool_name)
+                toolset_name = self.tool_executor.get_toolset_name(tool_name, user_id=user_id)
                 if toolset_name and user_id:
                     self.tool_executor.oauth_connector.store_user_tools(user_id, toolset_name, tool_response.oauth_tools)
 

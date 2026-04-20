@@ -1477,6 +1477,77 @@ class TestToolExecutorDynamicTools:
         assert "mcp_connect" not in tool_names
 
 
+    def test_get_toolset_name_works_for_oauth_tools(self):
+        """get_toolset_name returns correct name for per-user OAuth tools via _tool_to_toolset."""
+        mcp_ts = self._make_toolset("atlassian", [], mcp=True)
+        placeholder = self._make_tool("atlassian_connect")
+        mcp_ts.tools = [placeholder]
+        executor = ToolExecutor([mcp_ts])
+
+        # Before storing: placeholder is registered
+        assert executor.get_toolset_name("atlassian_connect") == "atlassian"
+        assert executor.get_toolset_name("searchConfluence", user_id="user-1") is None
+
+        # Create a RemoteMCPTool with proper .toolset reference
+        real = RemoteMCPTool(
+            name="searchConfluence",
+            description="Search Confluence",
+            parameters={},
+            toolset=mcp_ts,
+        )
+        executor.oauth_connector.store_user_tools("user-1", "atlassian", [real])
+
+        # After storing: found with user_id
+        assert executor.get_toolset_name("searchConfluence", user_id="user-1") == "atlassian"
+        # Not found for wrong user
+        assert executor.get_toolset_name("searchConfluence", user_id="user-2") is None
+        # Not found without user_id
+        assert executor.get_toolset_name("searchConfluence") is None
+
+    def test_get_tool_by_name_finds_oauth_tools(self):
+        """get_tool_by_name finds per-user OAuth tools with user_id."""
+        mcp_ts = self._make_toolset("notion", [], mcp=True)
+        placeholder = self._make_tool("notion_connect")
+        mcp_ts.tools = [placeholder]
+        executor = ToolExecutor([mcp_ts])
+
+        real = RemoteMCPTool(
+            name="searchPages",
+            description="Search pages",
+            parameters={},
+            toolset=mcp_ts,
+        )
+        executor.oauth_connector.store_user_tools("user-A", "notion", [real])
+
+        # Found with correct user_id
+        assert executor.get_tool_by_name("searchPages", user_id="user-A") is real
+        # Not found without user_id (per-user only)
+        assert executor.get_tool_by_name("searchPages") is None
+        # Not found for wrong user
+        assert executor.get_tool_by_name("searchPages", user_id="user-B") is None
+        # Placeholder still found for everyone
+        assert executor.get_tool_by_name("notion_connect") is placeholder
+
+    def test_oauth_tools_have_correct_parameterized_one_liner(self):
+        """OAuth RemoteMCPTools produce a description via get_parameterized_one_liner."""
+        mcp_ts = self._make_toolset("atlassian", [], mcp=True)
+        mcp_ts.tools = []
+        executor = ToolExecutor([mcp_ts])
+
+        real = RemoteMCPTool(
+            name="searchConfluenceUsingCql",
+            description="Search Confluence using CQL",
+            parameters={},
+            toolset=mcp_ts,
+        )
+        executor.oauth_connector.store_user_tools("user-1", "atlassian", [real])
+
+        tool = executor.get_tool_by_name("searchConfluenceUsingCql", user_id="user-1")
+        one_liner = tool.get_parameterized_one_liner({"cql": "type=page"})
+        assert "atlassian" in one_liner
+        assert "searchConfluenceUsingCql" in one_liner
+
+
 # ---------------------------------------------------------------------------
 # _invoke_oauth_connect returns oauth_tools
 # ---------------------------------------------------------------------------

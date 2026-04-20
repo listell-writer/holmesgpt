@@ -53,6 +53,7 @@ class ToolExecutor:
     def get_tool_by_name(self, name: str, user_id: Optional[str] = None) -> Optional[Tool]:
         if name in self.tools_by_name:
             return self.tools_by_name[name]
+        # Check per-user OAuth tools (registered in _tool_to_toolset but not in tools_by_name)
         user_tool = self.oauth_connector.find_tool(name, user_id)
         if user_tool:
             return user_tool
@@ -61,11 +62,8 @@ class ToolExecutor:
 
     def get_toolset_name(self, tool_name: str, user_id: Optional[str] = None) -> Optional[str]:
         """Return the toolset name that provides a given tool, or None."""
-        ts = self._tool_to_toolset.get(tool_name)
-        if ts:
-            return ts.name
-        user_tool = self.oauth_connector.find_tool(tool_name, user_id)
-        return user_tool.toolset.name if user_tool and hasattr(user_tool, "toolset") else None
+        ts = self._tool_to_toolset.get(tool_name) or self.oauth_connector.get_toolset(tool_name, user_id)
+        return ts.name if ts else None
 
     def ensure_toolset_initialized(self, tool_name: str) -> Optional[str]:
         """Ensure the toolset containing the given tool is lazily initialized.
