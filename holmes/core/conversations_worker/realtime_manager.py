@@ -49,11 +49,7 @@ if TYPE_CHECKING:
 
 
 def broadcast_submit_topic(account_id: str, cluster_id: str) -> str:
-    """Per-account-per-cluster Broadcast channel for conversation submissions.
-
-    The account_id is the 3rd ``:``-delimited segment; the cluster_id is the
-    entire suffix after it (cluster_id may contain ``:`` characters).
-    """
+    """Per-account-per-cluster Broadcast channel for conversation submissions."""
     return f"holmes:submit:{account_id}:{cluster_id}"
 
 
