@@ -30,6 +30,8 @@ class OAuthToolConnector:
     def __init__(self) -> None:
         self._user_tools: Dict[str, Dict[str, List[Tool]]] = {}
         self._lock = threading.Lock()
+        # Per-user tool→toolset mapping: {user_id: {tool_name: toolset}}
+        self._user_tool_to_toolset: Dict[str, Dict[str, Any]] = {}
 
     # ── Decision processing ────────────────────────────────────────────
 
@@ -128,11 +130,17 @@ class OAuthToolConnector:
             return []
 
     def store_user_tools(self, user_id: str, toolset_name: str, tools: List[Tool]) -> None:
-        """Store discovered OAuth tools for a user."""
+        """Store discovered OAuth tools for a user and register in tool_to_toolset."""
         with self._lock:
             if user_id not in self._user_tools:
                 self._user_tools[user_id] = {}
             self._user_tools[user_id][toolset_name] = tools
+        # Register per-user so get_toolset_name works for OAuth tools
+        if user_id not in self._user_tool_to_toolset:
+            self._user_tool_to_toolset[user_id] = {}
+        for tool in tools:
+            if hasattr(tool, "toolset"):
+                self._user_tool_to_toolset[user_id][tool.name] = tool.toolset
 
     # ── Tool resolution ────────────────────────────────────────────────
 
@@ -187,6 +195,12 @@ class OAuthToolConnector:
                     if tool.name == name:
                         return tool
         return None
+
+    def get_toolset(self, tool_name: str, user_id: Optional[str]) -> Optional[Any]:
+        """Return the toolset for a per-user OAuth tool, or None."""
+        if not user_id:
+            return None
+        return self._user_tool_to_toolset.get(user_id, {}).get(tool_name)
 
 
     # ── Error handling helpers ─────────────────────────────────────────
