@@ -399,8 +399,11 @@ class RealtimeManager:
             except Exception:
                 logging.exception("Error in broadcast callback", exc_info=True)
 
+        # Event name acts as the submission-type discriminator so the channel
+        # can be reused for future submission types (e.g. tool approval
+        # responses, cancellations) without collision.
         self._channel.on_broadcast(
-            event="new_conversation",
+            event="pending_conversations",
             callback=_on_broadcast,
         )
 
