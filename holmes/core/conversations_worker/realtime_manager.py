@@ -2,15 +2,14 @@
 Realtime manager for the ConversationWorker.
 
 Runs an asyncio event loop in a background daemon thread. Manages a Supabase
-Realtime subscription that notifies the worker when new pending conversations
-appear.  Two subscription modes are supported (selected via the
-``CONVERSATION_WORKER_USE_PGCHANGES`` env var):
+Realtime Broadcast subscription that notifies the worker when new pending
+conversations appear.
 
- 1. **Postgres Changes** (default) — subscribes to INSERT/UPDATE on the
-    Conversations table filtered by ``account_id``.
- 2. **Broadcast** — subscribes to a per-account-per-cluster Broadcast channel
-    ``holmes:submit:{account_id}:{cluster_id}``.  The initiator (Frontend /
-    Relay) must send a broadcast after creating the conversation.
+Holmes subscribes to a per-account-per-cluster Broadcast channel
+``holmes:submit:{account_id}:{cluster_id}``.  The initiator (Frontend / Relay)
+must send a broadcast after creating the conversation via RPC.  The channel
+name carries the account_id as the 3rd ``:``-delimited segment and the
+cluster_id as the remaining suffix (cluster_id may itself contain ``:``).
 
 Communication with the sync ConversationWorker is via a callback that is
 invoked when a pending-conversation notification arrives. The callback MUST
@@ -40,9 +39,7 @@ except ImportError:  # pragma: no cover — optional dependency
 
 from holmes.common.env_vars import (
     CONVERSATION_WORKER_AUTH_REFRESH_INTERVAL_SECONDS,
-    CONVERSATION_WORKER_USE_REALTIME_BROADCAST,
 )
-from holmes.core.supabase_dal import CONVERSATIONS_TABLE
 
 if TYPE_CHECKING:
     from holmes.core.supabase_dal import SupabaseDal
@@ -51,16 +48,11 @@ if TYPE_CHECKING:
 # ---- channel topic helpers ----
 
 
-def pg_changes_topic(account_id: str) -> str:
-    """Per-account channel for Conversations Postgres Changes."""
-    return f"holmes:pgchanges:{account_id}"
-
-
 def broadcast_submit_topic(account_id: str, cluster_id: str) -> str:
     """Per-account-per-cluster Broadcast channel for conversation submissions.
 
-    No WAL replication overhead — the initiator sends a broadcast message
-    after creating the conversation via RPC.
+    The account_id is the 3rd ``:``-delimited segment; the cluster_id is the
+    entire suffix after it (cluster_id may contain ``:`` characters).
     """
     return f"holmes:submit:{account_id}:{cluster_id}"
 
@@ -133,13 +125,10 @@ class RealtimeManager:
         dal: "SupabaseDal",
         holmes_id: str,
         on_new_pending: Callable[[], None],
-        *,
-        use_broadcast: bool = CONVERSATION_WORKER_USE_REALTIME_BROADCAST,
     ) -> None:
         self.dal = dal
         self.holmes_id = holmes_id
         self.on_new_pending = on_new_pending
-        self._use_broadcast = use_broadcast
         self._loop: Optional[asyncio.AbstractEventLoop] = None
         self._thread: Optional[threading.Thread] = None
         self._stop_event = threading.Event()
@@ -295,90 +284,12 @@ class RealtimeManager:
             except Exception:
                 logging.exception("Failed to set_auth on realtime client", exc_info=True)
 
-        # Subscribe using the configured mode.
-        if self._use_broadcast:
-            await self._subscribe_via_broadcast()
-        else:
-            await self._subscribe_via_pgchanges()
-
-    async def _subscribe_via_pgchanges(self) -> None:
-        """Option 1: Postgres Changes on the Conversations table.
-
-        Subscribes to INSERT/UPDATE filtered by ``account_id``.  Every
-        Conversations row change triggers a claim attempt.
-        """
-        topic = pg_changes_topic(self.dal.account_id)
-        self._channel = self._client.channel(
-            topic,
-            {"config": {"private": False}},
-        )
-
-        def _on_pg_change(payload: Dict[str, Any]) -> None:
-            try:
-                change = payload.get("data", {}) or {}
-                logging.info(
-                    "RealtimeManager: Postgres change notification: %s",
-                    change.get("type"),
-                )
-                self.on_new_pending()
-            except Exception:
-                logging.exception("Error in realtime pg change callback", exc_info=True)
-
-        account_id_filter = f"account_id=eq.{self.dal.account_id}"
-        self._channel.on_postgres_changes(
-            event="INSERT",
-            schema="public",
-            table=CONVERSATIONS_TABLE,
-            filter=account_id_filter,
-            callback=_on_pg_change,
-        )
-        self._channel.on_postgres_changes(
-            event="UPDATE",
-            schema="public",
-            table=CONVERSATIONS_TABLE,
-            filter=account_id_filter,
-            callback=_on_pg_change,
-        )
-
-        subscribed = asyncio.Event()
-
-        def _on_subscribe(status: Any, err: Optional[Exception] = None) -> None:
-            logging.info("PG changes subscribe status=%s err=%s", status, err)
-            status_str = str(status).upper()
-            if "SUBSCRIBED" in status_str:
-                self._connected = True
-                subscribed.set()
-                try:
-                    self.on_new_pending()
-                except Exception:
-                    logging.debug(
-                        "on_new_pending callback failed in pg subscribe",
-                        exc_info=True,
-                    )
-            elif any(
-                s in status_str for s in ("CHANNEL_ERROR", "CLOSED", "TIMED_OUT")
-            ):
-                self._connected = False
-                try:
-                    self.on_new_pending()
-                except Exception:
-                    logging.debug(
-                        "on_new_pending callback failed in pg error handler",
-                        exc_info=True,
-                    )
-
-        await self._channel.subscribe(_on_subscribe)
-        try:
-            await asyncio.wait_for(subscribed.wait(), timeout=5)
-        except asyncio.TimeoutError:
-            logging.warning("Timed out waiting for pg-changes subscribe ack")
-
-        logging.info("RealtimeManager connected: mode=pgchanges topic=%s", topic)
+        await self._subscribe_via_broadcast()
 
     async def _subscribe_via_broadcast(self) -> None:
-        """Option 2: Broadcast channel per account + cluster.
+        """Subscribe to the per-account-per-cluster Broadcast channel.
 
-        Subscribes to ``holmes:submit:{account_id}:{cluster_id}``.  The
+        Channel topic: ``holmes:submit:{account_id}:{cluster_id}``.  The
         initiator sends a broadcast after creating the conversation via RPC.
         No WAL replication overhead — the message goes directly through the
         Realtime WebSocket.
@@ -440,7 +351,7 @@ class RealtimeManager:
         except asyncio.TimeoutError:
             logging.warning("Timed out waiting for broadcast subscribe ack")
 
-        logging.info("RealtimeManager connected: mode=broadcast topic=%s", topic)
+        logging.info("RealtimeManager connected: topic=%s", topic)
 
     async def _shutdown_async(self) -> None:
         self._connected = False

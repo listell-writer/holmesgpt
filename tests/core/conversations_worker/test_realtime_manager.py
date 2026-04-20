@@ -1,15 +1,12 @@
 """Unit tests for RealtimeManager's testable (non-async) surface."""
-import os
 from unittest.mock import MagicMock
 
-import pytest
 import realtime._async.client as rt_client
 
 from holmes.core.conversations_worker.realtime_manager import (
     RealtimeManager,
     _install_proxy_patch_if_needed,
     broadcast_submit_topic,
-    pg_changes_topic,
 )
 
 
@@ -34,12 +31,24 @@ def test_is_connected_reflects_connection_flag():
     assert m.is_connected() is False
 
 
-def test_topic_helpers():
-    assert pg_changes_topic("acc-1") == "holmes:pgchanges:acc-1"
+def test_broadcast_submit_topic():
     assert (
         broadcast_submit_topic("acc-1", "cluster-1")
         == "holmes:submit:acc-1:cluster-1"
     )
+
+
+def test_broadcast_submit_topic_preserves_colons_in_cluster_id():
+    """Cluster id may itself contain colons — the entire suffix after the
+    account_id segment is the cluster_id."""
+    topic = broadcast_submit_topic("acc-1", "prod:us-east:1")
+    assert topic == "holmes:submit:acc-1:prod:us-east:1"
+    # Parsing contract: split into max 4 parts so cluster_id retains its colons.
+    parts = topic.split(":", 3)
+    assert parts[0] == "holmes"
+    assert parts[1] == "submit"
+    assert parts[2] == "acc-1"
+    assert parts[3] == "prod:us-east:1"
 
 
 def test_install_proxy_patch_does_nothing_without_env(monkeypatch):

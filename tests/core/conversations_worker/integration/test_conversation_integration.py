@@ -429,14 +429,13 @@ class TestRapidFollowups:
 
         conv = supabase_fx.create_conversation(
             ask="Answer '1' in one word.",
-            title="integ: presence-race",
+            title="integ: rapid-followups",
         )
         cid = conv["conversation_id"]
         supabase_fx.wait_for_terminal(cid, request_sequence=1, timeout=120)
 
         # Fire off follow-ups as fast as possible — each one triggers a new
-        # claim/dispatch cycle whose join_conversation_presence races with
-        # the previous turn's leave_conversation_presence.
+        # claim/dispatch cycle.
         for turn in range(2, NUM_TURNS + 1):
             now_iso = datetime.now(timezone.utc).isoformat()
             supabase_fx.post_followup(
@@ -449,8 +448,6 @@ class TestRapidFollowups:
                     }
                 ],
             )
-            # Wait for terminal so Holmes produces both a leave and a join
-            # for the next turn.
             result = supabase_fx.wait_for_terminal(
                 cid, request_sequence=turn, timeout=120
             )
@@ -459,7 +456,7 @@ class TestRapidFollowups:
             )
 
         # Every turn must have produced an ai_answer_end event — no turn
-        # lost its final write because a stale leave clobbered the new join.
+        # was lost to a race during claim/dispatch.
         types = supabase_fx.flat_event_types(cid)
         assert types.count("ai_answer_end") == NUM_TURNS, (
             f"Expected {NUM_TURNS} ai_answer_end events, got "

@@ -7,6 +7,10 @@ and the following environment variables:
                            password, account_id
     CLUSTER_NAME         – cluster to target (must match Holmes's config)
 
+Holmes subscribes to a per-account-per-cluster Broadcast channel
+(holmes:submit:{account_id}:{cluster_id}); tests send the broadcast after
+creating / following up a conversation so Holmes can pick it up immediately.
+
 Run with:
     poetry run pytest tests/core/conversations_worker/integration/ -m conversation_worker --no-cov -v
 """
@@ -50,12 +54,11 @@ class SupabaseFixture:
     user_id: str
     _store_url: str = ""
     _api_key: str = ""
-    use_pgchanges: bool = True
 
     # Track conversation IDs for cleanup
     _created_conversations: list = field(default_factory=list)
 
-    # Persistent Realtime connection for broadcast mode (lazy-initialized).
+    # Persistent Realtime connection for broadcast (lazy-initialized).
     _broadcast_loop: Any = field(default=None, repr=False)
     _broadcast_thread: Any = field(default=None, repr=False)
     _broadcast_ch: Any = field(default=None, repr=False)
@@ -86,9 +89,8 @@ class SupabaseFixture:
             },
         ).execute().data
         self._created_conversations.append(conv["conversation_id"])
-        # In broadcast mode, the initiator must notify Holmes explicitly.
-        if not self.use_pgchanges:
-            self.broadcast_submit(conv["conversation_id"])
+        # The initiator must notify Holmes explicitly via Broadcast.
+        self.broadcast_submit(conv["conversation_id"])
         return conv
 
     def post_followup(
@@ -106,16 +108,15 @@ class SupabaseFixture:
                 "_metadata": metadata or {},
             },
         ).execute().data
-        # In broadcast mode, notify Holmes after the follow-up too —
-        # followups re-pend the conversation just like initial creation.
-        if not self.use_pgchanges:
-            self.broadcast_submit(conversation_id)
+        # Follow-ups re-pend the conversation just like initial creation —
+        # notify Holmes over the Broadcast channel.
+        self.broadcast_submit(conversation_id)
         return result
 
     def _ensure_broadcast_channel(self) -> None:
         """Lazy-initialize a persistent Realtime connection + channel for
-        broadcast mode.  Runs an asyncio event loop in a daemon thread so
-        the sync test code can schedule coroutines on it."""
+        broadcast.  Runs an asyncio event loop in a daemon thread so the sync
+        test code can schedule coroutines on it."""
         if self._broadcast_ch is not None:
             return
 
@@ -299,10 +300,6 @@ def supabase_fx() -> SupabaseFixture:
     client.auth.set_session(res.session.access_token, res.session.refresh_token)
     client.postgrest.auth(res.session.access_token)
 
-    use_broadcast_str = os.environ.get("CONVERSATION_WORKER_USE_REALTIME_BROADCAST", "false")
-    use_broadcast = use_broadcast_str.lower() in ("true", "1", "yes")
-    use_pgchanges = not use_broadcast
-
     fx = SupabaseFixture(
         client=client,
         account_id=decoded["account_id"],
@@ -310,7 +307,6 @@ def supabase_fx() -> SupabaseFixture:
         user_id=res.user.id,
         _store_url=decoded["store_url"],
         _api_key=decoded["api_key"],
-        use_pgchanges=use_pgchanges,
     )
     yield fx
 

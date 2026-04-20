@@ -3,10 +3,7 @@ import json
 import logging
 
 from holmes import get_version  # type: ignore
-from holmes.common.env_vars import (
-    ENABLE_CONVERSATION_WORKER,
-    CONVERSATION_WORKER_USE_REALTIME_BROADCAST,
-)
+from holmes.common.env_vars import ENABLE_CONVERSATION_WORKER
 from holmes.config import Config
 from holmes.core.supabase_dal import SupabaseDal
 
@@ -15,7 +12,6 @@ class HolmesMetadata:
     is_robusta_ai_enabled: bool
     supports_additional_system_prompt: bool = True
     supports_realtime_conversations: bool = False
-    requires_realtime_broadcast: bool = False
 
 
 def update_holmes_status_in_db(dal: SupabaseDal, config: Config):
@@ -30,7 +26,6 @@ def update_holmes_status_in_db(dal: SupabaseDal, config: Config):
     metadata = HolmesMetadata(
         is_robusta_ai_enabled=config.should_try_robusta_ai,
         supports_realtime_conversations=bool(ENABLE_CONVERSATION_WORKER),
-        requires_realtime_broadcast=bool(CONVERSATION_WORKER_USE_REALTIME_BROADCAST),
     )
 
     dal.upsert_holmes_status(

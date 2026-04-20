@@ -46,8 +46,8 @@ ChatFunction = Callable[
 ]
 
 # When Realtime is connected we still poll periodically as a safety net —
-# Supabase Realtime has at-most-once delivery and notifications can be
-# missed.  This caps the maximum latency for a missed notification.
+# Supabase Realtime Broadcast has at-most-once delivery and notifications can
+# be missed.  This caps the maximum latency for a missed notification.
 _REALTIME_CONNECTED_POLL_SECONDS = 120
 
 
@@ -60,7 +60,6 @@ class ConversationWorker:
     and writes results back as ConversationEvents in real-time.
 
     Lifecycle: pending → queued (claimed) → running (processing) → completed/failed.
-    Presence is advertised for both queued and running conversations.
     """
 
     def __init__(
@@ -72,8 +71,8 @@ class ConversationWorker:
         self.dal = dal
         self.config = config
         self.chat_function = chat_function
-        # Uniquely identify this Holmes process (presence key, assignee value
-        # in Conversations). HOSTNAME alone is not unique because a pod can
+        # Uniquely identify this Holmes process (assignee value in
+        # Conversations). HOSTNAME alone is not unique because a pod can
         # restart and re-use the same name, and two replicas in different pods
         # can have the same env var in tests. Combining hostname + pid +
         # short uuid4 makes it globally unique across process lifetimes.
@@ -400,9 +399,6 @@ class ConversationWorker:
                 )
 
     def _process_conversation(self, task: ConversationTask) -> None:
-        # Presence was already joined during claim (queued state) and updated
-        # to running by _dispatch_queued. No join needed here.
-
         # Load events and extract the user ask + conversation history
         events = self.dal.get_conversation_events(task.conversation_id)
         self._hydrate_task_from_events(task, events)
