@@ -33,7 +33,7 @@ from holmes.core.models import (
     ToolApprovalDecision,
     ToolCallResult,
 )
-from holmes.core.oauth_config import _get_exchange_manager
+from holmes.core.oauth_config import OAuthTokenExchangeError, parse_oauth_decision
 from holmes.core.safeguards import prevent_overly_repeated_tool_call
 from holmes.core.tools import (
     StructuredToolResult,
@@ -154,21 +154,15 @@ def extract_bash_session_prefixes(messages: List[Dict[str, Any]]) -> List[str]:
     return list(prefixes)
 
 
-def _try_process_oauth_decision(
-    tool_call_id: str,
-    decision_data: Dict[str, Any],
-    request_context: Optional[Dict[str, Any]],
-) -> None:
-    """Process an OAuth callback from a tool approval decision.
-
-    Uses the pending exchange (which holds the PKCE code_verifier generated
-    when Holmes sent the approval request) to exchange the auth code for tokens.
-    """
+def _try_process_oauth_decision(tool_call_id, oauth_code, request_context) -> bool:
+    """Exchange an OAuth authorization code for tokens. Returns True on success."""
+    from holmes.core.oauth_config import _get_exchange_manager
     try:
-        payload_json = json.dumps(decision_data)
-        _get_exchange_manager().complete_exchange(tool_call_id, payload_json, request_context)
+        _get_exchange_manager().complete_exchange(tool_call_id, oauth_code, request_context)
+        return True
     except Exception as e:
         logging.error(f"Failed to process OAuth decision: {e}", exc_info=True)
+        return False
 
 
 # Callback type: receives a pending approval, returns (approved, optional_feedback)
@@ -311,20 +305,34 @@ class ToolCallingLLM:
             tool_decision = tool_call_with_decision.decision
             tool_result: Optional[ToolCallResult] = None
             if tool_decision and tool_decision.approved:
-                # Process OAuth decision if present (auth code from frontend browser OAuth flow)
-                if tool_decision.decision:
-                    _try_process_oauth_decision(tool_call.id, tool_decision.decision, request_context)
+                # Process OAuth auth code exchange if this decision carries one
+                oauth_code = parse_oauth_decision(tool_decision.decision)
+                user_id = (request_context or {}).get("user_id")
+                if oauth_code and user_id:
+                    oauth_success = _try_process_oauth_decision(tool_call.id, oauth_code, request_context)
+                    if oauth_success:
+                        # Token stored — load real tools for this user
+                        toolset = self.tool_executor._tool_to_toolset.get(tool_call.function.name)
+                        self.tool_executor.oauth_connector.load_tools_for_user(user_id, toolset, request_context)
+                    else:
+                        tool_result = ToolCallResult(
+                            tool_call_id=tool_call.id,
+                            tool_name=tool_call.function.name,
+                            description="",
+                            result="OAuth authentication failed. Please try again.", # type: ignore
+                        )
 
-                tool_result = self._invoke_llm_tool_call(
-                    tool_to_call=tool_call,
-                    previous_tool_calls=[],
-                    trace_span=trace_span,
-                    tool_number=None,
-                    user_approved=True,
-                    session_approved_prefixes=session_prefixes,
-                    request_context=request_context,
-                    enable_tool_approval=True,  # always True when processing decisions
-                )
+                if not tool_result:
+                    tool_result = self._invoke_llm_tool_call(
+                        tool_to_call=tool_call,
+                        previous_tool_calls=[],
+                        trace_span=trace_span,
+                        tool_number=None,
+                        user_approved=True,
+                        session_approved_prefixes=session_prefixes,
+                        request_context=request_context,
+                        enable_tool_approval=True,  # always True when processing decisions
+                    )
             else:
                 # Tool was rejected or no decision found, add rejection message
                 feedback_text = (
@@ -462,9 +470,15 @@ class ToolCallingLLM:
         return self._runbook_in_use
 
     def _get_tools(self) -> list:
-        """Get tools list, filtering restricted tools based on authorization."""
+        """Get tools list, filtering restricted tools based on authorization.
+
+        If a user_id is available (from request_context), per-user OAuth tools
+        replace _connect placeholders for authenticated users.
+        """
+        user_id = (self._request_context or {}).get("user_id") if hasattr(self, "_request_context") else None
         return self.tool_executor.get_all_tools_openai_format(
             include_restricted=self._should_include_restricted_tools(),
+            user_id=user_id,
         )
 
     @sentry_sdk.trace
@@ -653,7 +667,8 @@ class ToolCallingLLM:
                 params=tool_params,
             )
 
-        tool = self.tool_executor.get_tool_by_name(tool_name)
+        user_id = (request_context or {}).get("user_id")
+        tool = self.tool_executor.get_tool_by_name(tool_name, user_id=user_id)
         if not tool:
             logging.warning(
                 f"Skipping tool execution for {tool_name}: args: {tool_params}"
@@ -674,9 +689,14 @@ class ToolCallingLLM:
                 tool_call_id=tool_call_id,
                 session_approved_prefixes=session_approved_prefixes or [],
                 request_context=request_context,
-                tool_executor=self.tool_executor,
             )
             tool_response = tool.invoke(tool_params, context=invoke_context)
+
+            # Store OAuth tools discovered by a _connect placeholder
+            if tool_response.oauth_tools:
+                toolset_name = self.tool_executor.get_toolset_name(tool_name)
+                if toolset_name and user_id:
+                    self.tool_executor.oauth_connector.store_user_tools(user_id, toolset_name, tool_response.oauth_tools)
 
             # Track runbook usage - if fetch_runbook is called successfully,
             # restricted tools become available for the rest of the current request
@@ -949,6 +969,7 @@ class ToolCallingLLM:
         if trace_span is None:
             trace_span = DummySpan()
 
+        self._request_context = request_context
         all_tool_calls: list[dict] = []
 
         # Process tool decisions if provided (approval resume)
@@ -1314,7 +1335,9 @@ class ToolCallingLLM:
                 # Re-fetch tools if the tool list changed (runbook activation, OAuth tool discovery, etc.)
                 if tools is not None:
                     new_tools = self._get_tools()
-                    if len(new_tools) != len(tools):
+                    old_names = {t["function"]["name"] for t in tools}
+                    new_names = {t["function"]["name"] for t in new_tools}
+                    if old_names != new_names:
                         logging.warning(
                             f"Tool list changed - refreshing ({len(tools)} -> {len(new_tools)} tools)"
                         )
