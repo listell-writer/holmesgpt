@@ -110,7 +110,7 @@ class OAuthToolConnector:
                 self.store_user_tools(user_id, toolset.name, tools)
                 logger.info(
                     "Loaded %d OAuth tools for user %s on toolset %s",
-                    len(tools), user_id, toolset.name,
+                    len(tools), user_id[:6] if user_id else user_id, toolset.name,
                 )
             return tools
         except Exception as e:
@@ -187,6 +187,7 @@ class OAuthToolConnector:
                     if tool.name == name:
                         return tool
         return None
+
 
     # ── Error handling helpers ─────────────────────────────────────────
 

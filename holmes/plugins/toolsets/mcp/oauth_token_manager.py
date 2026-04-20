@@ -115,7 +115,7 @@ class OAuthTokenManager:
             loaded += 1
 
         if loaded:
-            logger.info("OAuthTokenManager: preloaded %d token(s) into cache", loaded)
+            logger.debug("OAuthTokenManager: preloaded %d token(s) into cache", loaded)
 
     # ── Public API ─────────────────────────────────────────────────────
 
@@ -158,7 +158,7 @@ class OAuthTokenManager:
                 authorization_url=oauth_config.authorization_url,
                 user_id=user_id,
             )
-            logger.info("OAuthTokenManager: loaded token from store (provider=%s)", oauth_config.authorization_url)
+            logger.debug("OAuthTokenManager: loaded token from store (provider=%s)", oauth_config.authorization_url)
             return stored_token["access_token"]
 
         return None
@@ -210,7 +210,7 @@ class OAuthTokenManager:
             client_id=oauth_config.client_id,
         )
 
-        logger.info(
+        logger.debug(
             "OAuthTokenManager: token stored (cache_key=%s, expires_in=%s, has_refresh=%s)",
             cache_key, expires_in, "refresh_token" in token_data,
         )
@@ -261,7 +261,7 @@ class OAuthTokenManager:
         if not expiring:
             return
 
-        logger.info("OAuthTokenManager: sweep found %d tokens expiring within %ds", len(expiring), OAUTH_REFRESH_AHEAD_SECONDS)
+        logger.debug("OAuthTokenManager: sweep found %d tokens expiring within %ds", len(expiring), OAUTH_REFRESH_AHEAD_SECONDS)
 
         for cache_key, entry in expiring:
             try:
@@ -339,7 +339,7 @@ class OAuthTokenManager:
 
         Returns (token_data, access_token, expires_in) on success, None on failure.
         """
-        logger.info("OAuthTokenManager: refreshing token at %s (cache_key=%s)", token_url, cache_key)
+        logger.debug("OAuthTokenManager: refreshing token at %s (cache_key=%s)", token_url, cache_key)
         response = httpx.post(
             token_url,
             data={
@@ -368,7 +368,7 @@ class OAuthTokenManager:
             refresh_token=token_data.get("refresh_token", refresh_token),
             refresh_expires_in=token_data.get("refresh_expires_in"),
         )
-        logger.info("OAuthTokenManager: token refreshed (cache_key=%s, expires_in=%s)", cache_key, expires_in)
+        logger.debug("OAuthTokenManager: token refreshed (cache_key=%s, expires_in=%s)", cache_key, expires_in)
         return token_data, access_token, expires_in
 
     # ── Key helpers ────────────────────────────────────────────────────
