@@ -698,15 +698,9 @@ class RemoteMCPToolset(Toolset):
 
     def get_oauth_config(self) -> Optional[Dict[str, Any]]:
         """Return OAuth config dict for syncing to DB/frontend, or None if not OAuth-enabled."""
-        if not self.is_oauth_enabled:
+        if not self.is_oauth_enabled or not isinstance(self._mcp_config, MCPConfig) or not self._mcp_config.oauth:
             return None
-        oauth = self._mcp_config.oauth
-        config = oauth.model_dump(exclude_none=True)
-        # registration_endpoint is excluded from model_dump (exclude=True on Field)
-        # but the frontend needs it for Dynamic Client Registration when client_id is absent
-        if oauth.registration_endpoint:
-            config["registration_endpoint"] = oauth.registration_endpoint
-        return config
+        return self._mcp_config.oauth.model_dump(exclude_none=True)
 
     def _load_remote_tools(self, request_context: Optional[Dict[str, Any]] = None) -> List["RemoteMCPTool"]:
         """Load tools from the MCP server and return as RemoteMCPTool instances."""
@@ -857,20 +851,7 @@ class RemoteMCPToolset(Toolset):
         if not isinstance(self._mcp_config, MCPConfig) or self._mcp_config.oauth is None:
             return (False, f"MCP server {self.name}: OAuth enabled but config not properly initialized")
         url = str(self._mcp_config.url).rstrip("/")
-
-        # If we already have a cached token (cache → DB → disk), try to load real tools directly.
-        # Only attempt if authorization_url is known (otherwise discovery hasn't run yet).
         oauth_config = self._mcp_config.oauth
-        disk_key = str(self._mcp_config.url)
-
-        if oauth_config.authorization_url and _get_token_manager().get_access_token(oauth_config, None, disk_key=disk_key):
-            try:
-                self.tools = self._load_remote_tools()
-                if self.tools:
-                    logging.info("OAuth MCP server %s: loaded %d tools using cached token", self.name, len(self.tools))
-                    return (True, "")
-            except Exception as e:
-                logging.warning("OAuth MCP server %s: cached token failed, falling back to placeholder: %s", self.name, _extract_root_error_message(e))
 
         try:
             # Collect HTTP responses for PRM discovery.  The WWW-Authenticate header

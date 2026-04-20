@@ -135,7 +135,7 @@ class MCPOAuthConfig(BaseModel):
     token_url: Optional[str] = Field(default=None, description="IdP token endpoint URL. Auto-discovered if omitted.")
     client_id: Optional[str] = Field(default=None, description="OAuth public client ID. Auto-registered via DCR if omitted.")
     scopes: Optional[List[str]] = Field(default=None, description="OAuth scopes to request.")
-    registration_endpoint: Optional[str] = Field(default=None, exclude=True, description="DCR endpoint (auto-populated during discovery, not user-facing).")
+    registration_endpoint: Optional[str] = Field(default=None, description="DCR endpoint (auto-populated during discovery, sent to frontend for client registration).")
 
     @model_validator(mode="after")
     def auto_enable_when_configured(self):
