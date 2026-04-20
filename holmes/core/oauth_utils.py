@@ -22,6 +22,7 @@ from holmes.core.oauth_config import (
     OAuthConfigLookupError,
     OAuthEndpoints,
     OAuthTokenExchangeError,
+    exchange_code_for_tokens,
 )
 
 logger = logging.getLogger(__name__)
@@ -47,65 +48,33 @@ def set_oauth_dal(dal: Any) -> None:
     _get_token_manager().set_dal(dal)
 
 
-# ── Token exchange ────────────────────────────────────────────────────────
+def preload_oauth_tokens() -> None:
+    """Preload tokens from persistent store into cache so the background sweep keeps them alive."""
+    _get_token_manager().preload_from_store()
 
 
-def exchange_code_for_tokens(
-    token_url: str,
-    code: str,
-    redirect_uri: str,
-    client_id: str,
-    code_verifier: Optional[str] = None,
-    client_secret: Optional[str] = None,
-) -> dict:
-    """Exchange an OAuth authorization code for tokens at the IdP's token endpoint.
+def eager_load_oauth_tools(executor: Any) -> None:
+    """For each OAuth toolset with cached tokens, eagerly load tools at startup.
 
-    Returns the parsed JSON token response (containing at least ``access_token``).
-    Raises :class:`OAuthTokenExchangeError` on HTTP failure or missing ``access_token``.
+    Covers both server mode (tokens preloaded from DB) and CLI mode (tokens
+    from disk). Stores loaded tools per-user on the executor so the first
+    request sees real tools immediately (no _connect placeholder round-trip).
     """
-    data = {
-        "grant_type": "authorization_code",
-        "code": code,
-        "redirect_uri": redirect_uri,
-        "client_id": client_id,
-    }
-    if code_verifier:
-        data["code_verifier"] = code_verifier
+    from holmes.plugins.toolsets.mcp.toolset_mcp import RemoteMCPToolset
 
-    # Some IdPs (e.g. Notion) require client credentials via HTTP Basic Auth,
-    # while others (e.g. Supabase) accept them in the POST body.
-    # Try Basic Auth first when client_secret is present, fall back to POST body.
-    auth = None
-    if client_secret:
-        auth = httpx.BasicAuth(client_id, client_secret)
+    token_mgr = _get_token_manager()
+    for ts in executor.toolsets:
+        if not isinstance(ts, RemoteMCPToolset) or not ts.is_oauth_enabled:
+            continue
+        if not ts._mcp_config.oauth.authorization_url:
+            continue
+        for user_id in token_mgr.get_cached_user_ids(ts._mcp_config.oauth):
+            request_ctx = {"user_id": user_id} if user_id != "__no_user__" else None
+            executor.oauth_connector.load_tools_for_user(user_id, ts, request_ctx)
 
-    resp = httpx.post(
-        token_url,
-        data=data,
-        headers={"Content-Type": "application/x-www-form-urlencoded"},
-        auth=auth,
-        timeout=30,
-    )
 
-    # If Basic Auth failed, retry with client_secret in POST body
-    if client_secret and not resp.is_success:
-        data["client_secret"] = client_secret
-        resp = httpx.post(
-            token_url,
-            data=data,
-            headers={"Content-Type": "application/x-www-form-urlencoded"},
-            timeout=30,
-        )
-
-    if not resp.is_success:
-        detail = resp.text[:300] if resp.text else "Unknown error"
-        raise OAuthTokenExchangeError(resp.status_code, detail)
-
-    token_data = resp.json()
-    if "access_token" not in token_data:
-        raise OAuthTokenExchangeError(resp.status_code, f"Response missing 'access_token'. Keys: {list(token_data.keys())}")
-
-    return token_data
+# exchange_code_for_tokens is re-exported from oauth_config (imported above)
+# to maintain backwards compatibility for existing callers.
 
 
 # ── PKCE ──────────────────────────────────────────────────────────────────
@@ -175,6 +144,8 @@ def start_oauth_callback_server(port: int = 0) -> Tuple[Any, Dict[str, Any], thr
             params = parse_qs(parsed.query)
             if "code" in params:
                 result["code"] = params["code"][0]
+                if "state" in params:
+                    result["state"] = params["state"][0]
                 self.send_response(200)
                 self.send_header("Content-Type", "text/html")
                 self.end_headers()
@@ -291,6 +262,9 @@ def cli_oauth_flow(oauth: OAuthEndpoints, server_name: str) -> Optional[Dict[str
         return None
     if "code" not in result:
         logger.warning("CLI OAuth %s: no auth code received (timeout?)", server_name)
+        return None
+    if result.get("state") != state:
+        logger.warning("CLI OAuth %s: state mismatch (CSRF protection) — expected=%s, got=%s", server_name, state, result.get("state"))
         return None
 
     try:

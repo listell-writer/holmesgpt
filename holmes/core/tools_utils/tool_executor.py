@@ -1,5 +1,5 @@
 import logging
-from typing import Dict, List, Optional
+from typing import Any, Dict, List, Optional
 
 import sentry_sdk
 
@@ -9,7 +9,7 @@ from holmes.core.tools import (
     Toolset,
     ToolsetStatusEnum,
 )
-from holmes.plugins.toolsets.mcp.toolset_mcp import RemoteMCPToolset
+from holmes.core.tools_utils.oauth_tool_connector import OAuthToolConnector
 
 display_logger = logging.getLogger("holmes.display.tool_executor")
 
@@ -46,10 +46,16 @@ class ToolExecutor:
                 self.tools_by_name[tool.name] = tool
                 self._tool_to_toolset[tool.name] = ts
 
-    def get_tool_by_name(self, name: str) -> Optional[Tool]:
+        self.oauth_connector = OAuthToolConnector()
+
+    # ── Tool lookup ────────────────────────────────────────────────────
+
+    def get_tool_by_name(self, name: str, user_id: Optional[str] = None) -> Optional[Tool]:
         if name in self.tools_by_name:
             return self.tools_by_name[name]
-
+        user_tool = self.oauth_connector.find_tool(name, user_id)
+        if user_tool:
+            return user_tool
         logging.warning(f"could not find tool {name}. skipping")
         return None
 
@@ -84,6 +90,18 @@ class ToolExecutor:
 
         return None
 
+    # ── Cloning ────────────────────────────────────────────────────────
+
+    def _clone_base(self) -> "ToolExecutor":
+        """Create a shallow clone sharing toolsets but with independent tool registries."""
+        clone = object.__new__(ToolExecutor)
+        clone.toolsets = self.toolsets
+        clone.enabled_toolsets = self.enabled_toolsets
+        clone.tools_by_name = dict(self.tools_by_name)
+        clone._tool_to_toolset = dict(self._tool_to_toolset)
+        clone.oauth_connector = self.oauth_connector  # Shared reference
+        return clone
+
     def clone_with_extra_tools(self, extra_tools: List[Tool]) -> "ToolExecutor":
         """Create a shallow clone with additional tools registered.
 
@@ -93,11 +111,7 @@ class ToolExecutor:
         This is used to inject frontend tools (FrontendPauseTool) on a
         per-request basis without modifying the shared ToolExecutor.
         """
-        clone = object.__new__(ToolExecutor)
-        clone.toolsets = self.toolsets
-        clone.enabled_toolsets = self.enabled_toolsets
-        clone.tools_by_name = dict(self.tools_by_name)
-        clone._tool_to_toolset = dict(self._tool_to_toolset)
+        clone = self._clone_base()
 
         for tool in extra_tools:
             if tool.name in clone.tools_by_name:
@@ -110,10 +124,13 @@ class ToolExecutor:
 
         return clone
 
+    # ── Tool listing ───────────────────────────────────────────────────
+
     @sentry_sdk.trace
     def get_all_tools_openai_format(
         self,
         include_restricted: bool = True,
+        user_id: Optional[str] = None,
     ):
         """Get all tools in OpenAI format.
 
@@ -121,43 +138,17 @@ class ToolExecutor:
             include_restricted: If False, filter out tools marked as restricted.
                                Set to True when runbook is in use or restricted
                                tools are explicitly enabled.
+            user_id: If provided, replace OAuth _connect placeholders with the
+                     user's real tools (loaded after authentication).
         """
+        tools = self._get_base_tools(include_restricted)
+        return self.oauth_connector.apply_user_tools(tools, user_id, self._tool_to_toolset)
+
+    def _get_base_tools(self, include_restricted: bool = True) -> list:
+        """Get all tools in OpenAI format (base set, no per-user overrides)."""
         tools = []
         for tool in self.tools_by_name.values():
-            # Filter out restricted tools if not authorized
             if not include_restricted and tool._is_restricted():
                 continue
             tools.append(tool.get_openai_format())
         return tools
-
-    def with_oauth_tools(
-        self,
-        oauth_tools: Dict[str, List[Tool]],
-    ) -> "ToolExecutor":
-        """Create a copy with OAuth placeholder _connect tools replaced by real tools.
-
-        The original ToolExecutor is NOT modified.
-        """
-        toolsets_by_name = {ts.name: ts for ts in self.enabled_toolsets}
-
-        new = object.__new__(ToolExecutor)
-        new.toolsets = self.toolsets
-        new.enabled_toolsets = self.enabled_toolsets
-        new.tools_by_name = dict(self.tools_by_name)
-        new._tool_to_toolset = dict(self._tool_to_toolset)
-
-        for toolset_name, new_tools in oauth_tools.items():
-            toolset = toolsets_by_name.get(toolset_name)
-            if not isinstance(toolset, RemoteMCPToolset):
-                continue
-
-            # Remove the placeholder _connect tool
-            new.tools_by_name.pop(toolset.connect_tool_name, None)
-            new._tool_to_toolset.pop(toolset.connect_tool_name, None)
-
-            # Add real tools
-            for tool in new_tools:
-                new.tools_by_name[tool.name] = tool
-                new._tool_to_toolset[tool.name] = toolset
-
-        return new

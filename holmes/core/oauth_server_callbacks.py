@@ -11,6 +11,7 @@ from typing import Any, List, Optional
 from holmes.core.models import OAuthCallbackRequest, OAuthCallbackResponse
 from holmes.core.oauth_config import OAuthConfigLookupError
 from holmes.core.oauth_utils import exchange_code_for_tokens
+from holmes.plugins.toolsets.mcp.toolset_mcp import RemoteMCPToolset
 
 logger = logging.getLogger(__name__)
 
@@ -23,11 +24,9 @@ def get_toolset_oauth_config(
 ) -> tuple:
     """Look up a toolset's OAuth config from a list of toolsets.
 
-    Returns ``(oauth_config, client_id, token_manager)``.
+    Returns ``(oauth_config, client_id, token_manager, toolset)``.
     Raises :class:`OAuthConfigLookupError` on failure.
     """
-    from holmes.plugins.toolsets.mcp.toolset_mcp import RemoteMCPToolset
-
     toolset = None
     for ts in toolsets:
         if isinstance(ts, RemoteMCPToolset) and (ts.name == toolset_name or ts.connect_tool_name == toolset_name):
@@ -48,19 +47,22 @@ def get_toolset_oauth_config(
     if not client_id:
         raise OAuthConfigLookupError(f"No client_id available for '{toolset_name}'")
 
-    return oauth, client_id, token_manager
+    return oauth, client_id, token_manager, toolset
 
 
 def process_oauth_callback(
     request: OAuthCallbackRequest,
     toolsets: List[Any],
     token_manager: Any,
+    executor: Optional[Any] = None,
 ) -> OAuthCallbackResponse:
     """Process an OAuth callback: look up config, exchange code, store tokens.
 
     Shared by both the HTTP endpoint and the in-flight tool-approval path.
+    If executor is provided, also loads and caches real tools per user so
+    subsequent requests skip the _connect placeholder.
     """
-    oauth, client_id, mgr = get_toolset_oauth_config(
+    oauth, client_id, mgr, toolset = get_toolset_oauth_config(
         toolsets, request.toolset_name, token_manager, request.client_id,
     )
 
@@ -77,4 +79,12 @@ def process_oauth_callback(
     request_context = {"user_id": request.user_id} if request.user_id else None
     mgr.store_token(oauth, token_data, request_context=request_context)
     logger.info("OAuth tokens stored for toolset '%s'", request.toolset_name)
+
+    # Load and cache real tools so subsequent requests skip _connect
+    if request.user_id and executor and toolset:
+        try:
+            executor.oauth_connector.load_tools_for_user(request.user_id, toolset, request_context)
+        except Exception:
+            logger.warning("Failed to preload tools after OAuth for %s", toolset.name, exc_info=True)
+
     return OAuthCallbackResponse(success=True)

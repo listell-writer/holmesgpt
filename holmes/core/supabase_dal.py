@@ -949,9 +949,15 @@ class SupabaseDal:
 
     # --- OAuth Token Storage ---
 
-    def get_oauth_token(self, provider_name: str, user_id: Optional[str] = None) -> Optional[Dict]:
-        """Get the OAuth token for a provider in this account, optionally scoped to a user."""
+    def get_oauth_token(self, provider_name: str, user_id: str) -> Optional[Dict]:
+        """Get the OAuth token for a provider in this account, scoped to a user.
+
+        When user_id is None, returns None — in server mode every token is stored
+        with a real user_id, so there are no unscoped tokens to find.
+        """
         if not self.enabled:
+            return None
+        if not user_id:
             return None
         try:
             query = (
@@ -959,9 +965,8 @@ class SupabaseDal:
                 .select("*")
                 .eq("account_id", self.account_id)
                 .eq("provider_name", provider_name)
+                .eq("user_id", user_id)
             )
-            if user_id:
-                query = query.eq("user_id", user_id)
             res = query.order("updated_at", desc=True).limit(1).execute()
             return res.data[0] if res.data else None
         except Exception:
@@ -1001,4 +1006,28 @@ class SupabaseDal:
         except Exception:
             logging.exception("Error upserting OAuth token for provider %s", provider_name)
             return False
+
+    def get_all_oauth_tokens_for_cluster(self, signing_key_hash: str) -> list[Dict]:
+        """Get all OAuth tokens owned by this cluster that match the signing key.
+
+        Preloads tokens into the in-memory cache at startup so the background
+        sweep thread can keep them alive (refresh before expiry). Without this,
+        tokens only enter the cache on first user request and may expire in the
+        DB if no requests arrive within the token lifetime.
+        """
+        if not self.enabled:
+            return []
+        try:
+            res = (
+                self.client.table(OAUTH_TOKENS_TABLE)
+                .select("*")
+                .eq("account_id", self.account_id)
+                .eq("origin_cluster_id", self.cluster or "unknown")
+                .eq("signing_key_hash", signing_key_hash)
+                .execute()
+            )
+            return res.data or []
+        except Exception:
+            logging.exception("Error fetching OAuth tokens for cluster preload")
+            return []
 

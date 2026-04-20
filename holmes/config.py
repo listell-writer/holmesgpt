@@ -40,9 +40,8 @@ if TYPE_CHECKING:
     from holmes.plugins.sources.prometheus.plugin import AlertManagerSource
 
 from holmes.core.config import config_path_dir
-from holmes.core.oauth_utils import set_oauth_dal
+from holmes.core.oauth_utils import eager_load_oauth_tools, preload_oauth_tokens, set_oauth_dal
 from holmes.core.supabase_dal import SupabaseDal
-from holmes.plugins.toolsets.mcp.oauth_tools_cache import has_oauth_mcp_toolsets
 from holmes.utils.definitions import RobustaConfig
 from holmes.utils.pydantic_utils import RobustaBaseConfig, load_model_from_file
 
@@ -118,7 +117,6 @@ class Config(RobustaBaseConfig):
     _cached_tool_executor: Optional[ToolExecutor] = None
     _cached_executor_key: Optional[tuple] = None
     _executor_lock: threading.Lock = PrivateAttr(default_factory=threading.Lock)
-    _has_oauth_toolsets: bool = False
 
     # TODO: Separate those fields to facade class, this shouldn't be part of the config.
     _toolset_manager: Optional[ToolsetManager] = PrivateAttr(None)
@@ -380,7 +378,9 @@ class Config(RobustaBaseConfig):
                 executor = ToolExecutor(toolsets, on_event=on_event)
                 self._cached_tool_executor = executor
                 self._cached_executor_key = cache_key
-                self._has_oauth_toolsets = has_oauth_mcp_toolsets(toolsets)
+
+                preload_oauth_tokens()
+                eager_load_oauth_tools(executor)
                 return executor
 
         toolsets = self.toolset_manager.prepare_toolsets(
@@ -390,8 +390,10 @@ class Config(RobustaBaseConfig):
             prerequisite_cache=prerequisite_cache,
             on_event=on_event,
         )
-        self._has_oauth_toolsets = has_oauth_mcp_toolsets(toolsets)
-        return ToolExecutor(toolsets, on_event=on_event)
+        preload_oauth_tokens()
+        executor = ToolExecutor(toolsets, on_event=on_event)
+        eager_load_oauth_tools(executor)
+        return executor
 
     def refresh_tool_executor(
         self,
@@ -440,7 +442,6 @@ class Config(RobustaBaseConfig):
             with self._executor_lock:
                 self._cached_tool_executor = ToolExecutor(new_toolsets)
                 self._cached_executor_key = cache_key
-            self._has_oauth_toolsets = has_oauth_mcp_toolsets(new_toolsets)
 
         return [(name, old.value, new.value) for name, old, new in changes]
 

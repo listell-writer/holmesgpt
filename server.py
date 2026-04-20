@@ -62,7 +62,6 @@ from holmes.utils.holmes_sync_toolsets import holmes_sync_toolsets_status
 from holmes.utils.log import EndpointFilter
 from holmes.checks.checks_api import init_checks_app
 from holmes.core.tools_utils.filesystem_result_storage import tool_result_storage
-from holmes.plugins.toolsets.mcp.oauth_tools_cache import load_authenticated_oauth_tools
 from holmes.core.models import FrontendToolMode
 from holmes.core.tools_utils.frontend_tools import build_frontend_noop_tool, build_frontend_pause_tool
 from holmes.core.tracing import TracingFactory
@@ -287,8 +286,8 @@ def oauth_callback(request: OAuthCallbackRequest) -> OAuthCallbackResponse:
         bool(request.code_verifier), request.redirect_uri,
     )
     try:
-        toolsets = config.create_tool_executor(dal=dal).toolsets
-        return process_oauth_callback(request, toolsets, _get_token_manager())
+        executor = config.create_tool_executor(dal=dal, reuse_executor=True)
+        return process_oauth_callback(request, executor.toolsets, _get_token_manager(), executor=executor)
     except OAuthConfigLookupError as e:
         logging.error("OAuth config error for '%s': %s", request.toolset_name, e.detail)
         raise HTTPException(status_code=400, detail=e.detail)
@@ -431,11 +430,6 @@ def chat(chat_request: ChatRequest, http_request: Request):
             tool_results_dir=tool_results_dir,
         )
 
-        # Inject authenticated OAuth tools if the user has cached tokens
-        if chat_request.user_id and config._has_oauth_toolsets:
-            authenticated_tools = load_authenticated_oauth_tools(ai.tool_executor.toolsets, request_context)
-            if authenticated_tools:
-                ai = ai.with_executor(ai.tool_executor.with_oauth_tools(authenticated_tools))
         global_instructions = dal.get_global_instructions_for_account()
         messages = build_chat_messages(
             chat_request.ask,

@@ -209,26 +209,6 @@ def _get_mcp_log_file(server_name: str) -> TextIO:
     return open(log_path, "w")
 
 
-def _inject_oauth_token(
-    toolset: "RemoteMCPToolset",
-    request_context: Optional[Dict[str, Any]],
-    headers: Optional[Dict[str, str]],
-) -> Optional[Dict[str, str]]:
-    """Inject cached OAuth Bearer token into headers if available."""
-    if not toolset.is_oauth_enabled:
-        return headers
-
-    oauth_config = toolset._mcp_config.oauth
-    cached_token = _get_token_manager().get_access_token(oauth_config, request_context)
-    if cached_token:
-        headers = headers or {}
-        headers["Authorization"] = f"Bearer {cached_token}"
-        logger.info("OAuth token injected for MCP server %s", toolset.name)
-    else:
-        logger.warning("OAuth MCP server %s: no cached token — request will likely 401", toolset.name)
-    return headers
-
-
 
 @asynccontextmanager
 async def get_initialized_mcp_session(
@@ -257,7 +237,7 @@ async def get_initialized_mcp_session(
     elif toolset._mcp_config.mode == MCPMode.SSE:
         url = str(toolset._mcp_config.url)
         httpx_factory = create_mcp_http_client_factory(toolset._mcp_config.verify_ssl)
-        rendered_headers = _inject_oauth_token(toolset, request_context, toolset._render_headers(request_context))
+        rendered_headers = toolset._render_headers(request_context)
         async with sse_client(
             url,
             rendered_headers,
@@ -273,7 +253,7 @@ async def get_initialized_mcp_session(
     else:
         url = str(toolset._mcp_config.url)
         httpx_factory = create_mcp_http_client_factory(toolset._mcp_config.verify_ssl)
-        rendered_headers = _inject_oauth_token(toolset, request_context, toolset._render_headers(request_context))
+        rendered_headers = toolset._render_headers(request_context)
         async with streamablehttp_client(
             url,
             headers=rendered_headers,
@@ -402,20 +382,6 @@ class RemoteMCPTool(Tool):
             real_tools = [RemoteMCPTool.create(tool, self.toolset) for tool in tools_result.tools]
 
             if real_tools:
-                # Replace the placeholder with real tools on the toolset
-                self.toolset.tools = real_tools
-
-                # Register new tools in the tool executor so the LLM can call them
-                tool_executor = context.tool_executor
-                if tool_executor:
-                    # Remove the placeholder
-                    tool_executor.tools_by_name.pop(self.name, None)
-                    tool_executor._tool_to_toolset.pop(self.name, None)
-                    # Register real tools
-                    for tool in real_tools:
-                        tool_executor.tools_by_name[tool.name] = tool
-                        tool_executor._tool_to_toolset[tool.name] = self.toolset
-
                 tool_names = [t.name for t in real_tools]
                 logger.info("OAuth MCP %s: loaded %d tools after authentication: %s", self.toolset.name, len(real_tools), tool_names)
                 return StructuredToolResult(
@@ -423,6 +389,7 @@ class RemoteMCPTool(Tool):
                     data=f"Successfully authenticated and discovered {len(real_tools)} tools: {', '.join(tool_names)}. You can now call these tools directly.",
                     params=params,
                     invocation=f"OAuth connect to {self.toolset.name}",
+                    oauth_tools=real_tools,
                 )
             else:
                 logger.warning("OAuth MCP %s: authenticated but no tools found", self.toolset.name)
@@ -734,14 +701,20 @@ class RemoteMCPToolset(Toolset):
         if not self.is_oauth_enabled:
             return None
         oauth = self._mcp_config.oauth
-        return {
-            "enabled": True,
-            "authorization_url": oauth.authorization_url,
-            "token_url": oauth.token_url,
-            "client_id": oauth.client_id,
-            "scopes": oauth.scopes,
-            "registration_endpoint": oauth.registration_endpoint,
-        }
+        config = oauth.model_dump(exclude_none=True)
+        # registration_endpoint is excluded from model_dump (exclude=True on Field)
+        # but the frontend needs it for Dynamic Client Registration when client_id is absent
+        if oauth.registration_endpoint:
+            config["registration_endpoint"] = oauth.registration_endpoint
+        return config
+
+    def _load_remote_tools(self, request_context: Optional[Dict[str, Any]] = None) -> List["RemoteMCPTool"]:
+        """Load tools from the MCP server and return as RemoteMCPTool instances."""
+        if request_context:
+            tools_result = asyncio.run(self._get_server_tools_with_context(request_context))
+        else:
+            tools_result = asyncio.run(self._get_server_tools())
+        return [RemoteMCPTool.create(tool, self) for tool in tools_result.tools]
 
     def _render_headers(
         self, request_context: Optional[Dict[str, Any]] = None
@@ -752,7 +725,8 @@ class RemoteMCPToolset(Toolset):
         Process:
         1. Start with 'headers' field (backward compatibility, passed as-is)
         2. Render 'extra_headers' via Jinja2 templates
-        3. Merge them (later layers take precedence)
+        3. Inject OAuth Bearer token if this is an OAuth-enabled toolset
+        4. Merge them (later layers take precedence)
 
         Returns:
             Merged headers dictionary or None
@@ -774,6 +748,17 @@ class RemoteMCPToolset(Toolset):
             )
             if rendered:
                 final_headers.update(rendered)
+
+        # Inject OAuth Bearer token if available (only when authorization_url is
+        # known — before discovery it's None and we can't look up a token yet)
+        if self.is_oauth_enabled and self._mcp_config.oauth.authorization_url:
+            oauth_config = self._mcp_config.oauth
+            cached_token = _get_token_manager().get_access_token(oauth_config, request_context)
+            if cached_token:
+                final_headers["Authorization"] = f"Bearer {cached_token}"
+                logger.info("OAuth token injected for MCP server %s", self.name)
+            else:
+                logger.warning("OAuth MCP server %s: no cached token — request will likely 401", self.name)
 
         return final_headers if final_headers else None
 
@@ -848,11 +833,7 @@ class RemoteMCPToolset(Toolset):
             if self.is_oauth_enabled:
                 return self._check_oauth_server_reachable()
 
-            tools_result = asyncio.run(self._get_server_tools())
-
-            self.tools = [
-                RemoteMCPTool.create(tool, self) for tool in tools_result.tools
-            ]
+            self.tools = self._load_remote_tools()
 
             if not self.tools:
                 logging.warning("mcp server %s loaded 0 tools.", self.name)
@@ -873,18 +854,18 @@ class RemoteMCPToolset(Toolset):
         load the real tools directly. Otherwise, auto-discover OAuth endpoints if needed,
         then register a placeholder tool that triggers the OAuth flow on first use.
         """
-        assert isinstance(self._mcp_config, MCPConfig)
-        assert self._mcp_config.oauth is not None
+        if not isinstance(self._mcp_config, MCPConfig) or self._mcp_config.oauth is None:
+            return (False, f"MCP server {self.name}: OAuth enabled but config not properly initialized")
         url = str(self._mcp_config.url).rstrip("/")
 
-        # If we already have a cached token (cache → DB → disk), try to load real tools directly
+        # If we already have a cached token (cache → DB → disk), try to load real tools directly.
+        # Only attempt if authorization_url is known (otherwise discovery hasn't run yet).
         oauth_config = self._mcp_config.oauth
         disk_key = str(self._mcp_config.url)
 
-        if _get_token_manager().get_access_token(oauth_config, None, disk_key=disk_key):
+        if oauth_config.authorization_url and _get_token_manager().get_access_token(oauth_config, None, disk_key=disk_key):
             try:
-                tools_result = asyncio.run(self._get_server_tools())
-                self.tools = [RemoteMCPTool.create(tool, self) for tool in tools_result.tools]
+                self.tools = self._load_remote_tools()
                 if self.tools:
                     logging.info("OAuth MCP server %s: loaded %d tools using cached token", self.name, len(self.tools))
                     return (True, "")
@@ -954,7 +935,8 @@ class RemoteMCPToolset(Toolset):
 
         Returns True if discovery succeeded and oauth config is fully populated.
         """
-        assert isinstance(self._mcp_config, MCPConfig) and self._mcp_config.oauth is not None
+        if not isinstance(self._mcp_config, MCPConfig) or self._mcp_config.oauth is None:
+            return False
         oauth_config = self._mcp_config.oauth
         verify_ssl = self._mcp_config.verify_ssl
 
