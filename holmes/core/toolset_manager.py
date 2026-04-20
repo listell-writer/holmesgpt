@@ -168,11 +168,17 @@ class ToolsetManager:
                 toolsets_by_name[toolset.name] = toolset
 
         if toolset_tags is not None:
-            toolsets_by_name = {
-                name: toolset
-                for name, toolset in toolsets_by_name.items()
-                if any(tag in toolset_tags for tag in toolset.tags)
-            }
+            filtered_toolsets_by_name = {}
+            for name, toolset in toolsets_by_name.items():
+                if any(tag in toolset_tags for tag in toolset.tags):
+                    filtered_toolsets_by_name[name] = toolset
+                elif toolset.enabled:
+                    logging.warning(
+                        f"Toolset '{name}' is enabled but was excluded because its tags "
+                        f"{[tag.value for tag in toolset.tags]} don't match the current "
+                        f"mode's tags {[tag.value for tag in toolset_tags]}"
+                    )
+            toolsets_by_name = filtered_toolsets_by_name
 
         final_toolsets = list(toolsets_by_name.values())
 
@@ -378,9 +384,6 @@ class ToolsetManager:
                 toolset.status = ToolsetStatusEnum(cached_status["status"])
                 toolset.error = cached_status.get("error", None)
                 toolset.enabled = cached_status.get("enabled", True)
-                toolset.type = ToolsetType(
-                    cached_status.get("type", ToolsetType.BUILTIN.value)
-                )
                 toolset.path = cached_status.get("path", None)
             # check prerequisites for only enabled toolset when the toolset is loaded from cache. When the toolset is
             # not loaded from cache, the prerequisites are checked in the refresh_toolset_status method.
