@@ -1,0 +1,120 @@
+# Test: Microsoft Teams MCP - read chat messages
+# Verifies Holmes can locate a Teams group chat by topic, read its recent
+# messages, and extract a verification code — exercising the delegated-Graph
+# read path of the floriscornel Teams MCP server.
+#
+# Scope intentionally limited to read-only operations (list_chats,
+# get_chat_messages) to keep the CI permission footprint minimal.
+#
+# Requirements (env vars):
+#   TEAMS_AUTH_TOKEN    - Microsoft Graph delegated access token.
+#                         Scopes: Chat.Read, Chat.ReadWrite, ChatMessage.Send,
+#                                 User.Read, User.ReadBasic.All
+#                         Graph access tokens expire in ~1h — CI must mint a
+#                         fresh token (via refresh token flow) before each run.
+#   TEAMS_TEST_CHAT_ID  - ID of a pre-existing group chat that the token's
+#                         user is a member of. The chat's topic must be
+#                         'holmes-eval-257-oncall-notes' (set once, reused).
+#
+# Reentrancy: fully idempotent. before_test posts a message containing the
+# verification code; duplicate messages across parallel runs are harmless
+# (Holmes just finds any one of them). after_test is intentionally omitted
+# to avoid parallel CI runs deleting each other's messages or the shared
+# test chat. See CLAUDE.md "Cloud Service Eval Reentrancy".
+
+user_prompt: |
+  An on-call engineer has been posting investigation notes into a Microsoft
+  Teams group chat. The chat has the topic 'holmes-eval-257-oncall-notes'.
+  Find that chat, read its recent messages, and report any incident
+  verification code that appears in the notes.
+
+expected_output:
+  - "Must report the verification code: HLMS257-V3R1FY"
+
+include_tool_calls: true
+
+tags:
+  - mcp
+  - integration
+  - fast
+  - hard
+  - question-answer
+
+before_test: |
+  set -e
+
+  # Validate required environment variables
+  [ -n "${TEAMS_AUTH_TOKEN:-}" ] || { echo "Missing env var: TEAMS_AUTH_TOKEN (delegated Graph access token)"; exit 1; }
+  [ -n "${TEAMS_TEST_CHAT_ID:-}" ] || { echo "Missing env var: TEAMS_TEST_CHAT_ID (pre-existing group chat ID)"; exit 1; }
+
+  VERIFY_CODE="HLMS257-V3R1FY"
+  GRAPH="https://graph.microsoft.com/v1.0"
+
+  # Verify the token can see the chat (surfaces auth/permission issues early)
+  echo "Verifying token can access chat ${TEAMS_TEST_CHAT_ID}..."
+  CHAT_CHECK=$(curl -sS -w "\n%{http_code}" \
+    "${GRAPH}/chats/${TEAMS_TEST_CHAT_ID}" \
+    -H "Authorization: Bearer ${TEAMS_AUTH_TOKEN}")
+  CHAT_HTTP=$(echo "$CHAT_CHECK" | tail -n1)
+  CHAT_BODY=$(echo "$CHAT_CHECK" | sed '$d')
+
+  if [ "$CHAT_HTTP" -ne 200 ]; then
+    echo "Cannot read chat ${TEAMS_TEST_CHAT_ID}. HTTP ${CHAT_HTTP}: ${CHAT_BODY}"
+    echo "Check that the token is valid and the user is a member of the chat."
+    exit 1
+  fi
+
+  # Optional sanity check on the chat topic
+  CHAT_TOPIC=$(echo "$CHAT_BODY" | python3 -c 'import sys,json; print(json.load(sys.stdin).get("topic") or "")')
+  if [ "$CHAT_TOPIC" != "holmes-eval-257-oncall-notes" ]; then
+    echo "WARNING: expected chat topic 'holmes-eval-257-oncall-notes', got '${CHAT_TOPIC}'"
+    echo "The prompt references the topic by name — update the chat topic in Teams."
+  fi
+
+  # Post an investigation-notes-style message containing the verification code
+  echo "Posting verification message (idempotent — duplicates are OK)..."
+  POST_BODY=$(cat <<EOF
+{
+  "body": {
+    "contentType": "text",
+    "content": "Investigation notes for the checkout-api latency incident. Reference: ${VERIFY_CODE}. Root cause is still under investigation; assigning to the platform team."
+  }
+}
+EOF
+  )
+
+  POST_RESP=$(curl -sS -w "\n%{http_code}" -X POST \
+    "${GRAPH}/chats/${TEAMS_TEST_CHAT_ID}/messages" \
+    -H "Authorization: Bearer ${TEAMS_AUTH_TOKEN}" \
+    -H "Content-Type: application/json" \
+    -d "${POST_BODY}")
+
+  POST_HTTP=$(echo "$POST_RESP" | tail -n1)
+  POST_RESP_BODY=$(echo "$POST_RESP" | sed '$d')
+
+  if [ "$POST_HTTP" -ne 201 ] && [ "$POST_HTTP" -ne 200 ]; then
+    echo "Failed to post message. HTTP ${POST_HTTP}: ${POST_RESP_BODY}"
+    exit 1
+  fi
+  echo "Message posted."
+
+  # Poll until the message is queryable (Graph eventual consistency)
+  MESSAGE_VISIBLE=false
+  for i in $(seq 1 15); do
+    LIST_RESP=$(curl -sS "${GRAPH}/chats/${TEAMS_TEST_CHAT_ID}/messages?\$top=10" \
+      -H "Authorization: Bearer ${TEAMS_AUTH_TOKEN}")
+    if echo "$LIST_RESP" | grep -q "${VERIFY_CODE}"; then
+      MESSAGE_VISIBLE=true
+      break
+    fi
+    sleep 1
+  done
+
+  if [ "$MESSAGE_VISIBLE" = false ]; then
+    echo "Message not visible via GET after 15s"
+    exit 1
+  fi
+
+  echo "Setup complete"
+
+# No after_test — see reentrancy note at the top of this file.

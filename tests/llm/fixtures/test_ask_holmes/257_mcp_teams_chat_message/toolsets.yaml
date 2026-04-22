@@ -1,0 +1,23 @@
+# floriscornel/teams-mcp (stdio via npx) for Microsoft Teams chat/channel access.
+# Uses a delegated Microsoft Graph access token supplied via TEAMS_AUTH_TOKEN.
+# Scopes required at token-mint time:
+#   User.Read, User.ReadBasic.All,
+#   Team.ReadBasic.All, Channel.ReadBasic.All, ChannelMessage.Read.All,
+#   Chat.Read, Chat.ReadWrite, ChatMessage.Send
+# For a stricter read-only token, launch the MCP with --read-only (drops write scopes).
+toolsets:
+  teams-mcp:
+    type: mcp
+    enabled: true
+    config:
+      mode: stdio
+      command: "npx"
+      args: ["-y", "@floriscornel/teams-mcp@latest"]
+      env:
+        AUTH_TOKEN: "{{ env.TEAMS_AUTH_TOKEN }}"
+  kubernetes/core:
+    enabled: false
+  kubernetes/logs:
+    enabled: false
+  helm/core:
+    enabled: false
