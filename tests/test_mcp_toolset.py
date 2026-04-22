@@ -797,6 +797,64 @@ class TestMCPSchemaPreservation:
         tool = RemoteMCPTool.create(mcp_tool, mock_toolset)
         assert tool.parameters["name"].json_schema_extra is None
 
+    @pytest.mark.usefixtures("suppress_migration_warnings")
+    def test_bool_schema_shorthand(self) -> None:
+        """JSON Schema allows `true`/`false` as a valid schema: `true` means
+        "any value", `false` means "never valid". The SigNoz MCP server's
+        signoz_create_dashboard tool uses `true` in several nested positions
+        (e.g. widgets[].queryData, widgets[].items.args[]). The parser must
+        accept both and return a ToolParameter without crashing.
+        """
+        mcp_tool = Tool(
+            name="create_dashboard",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "any_value": True,
+                    "never_valid": False,
+                    "widgets": {
+                        "type": "array",
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "query_data": True,
+                                "args": {"type": "array", "items": True},
+                            },
+                        },
+                    },
+                },
+                "required": ["widgets", "any_value", "never_valid"],
+            },
+            description="Create a dashboard",
+            annotations=None,
+        )
+
+        mock_toolset = RemoteMCPToolset(
+            name="test_toolset",
+            description="Test toolset",
+            config={"url": "http://localhost:1234"},
+        )
+
+        tool = RemoteMCPTool.create(mcp_tool, mock_toolset)
+
+        # `true` is permissive: pass `required` through from the parent.
+        assert tool.parameters["any_value"].type == "string"
+        assert tool.parameters["any_value"].required is True
+        # `false` forbids all values, so even if listed as required we
+        # surface required=False so the LLM isn't prompted to send one.
+        assert tool.parameters["never_valid"].required is False
+
+        widgets = tool.parameters["widgets"]
+        assert widgets.type == "array"
+        widget_item = widgets.items
+        assert widget_item is not None
+        assert widget_item.properties is not None
+        assert widget_item.properties["query_data"].type == "string"
+        args = widget_item.properties["args"]
+        assert args.type == "array"
+        assert args.items is not None
+        assert args.items.type == "string"
+
 
 class TestExceptionGroupUnwrapping:
     def test_extract_root_error_from_exception_group(self):

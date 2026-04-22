@@ -1,0 +1,23 @@
+toolsets:
+  signoz:
+    type: mcp
+    enabled: true
+    description: "SigNoz observability platform (logs, traces, metrics, alerts, dashboards)"
+    config:
+      mode: stdio
+      command: "{{ env.SIGNOZ_MCP_BINARY }}"
+      env:
+        SIGNOZ_URL: "{{ env.SIGNOZ_URL }}"
+        SIGNOZ_API_KEY: "{{ env.SIGNOZ_API_KEY }}"
+        LOG_LEVEL: "error"
+        OTEL_SDK_DISABLED: "true"
+  kubernetes/core:
+    enabled: false
+  kubernetes/logs:
+    enabled: false
+  helm/core:
+    enabled: false
+  bash:
+    enabled: false
+  robusta:
+    enabled: false

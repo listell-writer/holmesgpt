@@ -1,0 +1,113 @@
+# Test: SigNoz MCP log search (real end-to-end)
+#
+# Seeds the real SigNoz tenant via OTLP HTTP with an ERROR log containing a
+# unique verification code, then asks Holmes to find it via the official
+# signoz-mcp-server (https://github.com/SigNoz/signoz-mcp-server).
+#
+# Required environment variables:
+#   - SIGNOZ_URL:            tenant URL, e.g. https://foo.us2.signoz.cloud
+#   - SIGNOZ_API_KEY:        service-account API key (viewer role is enough)
+#   - SIGNOZ_INGESTION_KEY:  OTLP HTTP ingestion key
+#   - SIGNOZ_OTLP_ENDPOINT:  full OTLP HTTP logs URL, e.g.
+#                            https://ingest.us2.signoz.cloud:443/v1/logs
+#   - SIGNOZ_MCP_BINARY:     absolute path to the signoz-mcp-server binary.
+#                            Install with:
+#                              go install github.com/SigNoz/signoz-mcp-server/cmd/server@latest
+#                            then export SIGNOZ_MCP_BINARY="$(go env GOPATH)/bin/server"
+#
+# Anti-hallucination: the verification code is embedded only in the log body
+# that before_test ingests into SigNoz. Holmes cannot produce it without
+# actually calling signoz_search_logs (or similar) via the MCP server.
+
+user_prompt: >-
+  The payment-api-257 service is failing. Search SigNoz logs for ERROR
+  entries from that service and report the verification_code value
+  embedded in the error log body (format SIGNOZ-EVAL-XXXXXXXX).
+
+expected_output:
+  - "Must call at least one tool from the 'signoz' MCP toolset (e.g. signoz_search_logs) to retrieve logs"
+  - "Must report the verification code SIGNOZ-EVAL-257a9k3m exactly as it appears in the log body"
+  - "Must identify that the root cause is a payment gateway timeout after 30s"
+
+include_tool_calls: true
+
+tags:
+  - mcp
+  - logs
+  - medium
+
+setup_timeout: 180
+
+before_test: |
+  set -eu
+
+  : "${SIGNOZ_URL:?SIGNOZ_URL must be set}"
+  : "${SIGNOZ_INGESTION_KEY:?SIGNOZ_INGESTION_KEY must be set}"
+  : "${SIGNOZ_API_KEY:?SIGNOZ_API_KEY must be set}"
+  : "${SIGNOZ_OTLP_ENDPOINT:?SIGNOZ_OTLP_ENDPOINT must be set (e.g. https://ingest.us2.signoz.cloud:443/v1/logs)}"
+  : "${SIGNOZ_MCP_BINARY:?SIGNOZ_MCP_BINARY must be set — install via: go install github.com/SigNoz/signoz-mcp-server/cmd/server@latest}"
+
+  if [ ! -x "$SIGNOZ_MCP_BINARY" ]; then
+    echo "❌ SIGNOZ_MCP_BINARY=$SIGNOZ_MCP_BINARY is not an executable file"
+    exit 1
+  fi
+
+  SERVICE_NAME="payment-api-257"
+  VERIFICATION_CODE="SIGNOZ-EVAL-257a9k3m"
+  TS_NS=$(date +%s%N)
+
+  PAYLOAD=$(cat <<JSON
+  {
+    "resourceLogs": [{
+      "resource": {"attributes": [
+        {"key": "service.name", "value": {"stringValue": "${SERVICE_NAME}"}},
+        {"key": "deployment.environment", "value": {"stringValue": "holmesgpt-eval"}}
+      ]},
+      "scopeLogs": [{
+        "scope": {"name": "holmesgpt-eval"},
+        "logRecords": [{
+          "timeUnixNano": "${TS_NS}",
+          "observedTimeUnixNano": "${TS_NS}",
+          "severityNumber": 17,
+          "severityText": "ERROR",
+          "body": {"stringValue": "Payment gateway rejected request verification_code=${VERIFICATION_CODE} reason=timeout after 30s"}
+        }]
+      }]
+    }]
+  }
+  JSON
+  )
+
+  echo "⏳ Ingesting OTLP log to $SIGNOZ_OTLP_ENDPOINT (service=$SERVICE_NAME, code=$VERIFICATION_CODE)"
+  INGEST_OK=false
+  for attempt in 1 2 3 4 5; do
+    HTTP_STATUS=$(curl -sk -o /tmp/signoz_ingest_$$.out -w "%{http_code}" -X POST "$SIGNOZ_OTLP_ENDPOINT" \
+      -H "signoz-ingestion-key: ${SIGNOZ_INGESTION_KEY}" \
+      -H "Content-Type: application/json" \
+      --data "$PAYLOAD" || echo "000")
+    if [ "$HTTP_STATUS" = "200" ]; then
+      echo "✅ OTLP ingest succeeded (attempt $attempt)"
+      INGEST_OK=true
+      break
+    fi
+    echo "⚠️  OTLP ingest attempt $attempt returned HTTP $HTTP_STATUS: $(head -c 300 /tmp/signoz_ingest_$$.out 2>/dev/null)"
+    sleep $((attempt * 2))
+  done
+  rm -f /tmp/signoz_ingest_$$.out
+
+  if [ "$INGEST_OK" != "true" ]; then
+    echo "❌ OTLP ingest failed after 5 attempts"
+    exit 1
+  fi
+
+  # SigNoz ingestion has ~10-15s latency. Sleep so the log is queryable when
+  # Holmes runs. Holmes's own retry loops aren't guaranteed, so pre-wait here.
+  echo "⏳ Waiting 25s for SigNoz to index the log..."
+  sleep 25
+  echo "✅ Ready: log with code $VERIFICATION_CODE should be queryable via signoz_search_logs"
+
+after_test: |
+  # SigNoz Cloud has no per-log delete API; retention handles cleanup.
+  # The test uses a fixed verification code, so parallel PR runs re-ingest
+  # the same code — that's fine and keeps the eval reentrant.
+  echo "✅ No cleanup required (SigNoz retention)"

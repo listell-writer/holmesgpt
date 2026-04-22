@@ -47,6 +47,7 @@ nav:
   - Robusta: robusta.md
   - Sentry (MCP): sentry-mcp.md
   - ServiceNow: servicenow.md
+  - SigNoz (MCP): signoz-mcp.md
   - Slab: slab.md
   - Splunk (MCP): splunk-mcp.md
   - SQL Server: database-sqlserver.md

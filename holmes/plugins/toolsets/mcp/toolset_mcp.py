@@ -435,7 +435,10 @@ class RemoteMCPTool(Tool):
 
     @classmethod
     def _parse_tool_parameter(
-        cls, schema: dict[str, Any], root_schema: dict[str, Any], required: bool = True
+        cls,
+        schema: Union[dict[str, Any], bool],
+        root_schema: dict[str, Any],
+        required: bool = True,
     ) -> ToolParameter:
         """Recursively parse a JSON Schema property into a ToolParameter.
 
@@ -443,6 +446,18 @@ class RemoteMCPTool(Tool):
         so that the OpenAI-formatted schema sent to the LLM accurately describes
         complex parameter types (arrays, objects).
         """
+        # JSON Schema allows a boolean schema: `true` means "any value",
+        # `false` means "no value allowed". Some MCP servers (e.g. SigNoz's
+        # signoz_create_dashboard) use `true` as a shorthand for fields with
+        # unconstrained types. Treat it as a permissive string parameter so
+        # tool loading doesn't crash.
+        if isinstance(schema, bool):
+            return ToolParameter(
+                description=None,
+                type="string",
+                required=required if schema else False,
+            )
+
         schema = cls._resolve_schema(schema, root_schema)
 
         # If _resolve_schema preserved a multi-branch anyOf, parse each branch
@@ -477,10 +492,11 @@ class RemoteMCPTool(Tool):
         param_type = schema.get("type", "string")
 
         items = None
-        if "items" in schema and isinstance(schema["items"], dict):
-            items = cls._parse_tool_parameter(
-                schema["items"], root_schema, required=True
-            )
+        raw_items = schema.get("items")
+        # `items: true` is JSON Schema shorthand for "any value"; forward it
+        # through the same bool handler so the LLM still sees the array type.
+        if isinstance(raw_items, (dict, bool)):
+            items = cls._parse_tool_parameter(raw_items, root_schema, required=True)
 
         properties = None
         if "properties" in schema and isinstance(schema["properties"], dict):

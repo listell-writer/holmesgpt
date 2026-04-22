@@ -283,6 +283,9 @@ def responses():
             re.compile(r"https://.*\.es\.amazonaws\.com")
         )  # AWS OpenSearch
 
+        # Allow SigNoz Cloud API + OTLP ingest (all regions: us, us2, eu, in)
+        rsps.add_passthru(re.compile(r"https://.*\.signoz\.cloud"))
+
         # Allow Confluence/Atlassian Cloud API calls
         rsps.add_passthru(re.compile(r"https://.*\.atlassian\.net"))
         rsps.add_passthru("https://api.atlassian.com")  # Atlassian Cloud API gateway

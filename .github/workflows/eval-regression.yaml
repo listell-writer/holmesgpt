@@ -1178,6 +1178,31 @@ jobs:
               body: body
             });
 
+      - name: Install signoz-mcp-server binary
+        if: steps.check-tests.outputs.should-run == 'true'
+        shell: bash
+        run: |
+          # Pinned to the version the SigNoz eval was validated against.
+          # The install directory is on PATH in GitHub-hosted runners.
+          SIGNOZ_MCP_VERSION="v0.2.1"
+          TMP_DIR="$(mktemp -d)"
+          INSTALL_DIR="$HOME/.local/bin"
+          mkdir -p "$INSTALL_DIR"
+          curl -fsSL \
+            "https://github.com/SigNoz/signoz-mcp-server/releases/download/${SIGNOZ_MCP_VERSION}/signoz-mcp-server_linux_amd64.tar.gz" \
+            | tar xz -C "$TMP_DIR"
+          # Release tarball contains a binary named 'signoz-mcp-server' or 'server'.
+          BIN="$(find "$TMP_DIR" -maxdepth 4 -type f \( -name signoz-mcp-server -o -name server \) | head -1)"
+          if [ -z "$BIN" ]; then
+            echo "Could not locate signoz-mcp-server binary inside tarball"
+            ls -R "$TMP_DIR"
+            exit 1
+          fi
+          cp "$BIN" "$INSTALL_DIR/signoz-mcp-server"
+          chmod +x "$INSTALL_DIR/signoz-mcp-server"
+          echo "SIGNOZ_MCP_BINARY=$INSTALL_DIR/signoz-mcp-server" >> "$GITHUB_ENV"
+          "$INSTALL_DIR/signoz-mcp-server" --version 2>&1 || true
+
       - name: Run tests
         if: steps.check-tests.outputs.should-run == 'true'
         id: evals
@@ -1201,6 +1226,10 @@ jobs:
           MOONSHOT_API_KEY: ${{ secrets.MOONSHOT_API_KEY }}
           ELASTICSEARCH_URL: ${{ secrets.ELASTICSEARCH_URL }}
           ELASTICSEARCH_API_KEY: ${{ secrets.ELASTICSEARCH_API_KEY }}
+          SIGNOZ_URL: ${{ secrets.SIGNOZ_URL }}
+          SIGNOZ_API_KEY: ${{ secrets.SIGNOZ_API_KEY }}
+          SIGNOZ_INGESTION_KEY: ${{ secrets.SIGNOZ_INGESTION_KEY }}
+          SIGNOZ_OTLP_ENDPOINT: ${{ secrets.SIGNOZ_OTLP_ENDPOINT }}
           CONFLUENCE_BASE_URL: ${{ vars.CONFLUENCE_BASE_URL }}
           CONFLUENCE_SA_USER: ${{ secrets.CONFLUENCE_SA_USER }}
           CONFLUENCE_SA_API_KEY: ${{ secrets.CONFLUENCE_SA_API_KEY }}
