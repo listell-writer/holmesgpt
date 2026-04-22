@@ -1,0 +1,20 @@
+toolsets:
+  signoz:
+    type: mcp
+    enabled: true
+    description: "SigNoz observability platform (logs, traces, metrics, alerts)"
+    config:
+      mode: stdio
+      command: "python"
+      args:
+        - "tests/llm/fixtures/test_ask_holmes/257_signoz_log_search/mcp_signoz_server.py"
+  kubernetes/core:
+    enabled: false
+  kubernetes/logs:
+    enabled: false
+  helm/core:
+    enabled: false
+  bash:
+    enabled: false
+  robusta:
+    enabled: false
