@@ -1,0 +1,36 @@
+# Test: Read an incident from PagerDuty via the native Holmes toolset.
+#
+# Matrix with 257b which tests the same prompt against the hosted PagerDuty
+# MCP server. Both arms share the same before_test (shared/pagerduty_eval_257.sh)
+# which idempotently seeds one incident with two verification markers:
+#   - a code in the incident title
+#   - a token in an incident note
+#
+# Both markers are static strings that the LLM cannot guess — it must query the
+# PagerDuty API to find them.
+#
+# Requirements:
+#   PAGERDUTY_USER_API_KEY       — User API token with write permission
+#   PAGERDUTY_EVAL_SERVICE_ID    — (optional) defaults to PUD1YCZ
+#   PAGERDUTY_EVAL_FROM_EMAIL    — (optional) defaults to natan@robusta.dev
+
+user_prompt: |
+  Using PagerDuty, find the open incident with incident_key "HLMS257".
+  Report two things from it:
+    1. The verification code that appears in the incident's title.
+    2. The token that appears in a note on the incident.
+
+expected_output:
+  - "Must report the title verification code: 7k9x2m4p"
+  - "Must report the note token: r8v3q1w5"
+
+tags:
+  - pagerduty
+  - question-answer
+  - medium
+
+before_test: |
+  bash ../../shared/pagerduty_eval_257.sh
+
+# No after_test — the incident is intentionally reused across runs.
+# See CLAUDE.md "Cloud Service Eval Reentrancy".

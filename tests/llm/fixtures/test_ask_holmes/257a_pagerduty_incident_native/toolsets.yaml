@@ -1,0 +1,14 @@
+# Native PagerDuty toolset (Confluence-style, delegates to HttpToolset).
+toolsets:
+  pagerduty:
+    enabled: true
+    config:
+      api_key: "{{ env.PAGERDUTY_USER_API_KEY }}"
+      region: "us"
+      from_email: "{{ env.PAGERDUTY_EVAL_FROM_EMAIL }}"
+  kubernetes/core:
+    enabled: false
+  kubernetes/logs:
+    enabled: false
+  helm/core:
+    enabled: false

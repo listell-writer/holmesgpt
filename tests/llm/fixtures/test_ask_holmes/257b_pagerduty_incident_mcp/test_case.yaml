@@ -1,0 +1,34 @@
+# Test: Read an incident from PagerDuty via PagerDuty's OFFICIAL hosted MCP server.
+#
+# Matrix with 257a which tests the same prompt against the native Holmes toolset.
+# Both arms share the same before_test (shared/pagerduty_eval_257.sh).
+#
+# This arm uses PagerDuty's hosted MCP server at https://mcp.pagerduty.com/mcp
+# authenticated with the same User API Token. No OAuth flow required — the
+# hosted server takes a static Authorization header.
+#
+# Requirements:
+#   PAGERDUTY_USER_API_KEY       — User API token with write permission
+#   PAGERDUTY_EVAL_SERVICE_ID    — (optional) defaults to PUD1YCZ
+#   PAGERDUTY_EVAL_FROM_EMAIL    — (optional) defaults to natan@robusta.dev
+
+user_prompt: |
+  Using PagerDuty, find the open incident with incident_key "HLMS257".
+  Report two things from it:
+    1. The verification code that appears in the incident's title.
+    2. The token that appears in a note on the incident.
+
+expected_output:
+  - "Must report the title verification code: 7k9x2m4p"
+  - "Must report the note token: r8v3q1w5"
+
+tags:
+  - pagerduty
+  - mcp
+  - question-answer
+  - medium
+
+before_test: |
+  bash ../../shared/pagerduty_eval_257.sh
+
+# No after_test — see CLAUDE.md "Cloud Service Eval Reentrancy".

@@ -53,6 +53,7 @@ HolmesGPT includes pre-built integrations for popular monitoring and observabili
 
 <div class="grid cards" markdown>
 
+-   [:material-ticket:{ .lg .middle } **PagerDuty**](pagerduty.md)
 -   [:material-ticket:{ .lg .middle } **ServiceNow**](servicenow.md)
 
 </div>

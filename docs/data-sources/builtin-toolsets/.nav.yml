@@ -39,6 +39,7 @@ nav:
   - New Relic: newrelic.md
   - Notion: notion.md
   - OpenShift: openshift.md
+  - PagerDuty: pagerduty.md
   - PostgreSQL: database-postgresql.md
   - Prometheus: prometheus.md
   - Prefect (MCP): prefect-mcp.md

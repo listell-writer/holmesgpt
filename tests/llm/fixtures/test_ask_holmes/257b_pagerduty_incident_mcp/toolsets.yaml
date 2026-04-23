@@ -1,0 +1,21 @@
+# Official PagerDuty hosted MCP server (https://mcp.pagerduty.com/mcp).
+# Auth is a static Authorization header carrying the same User API token used
+# by the native toolset in 257a.
+toolsets:
+  pagerduty-mcp:
+    type: mcp
+    enabled: true
+    description: "PagerDuty official hosted MCP server"
+    config:
+      mode: streamable-http
+      url: https://mcp.pagerduty.com/mcp
+      headers:
+        Authorization: "Token {{ env.PAGERDUTY_USER_API_KEY }}"
+  pagerduty:
+    enabled: false
+  kubernetes/core:
+    enabled: false
+  kubernetes/logs:
+    enabled: false
+  helm/core:
+    enabled: false

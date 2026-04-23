@@ -173,6 +173,7 @@ markers = [
     "elasticsearch: Tests for Elasticsearch/OpenSearch toolset functionality",
     "integration: Integration tests requiring external services (e.g., running server, real APIs)",
     "confluence: Tests for Confluence page fetching toolset",
+    "pagerduty: Tests for PagerDuty incident-management toolset",
     # REGRESSION TEST SELECTION CRITERIA:
     # - Must pass 30+ iterations reliably with Sonnet-4.5 model
     # - No external API dependencies (Loki OK, NewRelic/DataDog excluded)

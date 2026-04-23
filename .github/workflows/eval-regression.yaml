@@ -1210,6 +1210,9 @@ jobs:
           CORALOGIX_SEND_API_KEY: ${{ secrets.CORALOGIX_SEND_API_KEY }}
           DATADOG_API_KEY: ${{ secrets.DATADOG_API_KEY }}
           DATADOG_APP_KEY: ${{ secrets.DATADOG_APP_KEY }}
+          PAGERDUTY_USER_API_KEY: ${{ secrets.PAGERDUTY_USER_API_KEY }}
+          PAGERDUTY_EVAL_SERVICE_ID: ${{ secrets.PAGERDUTY_EVAL_SERVICE_ID }}
+          PAGERDUTY_EVAL_FROM_EMAIL: ${{ secrets.PAGERDUTY_EVAL_FROM_EMAIL }}
           BRAINTRUST_API_KEY: ${{ secrets.BRAINTRUST_API_KEY }}
           MODEL_LIST_FILE_LOCATION: /tmp/model_list.yaml
           UPLOAD_DATASET: "true"
