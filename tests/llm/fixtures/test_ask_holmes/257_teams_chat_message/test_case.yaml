@@ -9,11 +9,16 @@
 #   User.Read, User.ReadBasic.All, Chat.ReadWrite, ChatMessage.Send
 #
 # Requirements (env vars):
-#   TEAMS_AUTH_TOKEN - Pre-minted delegated Microsoft Graph access token.
-#                      Graph access tokens expire in ~1h; refresh the secret
-#                      before runs. Any app that can issue Graph tokens
-#                      with the above scopes works (az CLI, MSAL app, etc.);
-#                      the toolset does not care which Entra client minted it.
+#   TEAMS_AUTH_TOKEN  - Pre-minted delegated Microsoft Graph access token.
+#                       Graph access tokens expire in ~1h; refresh the secret
+#                       before runs. Mint via scripts/get_teams_token.py or
+#                       any MSAL/Graph client. The toolset does not care which
+#                       Entra client minted it.
+#   TEAMS_TEST_MEMBER - Comma-separated list of UPNs (emails) to include as
+#                       chat members (e.g. "alice@tenant.com,bob@tenant.com").
+#                       The prompt tells Holmes to look up each and add them
+#                       to the group chat. At least 2 members required for
+#                       a group chat (token user is added automatically).
 #
 # Reentrancy: each run creates a NEW chat with a Holmes-chosen unique topic
 # suffix, so parallel runs never collide on the same resource. after_test
@@ -27,10 +32,9 @@ user_prompt: |
   coordinate the investigation.
 
   Please:
-  1. Look up the following two responders in the Teams directory:
-       - natan@robusta.dev
-       - arik@robusta.dev
-  2. Create a new Microsoft Teams group chat that includes both of them.
+  1. Look up each of the following responders in the Teams directory:
+     {{ env.TEAMS_TEST_MEMBER }}
+  2. Create a new Microsoft Teams group chat that includes all of them.
      The chat topic must start with 'holmes-eval-257-' and end with a
      unique suffix you choose (any random string works).
   3. Post an initial message to the chat with the text:
@@ -38,8 +42,8 @@ user_prompt: |
   4. Report the chat topic you chose and the chat ID that was created.
 
 expected_output:
-  - "Must have called teams_search_users (twice, or once per responder) to resolve natan@robusta.dev and arik@robusta.dev to user ids"
-  - "Must have called teams_create_chat with chat_type 'group', both resolved user ids, and a topic starting with 'holmes-eval-257-'"
+  - "Must have called teams_search_users (once per responder) to resolve each of {{ env.TEAMS_TEST_MEMBER }} to a user id"
+  - "Must have called teams_create_chat with chat_type 'group', all resolved user ids, and a topic starting with 'holmes-eval-257-'"
   - "Must have called teams_send_chat_message to post a message containing 'HLMS257-V3R1FY'"
   - "Must report the chat topic (starting with 'holmes-eval-257-') and the chat ID"
 
