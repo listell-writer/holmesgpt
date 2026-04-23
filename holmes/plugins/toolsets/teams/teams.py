@@ -133,6 +133,61 @@ class TeamsToolset(Toolset):
         return resp.json(), dict(resp.headers)
 
 
+_VALID_CONTENT_TYPES = ("text", "html")
+_VALID_IMPORTANCE = ("normal", "high", "urgent")
+
+
+def _build_message_body(
+    params: Dict[str, Any], allow_subject: bool = False
+) -> Any:
+    """Translate our tool parameters into the Graph chatMessage body.
+
+    Handles content_type, attachments (Adaptive Cards), importance, and
+    optionally subject (channel messages only). Returns a dict ready to
+    POST, or a StructuredToolResult error if the caller passed invalid
+    enum values.
+    """
+    content_type = (params.get("content_type") or "html").lower()
+    if content_type not in _VALID_CONTENT_TYPES:
+        return StructuredToolResult(
+            status=StructuredToolResultStatus.ERROR,
+            error=f"content_type must be one of {_VALID_CONTENT_TYPES}, got '{content_type}'",
+            params=params,
+        )
+    importance = (params.get("importance") or "normal").lower()
+    if importance not in _VALID_IMPORTANCE:
+        return StructuredToolResult(
+            status=StructuredToolResultStatus.ERROR,
+            error=f"importance must be one of {_VALID_IMPORTANCE}, got '{importance}'",
+            params=params,
+        )
+
+    body: Dict[str, Any] = {
+        "body": {"contentType": content_type, "content": params["content"]},
+        "importance": importance,
+    }
+
+    if allow_subject and params.get("subject"):
+        body["subject"] = params["subject"]
+
+    attachments = params.get("attachments") or []
+    if attachments:
+        body["attachments"] = [
+            {
+                "id": a["id"],
+                "contentType": (
+                    a.get("content_type")
+                    or a.get("contentType")
+                    or "application/vnd.microsoft.card.adaptive"
+                ),
+                "content": a["content"],
+            }
+            for a in attachments
+        ]
+
+    return body
+
+
 class BaseTeamsTool(Tool, ABC):
     """Base class for Teams tools with shared Graph request and error handling."""
 
@@ -342,31 +397,80 @@ class TeamsSendChatMessage(BaseTeamsTool):
             toolset=toolset,
             name="teams_send_chat_message",
             description=(
-                "Post a plain-text message into an existing Microsoft Teams chat. "
-                "Use chat_id returned by teams_create_chat or teams_list_chats."
+                "Post a message into an existing Microsoft Teams chat. "
+                "Mirrors the Graph chatMessage resource — supports plain text, "
+                "HTML formatting, and Adaptive Card attachments.\n"
+                "\n"
+                "CONTENT TYPES:\n"
+                "  content_type='text' — raw text. Newlines render as newlines.\n"
+                "  content_type='html' (default) — Teams renders a subset of HTML: "
+                "<b>, <strong>, <i>, <em>, <u>, <s>, <br>, <p>, <h1>-<h6>, "
+                "<ul>/<ol>/<li>, <pre>, <code>, <blockquote>, <a href>, <img>, "
+                "<table>/<tr>/<td>. Use <pre> for multi-line code/logs, <ul> for "
+                "bullets, <h3> or <b> for section headers, <br> or <p> between "
+                "sections. Escape literal < > & in user content.\n"
+                "\n"
+                "ADAPTIVE CARDS (richer formatting — fact tables, badges, actions): "
+                "set content_type='html' and put a single placeholder in content: "
+                '  <attachment id=\"<uuid>\"></attachment>\n'
+                "then pass `attachments` as a list with one entry: "
+                '  {"id": "<same-uuid>", '
+                '"content_type": "application/vnd.microsoft.card.adaptive", '
+                '"content": "<JSON-serialized-as-a-string Adaptive Card v1.5 payload>"} '
+                "Card schema: https://adaptivecards.io. Generate your own UUID for id. "
+                "The `content` field of the attachment must be the card JSON "
+                "serialized as a STRING (not a nested object).\n"
+                "\n"
+                "IMPORTANCE: 'normal' (default), 'high', or 'urgent'. 'urgent' shows "
+                "a red banner and triggers a priority notification."
             ),
             parameters={
                 "chat_id": ToolParameter(
-                    description="The chat ID (from teams_create_chat or teams_list_chats).",
+                    description="Chat ID (from teams_create_chat or teams_list_chats).",
                     type="string",
                     required=True,
                 ),
                 "content": ToolParameter(
-                    description="Plain-text message body.",
+                    description=(
+                        "Message body. Plain text when content_type='text', HTML when "
+                        "content_type='html'. For adaptive cards, a single "
+                        "<attachment id=\"<uuid>\"></attachment> tag."
+                    ),
                     type="string",
                     required=True,
+                ),
+                "content_type": ToolParameter(
+                    description="'html' (default) or 'text'.",
+                    type="string",
+                    required=False,
+                ),
+                "attachments": ToolParameter(
+                    description=(
+                        "Optional list of attachments (usually Adaptive Cards). Each "
+                        "item: {id (string UUID, referenced in content), content_type "
+                        "(typically 'application/vnd.microsoft.card.adaptive'), "
+                        "content (JSON-serialized card as string)}."
+                    ),
+                    type="array",
+                    required=False,
+                ),
+                "importance": ToolParameter(
+                    description="'normal' (default), 'high', or 'urgent'.",
+                    type="string",
+                    required=False,
                 ),
             },
         )
 
     def _invoke(self, params: dict, context: ToolInvokeContext) -> StructuredToolResult:
+        body = _build_message_body(params)
+        if isinstance(body, StructuredToolResult):
+            return body
         return self._graph_request(
             "POST",
             f"/chats/{params['chat_id']}/messages",
             params_for_result=params,
-            json_body={
-                "body": {"contentType": "text", "content": params["content"]},
-            },
+            json_body=body,
         )
 
     def get_parameterized_one_liner(self, params: Dict) -> str:
@@ -537,38 +641,95 @@ class TeamsSendChannelMessage(BaseTeamsTool):
             toolset=toolset,
             name="teams_send_channel_message",
             description=(
-                "Post a plain-text message (or status update) into a Teams channel. "
-                "Use this to write updates as an investigation progresses. "
-                "Requires team_id and channel_id from teams_list_teams / "
-                "teams_create_channel."
+                "Post a message (or status update) into a Teams channel. "
+                "Same Graph chatMessage resource as teams_send_chat_message, with "
+                "channel-specific extras: 'subject' (headline shown above the "
+                "message) and richer rendering surface.\n"
+                "\n"
+                "CONTENT TYPES:\n"
+                "  content_type='text' — raw text.\n"
+                "  content_type='html' (default) — Teams renders a subset of HTML: "
+                "<b>, <strong>, <i>, <em>, <u>, <s>, <br>, <p>, <h1>-<h6>, "
+                "<ul>/<ol>/<li>, <pre>, <code>, <blockquote>, <a href>, <img>, "
+                "<table>/<tr>/<td>. Use <pre> for code/logs, <ul> for bullets, "
+                "<h3> or <b> for section headers, <br> or <p> between sections. "
+                "Escape literal < > & in user content.\n"
+                "\n"
+                "ADAPTIVE CARDS (fact tables, badges, actions): set "
+                "content_type='html' and put a single "
+                '<attachment id=\"<uuid>\"></attachment> placeholder in content, '
+                "then pass `attachments` with one entry: "
+                '  {"id": "<same-uuid>", '
+                '"content_type": "application/vnd.microsoft.card.adaptive", '
+                '"content": "<JSON-serialized-as-a-string Adaptive Card v1.5 payload>"}.\n'
+                "Card schema: https://adaptivecards.io.\n"
+                "\n"
+                "SUBJECT: one-line headline above the message. Useful for incident "
+                "titles like 'Incident PD#169 — Victoria Metrics Outage'. Channel "
+                "messages only (ignored in regular chats).\n"
+                "\n"
+                "IMPORTANCE: 'normal' (default), 'high', 'urgent'."
             ),
             parameters={
                 "team_id": ToolParameter(
-                    description="The team id containing the channel.",
+                    description="Team id containing the channel.",
                     type="string",
                     required=True,
                 ),
                 "channel_id": ToolParameter(
-                    description="The channel id to post into.",
+                    description="Channel id to post into.",
                     type="string",
                     required=True,
                 ),
                 "content": ToolParameter(
-                    description="Plain-text message body.",
+                    description=(
+                        "Message body. Plain text when content_type='text', HTML when "
+                        "content_type='html'. For adaptive cards, a single "
+                        "<attachment id=\"<uuid>\"></attachment> tag."
+                    ),
                     type="string",
                     required=True,
+                ),
+                "content_type": ToolParameter(
+                    description="'html' (default) or 'text'.",
+                    type="string",
+                    required=False,
+                ),
+                "subject": ToolParameter(
+                    description=(
+                        "Optional one-line subject/headline shown above the message "
+                        "body. Channel messages only."
+                    ),
+                    type="string",
+                    required=False,
+                ),
+                "attachments": ToolParameter(
+                    description=(
+                        "Optional list of attachments (usually Adaptive Cards). Each "
+                        "item: {id (string UUID, referenced in content), content_type "
+                        "(typically 'application/vnd.microsoft.card.adaptive'), "
+                        "content (JSON-serialized card as string)}."
+                    ),
+                    type="array",
+                    required=False,
+                ),
+                "importance": ToolParameter(
+                    description="'normal' (default), 'high', or 'urgent'.",
+                    type="string",
+                    required=False,
                 ),
             },
         )
 
     def _invoke(self, params: dict, context: ToolInvokeContext) -> StructuredToolResult:
+        body = _build_message_body(params, allow_subject=True)
+        if isinstance(body, StructuredToolResult):
+            return body
         return self._graph_request(
             "POST",
             f"/teams/{params['team_id']}/channels/{params['channel_id']}/messages",
             params_for_result=params,
-            json_body={
-                "body": {"contentType": "text", "content": params["content"]},
-            },
+            json_body=body,
         )
 
     def get_parameterized_one_liner(self, params: Dict) -> str:
