@@ -25,8 +25,11 @@ class TeamsConfig(ToolsetConfig):
     The token must carry these delegated scopes:
         User.Read
         User.ReadBasic.All
-        Chat.ReadWrite
+        Chat.ReadWrite            (create / read / post to chats)
         ChatMessage.Send
+        Team.ReadBasic.All        (list joined teams)
+        Channel.Create            (create channels; admin consent usually required)
+        ChannelMessage.Send       (post messages to channels)
 
     Example configuration:
     ```yaml
@@ -59,8 +62,9 @@ class TeamsToolset(Toolset):
         super().__init__(
             name="teams",
             description=(
-                "Microsoft Teams chat operations via delegated Graph API: "
-                "search users, create a group chat, post messages, read chat history."
+                "Microsoft Teams chat and channel operations via delegated Graph API: "
+                "search users, create group chats, post messages and updates, "
+                "list joined teams, create channels in teams, read chat history."
             ),
             icon_url="https://cdn.simpleicons.org/microsoftteams/6264A7",
             docs_url="https://holmesgpt.dev/data-sources/builtin-toolsets/teams/",
@@ -71,6 +75,9 @@ class TeamsToolset(Toolset):
                 TeamsSendChatMessage(self),
                 TeamsListChats(self),
                 TeamsGetChatMessages(self),
+                TeamsListTeams(self),
+                TeamsCreateChannel(self),
+                TeamsSendChannelMessage(self),
             ],
         )
 
@@ -443,4 +450,130 @@ class TeamsGetChatMessages(BaseTeamsTool):
         return (
             f"{toolset_name_for_one_liner(self._toolset.name)}: "
             f"read messages from chat {params.get('chat_id', '')[:20]}…"
+        )
+
+
+class TeamsListTeams(BaseTeamsTool):
+    def __init__(self, toolset: TeamsToolset):
+        super().__init__(
+            toolset=toolset,
+            name="teams_list_teams",
+            description=(
+                "List Microsoft Teams that the authenticated user has joined. "
+                "Returns id, displayName, and description for each team. "
+                "Use this to find a team id before calling teams_create_channel."
+            ),
+            parameters={},
+        )
+
+    def _invoke(self, params: dict, context: ToolInvokeContext) -> StructuredToolResult:
+        return self._graph_request("GET", "/me/joinedTeams", params_for_result=params)
+
+    def get_parameterized_one_liner(self, params: Dict) -> str:
+        return f"{toolset_name_for_one_liner(self._toolset.name)}: list joined teams"
+
+
+class TeamsCreateChannel(BaseTeamsTool):
+    def __init__(self, toolset: TeamsToolset):
+        super().__init__(
+            toolset=toolset,
+            name="teams_create_channel",
+            description=(
+                "Create a new channel inside a Microsoft Team. Use teams_list_teams "
+                "first to find the team_id. membership_type must be 'standard' "
+                "(default; inherits team membership), 'private', or 'shared'. Only "
+                "'standard' channels can be created without specifying additional "
+                "members in the body."
+            ),
+            parameters={
+                "team_id": ToolParameter(
+                    description="The id of the team to create the channel in (from teams_list_teams).",
+                    type="string",
+                    required=True,
+                ),
+                "display_name": ToolParameter(
+                    description="Channel display name. Must be unique within the team.",
+                    type="string",
+                    required=True,
+                ),
+                "description": ToolParameter(
+                    description="Optional channel description.",
+                    type="string",
+                    required=False,
+                ),
+                "membership_type": ToolParameter(
+                    description="'standard' (default), 'private', or 'shared'.",
+                    type="string",
+                    required=False,
+                ),
+            },
+        )
+
+    def _invoke(self, params: dict, context: ToolInvokeContext) -> StructuredToolResult:
+        body: Dict[str, Any] = {
+            "displayName": params["display_name"],
+            "membershipType": params.get("membership_type") or "standard",
+        }
+        if params.get("description"):
+            body["description"] = params["description"]
+
+        return self._graph_request(
+            "POST",
+            f"/teams/{params['team_id']}/channels",
+            params_for_result=params,
+            json_body=body,
+        )
+
+    def get_parameterized_one_liner(self, params: Dict) -> str:
+        return (
+            f"{toolset_name_for_one_liner(self._toolset.name)}: "
+            f"create channel '{params.get('display_name', '')}' in team {params.get('team_id', '')[:20]}…"
+        )
+
+
+class TeamsSendChannelMessage(BaseTeamsTool):
+    def __init__(self, toolset: TeamsToolset):
+        super().__init__(
+            toolset=toolset,
+            name="teams_send_channel_message",
+            description=(
+                "Post a plain-text message (or status update) into a Teams channel. "
+                "Use this to write updates as an investigation progresses. "
+                "Requires team_id and channel_id from teams_list_teams / "
+                "teams_create_channel."
+            ),
+            parameters={
+                "team_id": ToolParameter(
+                    description="The team id containing the channel.",
+                    type="string",
+                    required=True,
+                ),
+                "channel_id": ToolParameter(
+                    description="The channel id to post into.",
+                    type="string",
+                    required=True,
+                ),
+                "content": ToolParameter(
+                    description="Plain-text message body.",
+                    type="string",
+                    required=True,
+                ),
+            },
+        )
+
+    def _invoke(self, params: dict, context: ToolInvokeContext) -> StructuredToolResult:
+        return self._graph_request(
+            "POST",
+            f"/teams/{params['team_id']}/channels/{params['channel_id']}/messages",
+            params_for_result=params,
+            json_body={
+                "body": {"contentType": "text", "content": params["content"]},
+            },
+        )
+
+    def get_parameterized_one_liner(self, params: Dict) -> str:
+        preview = (params.get("content") or "")[:40]
+        return (
+            f"{toolset_name_for_one_liner(self._toolset.name)}: "
+            f"post to channel {params.get('channel_id', '')[:20]}… '{preview}'"
         )

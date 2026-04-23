@@ -7,8 +7,11 @@ required). First run prompts you to sign in via a browser device-code URL;
 subsequent runs silently refresh the cached refresh token so you don't
 re-auth every hour.
 
-Scopes requested (delegated, no admin-restricted):
-    User.Read, User.ReadBasic.All, Chat.ReadWrite, ChatMessage.Send
+Scopes requested (delegated):
+    User.Read, User.ReadBasic.All,
+    Chat.ReadWrite, ChatMessage.Send,
+    Team.ReadBasic.All, Channel.Create, ChannelMessage.Send
+Note: Channel.Create usually requires admin consent in enterprise tenants.
 
 Cache location: ~/.holmes/teams_msal_cache.bin (0600). Contains the refresh
 token (~90-day lifetime by default). Delete this file to force a fresh
@@ -43,6 +46,9 @@ SCOPES = [
     "User.ReadBasic.All",
     "Chat.ReadWrite",
     "ChatMessage.Send",
+    "Team.ReadBasic.All",
+    "Channel.Create",
+    "ChannelMessage.Send",
 ]
 CACHE_DIR = Path.home() / ".holmes"
 CACHE_FILE = CACHE_DIR / "teams_msal_cache.bin"
