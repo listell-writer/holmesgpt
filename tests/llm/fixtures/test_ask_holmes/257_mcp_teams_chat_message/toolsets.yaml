@@ -1,10 +1,15 @@
 # floriscornel/teams-mcp (stdio via npx) for Microsoft Teams chat/channel access.
-# Uses a delegated Microsoft Graph access token supplied via TEAMS_AUTH_TOKEN.
-# Scopes required at token-mint time:
+#
+# Auth: relies on the MCP's token cache file at $HOME/.teams-mcp-token-cache.json
+# (+ auth metadata at $HOME/.msgraph-mcp-auth.json), which before_test decodes
+# from the TEAMS_TOKEN_CACHE_TGZ_B64 secret. The MCP refreshes access tokens
+# automatically using the cached refresh token (~90-day default lifetime), so
+# no interactive re-auth is needed per run.
+#
+# Scopes required when first authenticating (before producing the cache):
 #   User.Read, User.ReadBasic.All,
-#   Team.ReadBasic.All, Channel.ReadBasic.All, ChannelMessage.Read.All,
-#   Chat.Read, Chat.ReadWrite, ChatMessage.Send
-# For a stricter read-only token, launch the MCP with --read-only (drops write scopes).
+#   Chat.ReadWrite, ChatMessage.Send
+# For a stricter read-only MCP, append --read-only to args (drops write scopes).
 toolsets:
   teams-mcp:
     type: mcp
@@ -13,8 +18,6 @@ toolsets:
       mode: stdio
       command: "npx"
       args: ["-y", "@floriscornel/teams-mcp@latest"]
-      env:
-        AUTH_TOKEN: "{{ env.TEAMS_AUTH_TOKEN }}"
   kubernetes/core:
     enabled: false
   kubernetes/logs:
