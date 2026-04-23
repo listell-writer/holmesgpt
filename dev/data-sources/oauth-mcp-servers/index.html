@@ -5147,6 +5147,37 @@
 </span></code></pre></div>
 </div>
 <div class="tabbed-block">
+<p><strong>Before configuring Holmes, set up the Atlassian side:</strong></p>
+<ol>
+<li>Go to <a href="https://admin.atlassian.com/">https://admin.atlassian.com/</a> and select your organization</li>
+<li>Navigate to <strong>Rovo</strong> → <strong>Rovo MCP Server</strong></li>
+<li>
+<p>Click <strong>Add domain</strong> and enter your Robusta platform URL, matching your region:</p>
+<table>
+<thead>
+<tr>
+<th>Region</th>
+<th>URL</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>US (default)</td>
+<td><code>https://platform.robusta.dev/**</code></td>
+</tr>
+<tr>
+<td>EU</td>
+<td><code>https://eu.platform.robusta.dev/**</code></td>
+</tr>
+<tr>
+<td>AP</td>
+<td><code>https://ap.platform.robusta.dev/**</code></td>
+</tr>
+</tbody>
+</table>
+</li>
+</ol>
+<p><strong>Update your values and helm install or upgrade:</strong></p>
 <div class="language-yaml highlight"><pre><span></span><code><span id="__span-5-1"><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a><span class="nt">holmes</span><span class="p">:</span>
 </span><span id="__span-5-2"><a id="__codelineno-5-2" name="__codelineno-5-2" href="#__codelineno-5-2"></a><span class="w">  </span><span class="nt">mcp_servers</span><span class="p">:</span>
 </span><span id="__span-5-3"><a id="__codelineno-5-3" name="__codelineno-5-3" href="#__codelineno-5-3"></a><span class="w">    </span><span class="nt">atlassian</span><span class="p">:</span>
