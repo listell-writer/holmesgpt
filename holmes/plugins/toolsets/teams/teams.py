@@ -170,8 +170,32 @@ def _build_message_body(
     if allow_subject and params.get("subject"):
         body["subject"] = params["subject"]
 
-    attachments = params.get("attachments") or []
-    if attachments:
+    # Filter out None / empty entries — some LLMs emit [None] or [] when the
+    # caller doesn't want attachments but still includes the key.
+    raw_attachments = [
+        a for a in (params.get("attachments") or []) if isinstance(a, dict) and a
+    ]
+    if raw_attachments:
+        for i, a in enumerate(raw_attachments):
+            if not a.get("id"):
+                return StructuredToolResult(
+                    status=StructuredToolResultStatus.ERROR,
+                    error=(
+                        f"attachments[{i}] missing required 'id' field. Each attachment "
+                        "needs a UUID that is also referenced in the content via "
+                        "<attachment id=\"<uuid>\"/>."
+                    ),
+                    params=params,
+                )
+            if not a.get("content"):
+                return StructuredToolResult(
+                    status=StructuredToolResultStatus.ERROR,
+                    error=(
+                        f"attachments[{i}] missing required 'content' field. For an "
+                        "Adaptive Card, this must be the card JSON serialized as a string."
+                    ),
+                    params=params,
+                )
         body["attachments"] = [
             {
                 "id": a["id"],
@@ -182,7 +206,7 @@ def _build_message_body(
                 ),
                 "content": a["content"],
             }
-            for a in attachments
+            for a in raw_attachments
         ]
 
     return body
@@ -405,8 +429,13 @@ class TeamsSendChatMessage(BaseTeamsTool):
                 "  content_type='text' — content is HTML-escaped and shown as a "
                 "single run of text. Teams DOES NOT preserve newlines (\\n) or "
                 "tabs; they collapse into whitespace. Any '<', '>', '&' are "
-                "escaped. Use only for a single short line. For anything with "
-                "multiple sentences, paragraphs, or bullet lists — use 'html'.\n"
+                "escaped and shown as literal characters. Use ONLY when the entire "
+                "content is plain literal text with no markup at all AND no need "
+                "for line breaks (e.g., 'Acknowledged.'). "
+                "If your content contains ANY <tag>, or you want line breaks, "
+                "headers, or lists — use 'html'. Pre-escaping your own markup "
+                "(e.g. writing &lt;h3&gt;) is never correct; just use html with "
+                "raw <h3>.\n"
                 "  content_type='html' (default, recommended for any multi-line "
                 "or formatted content) — Teams renders a subset of HTML: <b>, "
                 "<strong>, <i>, <em>, <u>, <s>, <br>, <p>, <h1>-<h6>, "
