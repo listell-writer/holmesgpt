@@ -26,13 +26,19 @@ def _render_env(value: Any) -> Any:
     """Recursively substitute {{ env.VAR }} placeholders in strings or lists of strings.
 
     Used to keep tenant-specific values (emails, IDs) out of test fixtures.
-    Returns the value unchanged when it contains no placeholder. Raises
-    ValueError (via get_env_replacement) if a referenced env var is missing.
+    Returns the value unchanged when it contains no placeholder. Tolerant of
+    missing env vars at collection time: leaves unsubstituted placeholders
+    in place so unrelated tests can still be collected; tests that rely on
+    the missing values will fail clearly at run time.
     """
     if isinstance(value, str):
         if "{{" not in value:
             return value
-        return get_env_replacement(value) or value
+        try:
+            return get_env_replacement(value) or value
+        except ValueError as e:
+            logging.debug("Env var substitution skipped: %s", e)
+            return value
     if isinstance(value, list):
         return [_render_env(v) for v in value]
     return value
