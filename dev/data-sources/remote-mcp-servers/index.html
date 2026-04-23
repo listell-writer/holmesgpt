@@ -16,7 +16,7 @@
         <link rel="prev" href="../custom-toolsets/">
       
       
-        <link rel="next" href="../header-propagation/">
+        <link rel="next" href="../oauth-mcp-servers/">
       
       
         
@@ -1624,6 +1624,8 @@
       
         
           
+        
+      
         
       
         
@@ -3542,6 +3544,17 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#oauth-authentication" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        OAuth Authentication
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#advanced-configuration" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -3567,6 +3580,34 @@
   
 </nav>
       
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../oauth-mcp-servers/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    OAuth MCP Servers (Alpha)
+  
+
+    
+  </span>
+  
+  
+
+      </a>
     </li>
   
 
@@ -5021,6 +5062,17 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#oauth-authentication" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        OAuth Authentication
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#advanced-configuration" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -5425,6 +5477,8 @@
 </div>
 </div>
 <p>The URL should end with <code>/sse</code>. If it doesn't, HolmesGPT will automatically append it.</p>
+<h2 id="oauth-authentication">OAuth Authentication<a class="headerlink" href="#oauth-authentication" title="Permanent link">&para;</a></h2>
+<p>For MCP servers that require OAuth authentication (e.g. Atlassian, Notion), see the dedicated <a href="../oauth-mcp-servers/">OAuth MCP Servers</a> page.</p>
 <h2 id="advanced-configuration">Advanced Configuration<a class="headerlink" href="#advanced-configuration" title="Permanent link">&para;</a></h2>
 <p><strong>Dynamic Headers with Request Context</strong></p>
 <p>MCP servers can forward HTTP headers from the incoming request to the MCP backend. Use <code>extra_headers</code> with Jinja2 templates referencing <code>request_context.headers</code>. Header lookups are case-insensitive. You can also use environment variables (<code>{{ env.MY_VAR }}</code>) or combine them (<code>Bearer {{ request_context.headers['token'] }}</code>).</p>
@@ -5532,13 +5586,13 @@
         
         
           
-          <a href="../header-propagation/" class="md-footer__link md-footer__link--next" aria-label="Next: HTTP Header Propagation">
+          <a href="../oauth-mcp-servers/" class="md-footer__link md-footer__link--next" aria-label="Next: OAuth MCP Servers (Alpha)">
             <div class="md-footer__title">
               <span class="md-footer__direction">
                 Next
               </span>
               <div class="md-ellipsis">
-                HTTP Header Propagation
+                OAuth MCP Servers (Alpha)
               </div>
             </div>
             <div class="md-footer__button md-icon">
