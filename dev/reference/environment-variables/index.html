@@ -4904,6 +4904,17 @@
 </li>
         
           <li class="md-nav__item">
+  <a href="#trace_token_usage" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        TRACE_TOKEN_USAGE
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
   <a href="#holmes_cache_dir" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -5718,6 +5729,17 @@
 </li>
         
           <li class="md-nav__item">
+  <a href="#trace_token_usage" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        TRACE_TOKEN_USAGE
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
   <a href="#holmes_cache_dir" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -6182,14 +6204,23 @@
 <p><strong>Example:</strong>
 <div class="language-bash highlight"><pre><span></span><code><span id="__span-11-1"><a id="__codelineno-11-1" name="__codelineno-11-1" href="#__codelineno-11-1"></a><span class="nb">export</span><span class="w"> </span><span class="nv">HOLMES_LOG_LEVEL</span><span class="o">=</span><span class="s2">&quot;DEBUG&quot;</span>
 </span></code></pre></div></p>
+<h3 id="trace_token_usage">TRACE_TOKEN_USAGE<a class="headerlink" href="#trace_token_usage" title="Permanent link">&para;</a></h3>
+<p>When enabled, logs aggregated token usage (input, output, cached, total, cost) once per completed <code>/api/chat</code> request at <code>INFO</code> level. Useful for debugging token consumption and cost issues.</p>
+<p><strong>Default:</strong> <code>false</code></p>
+<p><strong>Example:</strong>
+<div class="language-bash highlight"><pre><span></span><code><span id="__span-12-1"><a id="__codelineno-12-1" name="__codelineno-12-1" href="#__codelineno-12-1"></a><span class="nb">export</span><span class="w"> </span><span class="nv">TRACE_TOKEN_USAGE</span><span class="o">=</span><span class="s2">&quot;true&quot;</span>
+</span></code></pre></div></p>
+<p><strong>Sample output:</strong>
+<div class="language-text highlight"><pre><span></span><code><span id="__span-13-1"><a id="__codelineno-13-1" name="__codelineno-13-1" href="#__codelineno-13-1"></a>Completed /api/chat request: ask=... (stream) | model=gpt-4o, input=45290, output=603, cached=0, total=45893, cost=$0.0656
+</span></code></pre></div></p>
 <h3 id="holmes_cache_dir">HOLMES_CACHE_DIR<a class="headerlink" href="#holmes_cache_dir" title="Permanent link">&para;</a></h3>
 <p>Directory for caching HolmesGPT data and temporary files.</p>
 <h3 id="holmes_passthrough_blocked_headers">HOLMES_PASSTHROUGH_BLOCKED_HEADERS<a class="headerlink" href="#holmes_passthrough_blocked_headers" title="Permanent link">&para;</a></h3>
 <p><strong>Default:</strong> <code>"authorization,cookie,set-cookie"</code></p>
 <p>Comma-separated list of HTTP header names that should <strong>not</strong> be forwarded from incoming requests to toolsets via <code>request_context</code>. Case-insensitive.</p>
 <p><strong>Example:</strong>
-<div class="language-bash highlight"><pre><span></span><code><span id="__span-12-1"><a id="__codelineno-12-1" name="__codelineno-12-1" href="#__codelineno-12-1"></a><span class="c1"># Also block a custom internal header</span>
-</span><span id="__span-12-2"><a id="__codelineno-12-2" name="__codelineno-12-2" href="#__codelineno-12-2"></a><span class="nb">export</span><span class="w"> </span><span class="nv">HOLMES_PASSTHROUGH_BLOCKED_HEADERS</span><span class="o">=</span><span class="s2">&quot;authorization,cookie,set-cookie,x-internal-only&quot;</span>
+<div class="language-bash highlight"><pre><span></span><code><span id="__span-14-1"><a id="__codelineno-14-1" name="__codelineno-14-1" href="#__codelineno-14-1"></a><span class="c1"># Also block a custom internal header</span>
+</span><span id="__span-14-2"><a id="__codelineno-14-2" name="__codelineno-14-2" href="#__codelineno-14-2"></a><span class="nb">export</span><span class="w"> </span><span class="nv">HOLMES_PASSTHROUGH_BLOCKED_HEADERS</span><span class="o">=</span><span class="s2">&quot;authorization,cookie,set-cookie,x-internal-only&quot;</span>
 </span></code></pre></div></p>
 <p>See <a href="../../data-sources/header-propagation/">HTTP Header Propagation</a> for details.</p>
 <h2 id="data-source-configuration">Data Source Configuration<a class="headerlink" href="#data-source-configuration" title="Permanent link">&para;</a></h2>
@@ -6234,28 +6265,28 @@
 <p>Per-request timeout, in seconds, for MCP tool calls. Forwarded to the MCP SDK's <code>ClientSession.call_tool(read_timeout_seconds=...)</code>, which enforces it via <code>anyio.fail_after</code> around the response-stream receive. Without a bound here, streamable-http tool calls can hang indefinitely if the MCP server dies mid-response (the httpx/anyio stream EOF does not reliably wake pending response futures).</p>
 <p>On expiry the SDK raises <code>McpError(code=REQUEST_TIMEOUT)</code>, which Holmes surfaces as a <code>StructuredToolResultStatus.ERROR</code> result with the message <code>Timed out while waiting for response to ClientRequest. Waited N seconds.</code></p>
 <p><strong>Example:</strong>
-<div class="language-bash highlight"><pre><span></span><code><span id="__span-13-1"><a id="__codelineno-13-1" name="__codelineno-13-1" href="#__codelineno-13-1"></a><span class="nb">export</span><span class="w"> </span><span class="nv">MCP_TOOL_CALL_TIMEOUT_SEC</span><span class="o">=</span><span class="m">60</span>
+<div class="language-bash highlight"><pre><span></span><code><span id="__span-15-1"><a id="__codelineno-15-1" name="__codelineno-15-1" href="#__codelineno-15-1"></a><span class="nb">export</span><span class="w"> </span><span class="nv">MCP_TOOL_CALL_TIMEOUT_SEC</span><span class="o">=</span><span class="m">60</span>
 </span></code></pre></div></p>
 <h2 id="testing-and-development">Testing and Development<a class="headerlink" href="#testing-and-development" title="Permanent link">&para;</a></h2>
 <h3 id="run_live">RUN_LIVE<a class="headerlink" href="#run_live" title="Permanent link">&para;</a></h3>
 <p>Enables live execution of commands in tests. Defaults to <code>true</code>.</p>
 <p><strong>Example:</strong>
-<div class="language-bash highlight"><pre><span></span><code><span id="__span-14-1"><a id="__codelineno-14-1" name="__codelineno-14-1" href="#__codelineno-14-1"></a><span class="nb">export</span><span class="w"> </span><span class="nv">RUN_LIVE</span><span class="o">=</span><span class="nb">true</span>
+<div class="language-bash highlight"><pre><span></span><code><span id="__span-16-1"><a id="__codelineno-16-1" name="__codelineno-16-1" href="#__codelineno-16-1"></a><span class="nb">export</span><span class="w"> </span><span class="nv">RUN_LIVE</span><span class="o">=</span><span class="nb">true</span>
 </span></code></pre></div></p>
 <h3 id="model">MODEL<a class="headerlink" href="#model" title="Permanent link">&para;</a></h3>
 <p>Override the default LLM model for testing.</p>
 <p><strong>Example:</strong>
-<div class="language-bash highlight"><pre><span></span><code><span id="__span-15-1"><a id="__codelineno-15-1" name="__codelineno-15-1" href="#__codelineno-15-1"></a><span class="nb">export</span><span class="w"> </span><span class="nv">MODEL</span><span class="o">=</span><span class="s2">&quot;anthropic/claude-sonnet-4-20250514&quot;</span>
+<div class="language-bash highlight"><pre><span></span><code><span id="__span-17-1"><a id="__codelineno-17-1" name="__codelineno-17-1" href="#__codelineno-17-1"></a><span class="nb">export</span><span class="w"> </span><span class="nv">MODEL</span><span class="o">=</span><span class="s2">&quot;anthropic/claude-sonnet-4-20250514&quot;</span>
 </span></code></pre></div></p>
 <h3 id="classifier_model">CLASSIFIER_MODEL<a class="headerlink" href="#classifier_model" title="Permanent link">&para;</a></h3>
 <p>Model to use for scoring test answers (defaults to MODEL if not set). Required when using Anthropic models as the primary model since Anthropic models cannot be used as classifiers.</p>
 <p><strong>Example:</strong>
-<div class="language-bash highlight"><pre><span></span><code><span id="__span-16-1"><a id="__codelineno-16-1" name="__codelineno-16-1" href="#__codelineno-16-1"></a><span class="nb">export</span><span class="w"> </span><span class="nv">CLASSIFIER_MODEL</span><span class="o">=</span><span class="s2">&quot;gpt-4.1&quot;</span>
+<div class="language-bash highlight"><pre><span></span><code><span id="__span-18-1"><a id="__codelineno-18-1" name="__codelineno-18-1" href="#__codelineno-18-1"></a><span class="nb">export</span><span class="w"> </span><span class="nv">CLASSIFIER_MODEL</span><span class="o">=</span><span class="s2">&quot;gpt-4.1&quot;</span>
 </span></code></pre></div></p>
 <h3 id="iterations">ITERATIONS<a class="headerlink" href="#iterations" title="Permanent link">&para;</a></h3>
 <p>Number of times to run each test for reliability testing.</p>
 <p><strong>Example:</strong>
-<div class="language-bash highlight"><pre><span></span><code><span id="__span-17-1"><a id="__codelineno-17-1" name="__codelineno-17-1" href="#__codelineno-17-1"></a><span class="nb">export</span><span class="w"> </span><span class="nv">ITERATIONS</span><span class="o">=</span><span class="m">10</span>
+<div class="language-bash highlight"><pre><span></span><code><span id="__span-19-1"><a id="__codelineno-19-1" name="__codelineno-19-1" href="#__codelineno-19-1"></a><span class="nb">export</span><span class="w"> </span><span class="nv">ITERATIONS</span><span class="o">=</span><span class="m">10</span>
 </span></code></pre></div></p>
 <h3 id="braintrust_api_key">BRAINTRUST_API_KEY<a class="headerlink" href="#braintrust_api_key" title="Permanent link">&para;</a></h3>
 <p>API key for Braintrust integration to track test results.</p>
