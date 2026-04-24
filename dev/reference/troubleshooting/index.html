@@ -4916,6 +4916,17 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#6-extra-inputs-are-not-permitted-errors-from-the-llm-provider" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        6. Extra inputs are not permitted Errors From the LLM Provider
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#still-stuck" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -5033,6 +5044,17 @@
     <span class="md-ellipsis">
       
         5. Model Issues
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#6-extra-inputs-are-not-permitted-errors-from-the-llm-provider" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        6. Extra inputs are not permitted Errors From the LLM Provider
       
     </span>
   </a>
@@ -5176,6 +5198,15 @@
 <li><code>gpt-4.1</code> - Good balance of speed/capability</li>
 </ul>
 <p>See <a href="../../development/evaluations/latest-results/">benchmark results</a> for detailed model performance comparisons.</p>
+<h2 id="6-extra-inputs-are-not-permitted-errors-from-the-llm-provider">6. <code>Extra inputs are not permitted</code> Errors From the LLM Provider<a class="headerlink" href="#6-extra-inputs-are-not-permitted-errors-from-the-llm-provider" title="Permanent link">&para;</a></h2>
+<p>Some providers reject messages that contain fields they don't recognize, producing errors like:</p>
+<div class="language-text highlight"><pre><span></span><code><span id="__span-1-1"><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a>litellm.BadRequestError: OpenAIException - messages.1.provider_specific_fields: Extra inputs are not permitted
+</span></code></pre></div>
+<p>This happens when LiteLLM attaches provider-specific metadata (e.g. <code>provider_specific_fields</code>) to assistant messages and those messages are later sent back to a provider that doesn't accept the field.</p>
+<p><strong>Solution:</strong> Set <code>LLM_EXTRA_STRIP_MESSAGE_FIELDS</code> to a comma-separated list of fields to strip before sending:</p>
+<div class="language-bash highlight"><pre><span></span><code><span id="__span-2-1"><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a><span class="nb">export</span><span class="w"> </span><span class="nv">LLM_EXTRA_STRIP_MESSAGE_FIELDS</span><span class="o">=</span><span class="s2">&quot;provider_specific_fields&quot;</span>
+</span></code></pre></div>
+<p>Replace the value with whichever field is named in your error message. Multiple fields can be passed, e.g. <code>"provider_specific_fields,reasoning_content"</code>.</p>
 <hr />
 <h2 id="still-stuck">Still stuck?<a class="headerlink" href="#still-stuck" title="Permanent link">&para;</a></h2>
 <p>Join our <a href="https://cloud-native.slack.com/archives/C0A1SPQM5PZ">Slack community</a> or <a href="https://github.com/HolmesGPT/holmesgpt/issues">open a GitHub issue</a> for help.</p>
