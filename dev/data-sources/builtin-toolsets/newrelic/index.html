@@ -1838,6 +1838,8 @@
       
         
       
+        
+      
     
     
     
@@ -2998,6 +3000,34 @@
     </span>
   </a>
   
+    <nav class="md-nav" aria-label="Prerequisites">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#creating-a-user-api-key" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Creating a User API Key
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#finding-your-account-id" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Finding your Account ID
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
 </li>
       
         <li class="md-nav__item">
@@ -3005,6 +3035,17 @@
     <span class="md-ellipsis">
       
         Configuration
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#configuration-reference" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Configuration Reference
       
     </span>
   </a>
@@ -3404,6 +3445,34 @@
     
   
     SQLite
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../victoriametrics/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    VictoriaMetrics
   
 
     
@@ -5036,6 +5105,34 @@
     </span>
   </a>
   
+    <nav class="md-nav" aria-label="Prerequisites">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#creating-a-user-api-key" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Creating a User API Key
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#finding-your-account-id" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Finding your Account ID
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
 </li>
       
         <li class="md-nav__item">
@@ -5043,6 +5140,17 @@
     <span class="md-ellipsis">
       
         Configuration
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#configuration-reference" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Configuration Reference
       
     </span>
   </a>
@@ -5185,12 +5293,21 @@
 <p>By enabling this toolset, HolmesGPT will be able to pull traces and logs from New Relic for investigations.</p>
 <h2 id="prerequisites">Prerequisites<a class="headerlink" href="#prerequisites" title="Permanent link">&para;</a></h2>
 <ol>
-<li>A New Relic API Key with necessary permissions to access traces and logs</li>
-<li>Your New Relic Account ID</li>
+<li>A <strong>New Relic User API Key</strong> (the one whose value starts with <code>NRAK-</code>)</li>
+<li>Your <strong>New Relic Account ID</strong> (numeric, e.g. <code>1234567</code>)</li>
 </ol>
-<p>You can find these in your New Relic account under Administration &gt; API keys and Account settings.</p>
+<h3 id="creating-a-user-api-key">Creating a User API Key<a class="headerlink" href="#creating-a-user-api-key" title="Permanent link">&para;</a></h3>
+<p>New Relic supports several API key types — HolmesGPT needs a <strong>User API Key</strong> (prefix <code>NRAK-</code>). Ingest License Keys (<code>NRII-</code>), Browser keys, and Mobile keys will not work.</p>
+<p>Go to <strong>Administration → API keys</strong> in your New Relic UI:</p>
+<ul>
+<li><strong>US region</strong>: <a href="https://one.newrelic.com/admin-portal/api-keys/launcher">https://one.newrelic.com/admin-portal/api-keys/launcher</a></li>
+<li><strong>EU region</strong>: <a href="https://one.eu.newrelic.com/admin-portal/api-keys/launcher">https://one.eu.newrelic.com/admin-portal/api-keys/launcher</a></li>
+</ul>
+<p>Click <strong>Create a key</strong>, choose key type <strong>User</strong>, give it a name (e.g. "holmesgpt"), and copy the <code>NRAK-...</code> value — you'll only see it once.</p>
+<h3 id="finding-your-account-id">Finding your Account ID<a class="headerlink" href="#finding-your-account-id" title="Permanent link">&para;</a></h3>
+<p>In the same UI, click your profile icon (bottom-left) → <strong>Administration</strong> → your account name. The numeric ID appears in the URL and on the account overview page.</p>
 <h2 id="configuration">Configuration<a class="headerlink" href="#configuration" title="Permanent link">&para;</a></h2>
-<div class="tabbed-set tabbed-alternate" data-tabs="1:2"><input checked="checked" id="configuration-holmes-cli" name="__tabbed_1" type="radio" /><input id="configuration-robusta-helm-chart" name="__tabbed_1" type="radio" /><div class="tabbed-labels"><label for="configuration-holmes-cli">Holmes CLI</label><label for="configuration-robusta-helm-chart">Robusta Helm Chart</label></div>
+<div class="tabbed-set tabbed-alternate" data-tabs="1:3"><input checked="checked" id="configuration-holmes-cli" name="__tabbed_1" type="radio" /><input id="configuration-holmes-helm-chart" name="__tabbed_1" type="radio" /><input id="configuration-robusta-helm-chart" name="__tabbed_1" type="radio" /><div class="tabbed-labels"><label for="configuration-holmes-cli">Holmes CLI</label><label for="configuration-holmes-helm-chart">Holmes Helm Chart</label><label for="configuration-robusta-helm-chart">Robusta Helm Chart</label></div>
 <div class="tabbed-content">
 <div class="tabbed-block">
 <p>Add the following to <strong>~/.holmes/config.yaml</strong>. Create the file if it doesn't exist:</p>
@@ -5198,7 +5315,7 @@
 </span><span id="__span-0-2"><a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a><span class="w">  </span><span class="nt">newrelic</span><span class="p">:</span>
 </span><span id="__span-0-3"><a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a><span class="w">    </span><span class="nt">enabled</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">true</span>
 </span><span id="__span-0-4"><a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a><span class="w">    </span><span class="nt">config</span><span class="p">:</span>
-</span><span id="__span-0-5"><a id="__codelineno-0-5" name="__codelineno-0-5" href="#__codelineno-0-5"></a><span class="w">      </span><span class="nt">api_key</span><span class="p">:</span><span class="w"> </span><span class="s">&quot;&lt;your</span><span class="nv"> </span><span class="s">New</span><span class="nv"> </span><span class="s">Relic</span><span class="nv"> </span><span class="s">API</span><span class="nv"> </span><span class="s">key&gt;&quot;</span>
+</span><span id="__span-0-5"><a id="__codelineno-0-5" name="__codelineno-0-5" href="#__codelineno-0-5"></a><span class="w">      </span><span class="nt">api_key</span><span class="p">:</span><span class="w"> </span><span class="s">&quot;&lt;your</span><span class="nv"> </span><span class="s">New</span><span class="nv"> </span><span class="s">Relic</span><span class="nv"> </span><span class="s">User</span><span class="nv"> </span><span class="s">API</span><span class="nv"> </span><span class="s">Key&gt;&quot;</span>
 </span><span id="__span-0-6"><a id="__codelineno-0-6" name="__codelineno-0-6" href="#__codelineno-0-6"></a><span class="w">      </span><span class="nt">account_id</span><span class="p">:</span><span class="w"> </span><span class="s">&quot;&lt;your</span><span class="nv"> </span><span class="s">New</span><span class="nv"> </span><span class="s">Relic</span><span class="nv"> </span><span class="s">account</span><span class="nv"> </span><span class="s">ID&gt;&quot;</span>
 </span><span id="__span-0-7"><a id="__codelineno-0-7" name="__codelineno-0-7" href="#__codelineno-0-7"></a><span class="w">      </span><span class="nt">is_eu_datacenter</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">false</span><span class="w">  </span><span class="c1"># Set to true if using New Relic EU region</span>
 </span><span id="__span-0-8"><a id="__codelineno-0-8" name="__codelineno-0-8" href="#__codelineno-0-8"></a><span class="w">      </span><span class="nt">enable_multi_account</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">false</span><span class="w">  </span><span class="c1"># Optional: set to true to query across multiple accounts</span>
@@ -5208,19 +5325,98 @@
 </span></code></pre></div></p>
 </div>
 <div class="tabbed-block">
-<div class="language-yaml highlight"><pre><span></span><code><span id="__span-2-1"><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a><span class="nt">holmes</span><span class="p">:</span>
-</span><span id="__span-2-2"><a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a><span class="w">  </span><span class="nt">toolsets</span><span class="p">:</span>
-</span><span id="__span-2-3"><a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a><span class="w">    </span><span class="nt">newrelic</span><span class="p">:</span>
-</span><span id="__span-2-4"><a id="__codelineno-2-4" name="__codelineno-2-4" href="#__codelineno-2-4"></a><span class="w">      </span><span class="nt">enabled</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">true</span>
-</span><span id="__span-2-5"><a id="__codelineno-2-5" name="__codelineno-2-5" href="#__codelineno-2-5"></a><span class="w">      </span><span class="nt">config</span><span class="p">:</span>
-</span><span id="__span-2-6"><a id="__codelineno-2-6" name="__codelineno-2-6" href="#__codelineno-2-6"></a><span class="w">        </span><span class="nt">api_key</span><span class="p">:</span><span class="w"> </span><span class="s">&quot;&lt;your</span><span class="nv"> </span><span class="s">New</span><span class="nv"> </span><span class="s">Relic</span><span class="nv"> </span><span class="s">API</span><span class="nv"> </span><span class="s">key&gt;&quot;</span>
-</span><span id="__span-2-7"><a id="__codelineno-2-7" name="__codelineno-2-7" href="#__codelineno-2-7"></a><span class="w">        </span><span class="nt">account_id</span><span class="p">:</span><span class="w"> </span><span class="s">&quot;&lt;your</span><span class="nv"> </span><span class="s">New</span><span class="nv"> </span><span class="s">Relic</span><span class="nv"> </span><span class="s">account</span><span class="nv"> </span><span class="s">ID&gt;&quot;</span>
-</span><span id="__span-2-8"><a id="__codelineno-2-8" name="__codelineno-2-8" href="#__codelineno-2-8"></a><span class="w">        </span><span class="nt">is_eu_datacenter</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">false</span><span class="w">  </span><span class="c1"># Set to true if using New Relic EU region</span>
-</span><span id="__span-2-9"><a id="__codelineno-2-9" name="__codelineno-2-9" href="#__codelineno-2-9"></a><span class="w">        </span><span class="nt">enable_multi_account</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">false</span><span class="w">  </span><span class="c1"># Optional: set to true to query across multiple accounts</span>
+<p>First, create a Kubernetes secret with your User API Key:</p>
+<div class="language-bash highlight"><pre><span></span><code><span id="__span-2-1"><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a>kubectl<span class="w"> </span>create<span class="w"> </span>secret<span class="w"> </span>generic<span class="w"> </span>newrelic-credentials<span class="w"> </span><span class="se">\</span>
+</span><span id="__span-2-2"><a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a><span class="w">  </span>--from-literal<span class="o">=</span>api-key<span class="o">=</span>your-new-relic-user-api-key<span class="w"> </span><span class="se">\</span>
+</span><span id="__span-2-3"><a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a><span class="w">  </span>-n<span class="w"> </span>holmes
+</span></code></pre></div>
+<div class="admonition note">
+<p class="admonition-title">Namespace must match Holmes' deployment</p>
+<p>Create the secret in the same namespace where Holmes runs. The <code>-n holmes</code> flag in the <strong>Holmes Helm</strong> tab and <code>-n default</code> in the <strong>Robusta Helm</strong> tab match each chart's documented defaults — adjust if you installed Holmes/Robusta into a different namespace. A secret in the wrong namespace silently resolves to an empty env var and authentication will fail with no clear error.</p>
+</div>
+<p>Then add to your Holmes Helm values:</p>
+<div class="language-yaml highlight"><pre><span></span><code><span id="__span-3-1"><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a><span class="nt">additionalEnvVars</span><span class="p">:</span>
+</span><span id="__span-3-2"><a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a><span class="w">  </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">NEW_RELIC_API_KEY</span>
+</span><span id="__span-3-3"><a id="__codelineno-3-3" name="__codelineno-3-3" href="#__codelineno-3-3"></a><span class="w">    </span><span class="nt">valueFrom</span><span class="p">:</span>
+</span><span id="__span-3-4"><a id="__codelineno-3-4" name="__codelineno-3-4" href="#__codelineno-3-4"></a><span class="w">      </span><span class="nt">secretKeyRef</span><span class="p">:</span>
+</span><span id="__span-3-5"><a id="__codelineno-3-5" name="__codelineno-3-5" href="#__codelineno-3-5"></a><span class="w">        </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">newrelic-credentials</span>
+</span><span id="__span-3-6"><a id="__codelineno-3-6" name="__codelineno-3-6" href="#__codelineno-3-6"></a><span class="w">        </span><span class="nt">key</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">api-key</span>
+</span><span id="__span-3-7"><a id="__codelineno-3-7" name="__codelineno-3-7" href="#__codelineno-3-7"></a>
+</span><span id="__span-3-8"><a id="__codelineno-3-8" name="__codelineno-3-8" href="#__codelineno-3-8"></a><span class="nt">toolsets</span><span class="p">:</span>
+</span><span id="__span-3-9"><a id="__codelineno-3-9" name="__codelineno-3-9" href="#__codelineno-3-9"></a><span class="w">  </span><span class="nt">newrelic</span><span class="p">:</span>
+</span><span id="__span-3-10"><a id="__codelineno-3-10" name="__codelineno-3-10" href="#__codelineno-3-10"></a><span class="w">    </span><span class="nt">enabled</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">true</span>
+</span><span id="__span-3-11"><a id="__codelineno-3-11" name="__codelineno-3-11" href="#__codelineno-3-11"></a><span class="w">    </span><span class="nt">config</span><span class="p">:</span>
+</span><span id="__span-3-12"><a id="__codelineno-3-12" name="__codelineno-3-12" href="#__codelineno-3-12"></a><span class="w">      </span><span class="nt">api_key</span><span class="p">:</span><span class="w"> </span><span class="s">&quot;{{</span><span class="nv"> </span><span class="s">env.NEW_RELIC_API_KEY</span><span class="nv"> </span><span class="s">}}&quot;</span>
+</span><span id="__span-3-13"><a id="__codelineno-3-13" name="__codelineno-3-13" href="#__codelineno-3-13"></a><span class="w">      </span><span class="nt">account_id</span><span class="p">:</span><span class="w"> </span><span class="s">&quot;&lt;your</span><span class="nv"> </span><span class="s">New</span><span class="nv"> </span><span class="s">Relic</span><span class="nv"> </span><span class="s">account</span><span class="nv"> </span><span class="s">ID&gt;&quot;</span>
+</span><span id="__span-3-14"><a id="__codelineno-3-14" name="__codelineno-3-14" href="#__codelineno-3-14"></a><span class="w">      </span><span class="nt">is_eu_datacenter</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">false</span><span class="w">  </span><span class="c1"># Set to true if using New Relic EU region</span>
+</span><span id="__span-3-15"><a id="__codelineno-3-15" name="__codelineno-3-15" href="#__codelineno-3-15"></a><span class="w">      </span><span class="nt">enable_multi_account</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">false</span><span class="w">  </span><span class="c1"># Optional: set to true to query across multiple accounts</span>
 </span></code></pre></div>
 </div>
+<div class="tabbed-block">
+<p>First, create a Kubernetes secret with your User API Key:</p>
+<div class="language-bash highlight"><pre><span></span><code><span id="__span-4-1"><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a>kubectl<span class="w"> </span>create<span class="w"> </span>secret<span class="w"> </span>generic<span class="w"> </span>newrelic-credentials<span class="w"> </span><span class="se">\</span>
+</span><span id="__span-4-2"><a id="__codelineno-4-2" name="__codelineno-4-2" href="#__codelineno-4-2"></a><span class="w">  </span>--from-literal<span class="o">=</span>api-key<span class="o">=</span>your-new-relic-user-api-key<span class="w"> </span><span class="se">\</span>
+</span><span id="__span-4-3"><a id="__codelineno-4-3" name="__codelineno-4-3" href="#__codelineno-4-3"></a><span class="w">  </span>-n<span class="w"> </span>default
+</span></code></pre></div>
+<div class="admonition note">
+<p class="admonition-title">Namespace must match Holmes' deployment</p>
+<p>Create the secret in the same namespace where Holmes runs. The <code>-n holmes</code> flag in the <strong>Holmes Helm</strong> tab and <code>-n default</code> in the <strong>Robusta Helm</strong> tab match each chart's documented defaults — adjust if you installed Holmes/Robusta into a different namespace. A secret in the wrong namespace silently resolves to an empty env var and authentication will fail with no clear error.</p>
+</div>
+<p>Then add to your Robusta Helm values:</p>
+<div class="language-yaml highlight"><pre><span></span><code><span id="__span-5-1"><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a><span class="nt">holmes</span><span class="p">:</span>
+</span><span id="__span-5-2"><a id="__codelineno-5-2" name="__codelineno-5-2" href="#__codelineno-5-2"></a><span class="w">  </span><span class="nt">additionalEnvVars</span><span class="p">:</span>
+</span><span id="__span-5-3"><a id="__codelineno-5-3" name="__codelineno-5-3" href="#__codelineno-5-3"></a><span class="w">    </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">NEW_RELIC_API_KEY</span>
+</span><span id="__span-5-4"><a id="__codelineno-5-4" name="__codelineno-5-4" href="#__codelineno-5-4"></a><span class="w">      </span><span class="nt">valueFrom</span><span class="p">:</span>
+</span><span id="__span-5-5"><a id="__codelineno-5-5" name="__codelineno-5-5" href="#__codelineno-5-5"></a><span class="w">        </span><span class="nt">secretKeyRef</span><span class="p">:</span>
+</span><span id="__span-5-6"><a id="__codelineno-5-6" name="__codelineno-5-6" href="#__codelineno-5-6"></a><span class="w">          </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">newrelic-credentials</span>
+</span><span id="__span-5-7"><a id="__codelineno-5-7" name="__codelineno-5-7" href="#__codelineno-5-7"></a><span class="w">          </span><span class="nt">key</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">api-key</span>
+</span><span id="__span-5-8"><a id="__codelineno-5-8" name="__codelineno-5-8" href="#__codelineno-5-8"></a><span class="w">  </span><span class="nt">toolsets</span><span class="p">:</span>
+</span><span id="__span-5-9"><a id="__codelineno-5-9" name="__codelineno-5-9" href="#__codelineno-5-9"></a><span class="w">    </span><span class="nt">newrelic</span><span class="p">:</span>
+</span><span id="__span-5-10"><a id="__codelineno-5-10" name="__codelineno-5-10" href="#__codelineno-5-10"></a><span class="w">      </span><span class="nt">enabled</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">true</span>
+</span><span id="__span-5-11"><a id="__codelineno-5-11" name="__codelineno-5-11" href="#__codelineno-5-11"></a><span class="w">      </span><span class="nt">config</span><span class="p">:</span>
+</span><span id="__span-5-12"><a id="__codelineno-5-12" name="__codelineno-5-12" href="#__codelineno-5-12"></a><span class="w">        </span><span class="nt">api_key</span><span class="p">:</span><span class="w"> </span><span class="s">&quot;{{</span><span class="nv"> </span><span class="s">env.NEW_RELIC_API_KEY</span><span class="nv"> </span><span class="s">}}&quot;</span>
+</span><span id="__span-5-13"><a id="__codelineno-5-13" name="__codelineno-5-13" href="#__codelineno-5-13"></a><span class="w">        </span><span class="nt">account_id</span><span class="p">:</span><span class="w"> </span><span class="s">&quot;&lt;your</span><span class="nv"> </span><span class="s">New</span><span class="nv"> </span><span class="s">Relic</span><span class="nv"> </span><span class="s">account</span><span class="nv"> </span><span class="s">ID&gt;&quot;</span>
+</span><span id="__span-5-14"><a id="__codelineno-5-14" name="__codelineno-5-14" href="#__codelineno-5-14"></a><span class="w">        </span><span class="nt">is_eu_datacenter</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">false</span><span class="w">  </span><span class="c1"># Set to true if using New Relic EU region</span>
+</span><span id="__span-5-15"><a id="__codelineno-5-15" name="__codelineno-5-15" href="#__codelineno-5-15"></a><span class="w">        </span><span class="nt">enable_multi_account</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">false</span><span class="w">  </span><span class="c1"># Optional: set to true to query across multiple accounts</span>
+</span></code></pre></div>
+<p>Update your Helm values and run a Helm upgrade:
+<div class="language-bash highlight"><pre><span></span><code><span id="__span-6-1"><a id="__codelineno-6-1" name="__codelineno-6-1" href="#__codelineno-6-1"></a>helm<span class="w"> </span>upgrade<span class="w"> </span>robusta<span class="w"> </span>robusta/robusta<span class="w"> </span>--values<span class="o">=</span>generated_values.yaml<span class="w"> </span>--set<span class="w"> </span><span class="nv">clusterName</span><span class="o">=</span>&lt;YOUR_CLUSTER_NAME&gt;
+</span></code></pre></div></p>
 </div>
 </div>
+</div>
+<h2 id="configuration-reference">Configuration Reference<a class="headerlink" href="#configuration-reference" title="Permanent link">&para;</a></h2>
+<table>
+<thead>
+<tr>
+<th>Option</th>
+<th>Default</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>api_key</code></td>
+<td>(required)</td>
+<td>New Relic User API Key (starts with <code>NRAK-</code>).</td>
+</tr>
+<tr>
+<td><code>account_id</code></td>
+<td>(required)</td>
+<td>New Relic account ID (numeric, e.g. <code>1234567</code>).</td>
+</tr>
+<tr>
+<td><code>is_eu_datacenter</code></td>
+<td><code>false</code></td>
+<td>Set <code>true</code> for the EU region. Controls both the API endpoint (<code>api.eu.newrelic.com</code>) and the URL used in clickable links in Holmes's responses.</td>
+</tr>
+<tr>
+<td><code>enable_multi_account</code></td>
+<td><code>false</code></td>
+<td>Enable cross-account queries. When true, Holmes exposes an additional <code>newrelic_list_organization_accounts</code> tool and lets individual NRQL queries override the account ID.</td>
+</tr>
+</tbody>
+</table>
 <h2 id="capabilities">Capabilities<a class="headerlink" href="#capabilities" title="Permanent link">&para;</a></h2>
 <table>
 <thead>
@@ -5234,6 +5430,10 @@
 <td>newrelic_execute_nrql_query</td>
 <td>Execute NRQL queries for Traces, APM, Spans, Logs and more</td>
 </tr>
+<tr>
+<td>newrelic_list_organization_accounts</td>
+<td>List all account IDs/names available to the API key (only enabled when <code>enable_multi_account: true</code>)</td>
+</tr>
 </tbody>
 </table>
 <h2 id="multi-account-mode">Multi-Account Mode<a class="headerlink" href="#multi-account-mode" title="Permanent link">&para;</a></h2>
@@ -5243,7 +5443,7 @@
 <h2 id="how-it-works">How it Works<a class="headerlink" href="#how-it-works" title="Permanent link">&para;</a></h2>
 <p>You don't need to know NRQL to use this toolset. Holmes will automatically construct and execute NRQL queries based on your investigation needs.</p>
 <p>For example, when investigating application logs, Holmes might execute a query like:
-<div class="language-sql highlight"><pre><span></span><code><span id="__span-3-1"><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a><span class="k">SELECT</span><span class="w"> </span><span class="n">message</span><span class="p">,</span><span class="w"> </span><span class="k">timestamp</span><span class="w"> </span><span class="k">FROM</span><span class="w"> </span><span class="n">Log</span><span class="w"> </span><span class="k">WHERE</span><span class="w"> </span><span class="n">pod_name</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s1">&#39;your-app&#39;</span><span class="w"> </span><span class="n">SINCE</span><span class="w"> </span><span class="mi">1</span><span class="w"> </span><span class="n">hour</span><span class="w"> </span><span class="n">ago</span>
+<div class="language-sql highlight"><pre><span></span><code><span id="__span-7-1"><a id="__codelineno-7-1" name="__codelineno-7-1" href="#__codelineno-7-1"></a><span class="k">SELECT</span><span class="w"> </span><span class="n">message</span><span class="p">,</span><span class="w"> </span><span class="k">timestamp</span><span class="w"> </span><span class="k">FROM</span><span class="w"> </span><span class="n">Log</span><span class="w"> </span><span class="k">WHERE</span><span class="w"> </span><span class="n">pod_name</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s1">&#39;your-app&#39;</span><span class="w"> </span><span class="n">SINCE</span><span class="w"> </span><span class="mi">1</span><span class="w"> </span><span class="n">hour</span><span class="w"> </span><span class="n">ago</span>
 </span></code></pre></div></p>
 <p>To learn more about NRQL syntax, see the <a href="https://docs.newrelic.com/docs/nrql/get-started/introduction-nrql-new-relics-query-language/">New Relic Query Language documentation</a>.</p>
 

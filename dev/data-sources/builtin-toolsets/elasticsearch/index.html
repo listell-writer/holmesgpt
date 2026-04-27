@@ -1838,6 +1838,8 @@
       
         
       
+        
+      
     
     
     
@@ -3443,6 +3445,34 @@
     
   
     SQLite
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../victoriametrics/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    VictoriaMetrics
   
 
     
@@ -5316,8 +5346,13 @@
 <div class="tabbed-block">
 <p>First, create a Kubernetes secret with your credentials:</p>
 <div class="language-bash highlight"><pre><span></span><code><span id="__span-2-1"><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a>kubectl<span class="w"> </span>create<span class="w"> </span>secret<span class="w"> </span>generic<span class="w"> </span>elasticsearch-credentials<span class="w"> </span><span class="se">\</span>
-</span><span id="__span-2-2"><a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a><span class="w">  </span>--from-literal<span class="o">=</span>api-key<span class="o">=</span>your-api-key
+</span><span id="__span-2-2"><a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a><span class="w">  </span>--from-literal<span class="o">=</span>api-key<span class="o">=</span>your-api-key<span class="w"> </span><span class="se">\</span>
+</span><span id="__span-2-3"><a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a><span class="w">  </span>-n<span class="w"> </span>holmes
 </span></code></pre></div>
+<div class="admonition note">
+<p class="admonition-title">Namespace must match Holmes' deployment</p>
+<p>Create the secret in the same namespace where Holmes runs. The <code>-n holmes</code> flag in the <strong>Holmes Helm</strong> tab and <code>-n default</code> in the <strong>Robusta Helm</strong> tab match each chart's documented defaults — adjust if you installed Holmes/Robusta into a different namespace. A secret in the wrong namespace silently resolves to an empty env var and authentication will fail with no clear error.</p>
+</div>
 <p>Then add to your Holmes Helm values:</p>
 <div class="language-yaml highlight"><pre><span></span><code><span id="__span-3-1"><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a><span class="nt">additionalEnvVars</span><span class="p">:</span>
 </span><span id="__span-3-2"><a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a><span class="w">  </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">ELASTICSEARCH_URL</span>
@@ -5350,8 +5385,13 @@
 <div class="tabbed-block">
 <p>First, create a Kubernetes secret with your credentials:</p>
 <div class="language-bash highlight"><pre><span></span><code><span id="__span-4-1"><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a>kubectl<span class="w"> </span>create<span class="w"> </span>secret<span class="w"> </span>generic<span class="w"> </span>elasticsearch-credentials<span class="w"> </span><span class="se">\</span>
-</span><span id="__span-4-2"><a id="__codelineno-4-2" name="__codelineno-4-2" href="#__codelineno-4-2"></a><span class="w">  </span>--from-literal<span class="o">=</span>api-key<span class="o">=</span>your-api-key
+</span><span id="__span-4-2"><a id="__codelineno-4-2" name="__codelineno-4-2" href="#__codelineno-4-2"></a><span class="w">  </span>--from-literal<span class="o">=</span>api-key<span class="o">=</span>your-api-key<span class="w"> </span><span class="se">\</span>
+</span><span id="__span-4-3"><a id="__codelineno-4-3" name="__codelineno-4-3" href="#__codelineno-4-3"></a><span class="w">  </span>-n<span class="w"> </span>default
 </span></code></pre></div>
+<div class="admonition note">
+<p class="admonition-title">Namespace must match Holmes' deployment</p>
+<p>Create the secret in the same namespace where Holmes runs. The <code>-n holmes</code> flag in the <strong>Holmes Helm</strong> tab and <code>-n default</code> in the <strong>Robusta Helm</strong> tab match each chart's documented defaults — adjust if you installed Holmes/Robusta into a different namespace. A secret in the wrong namespace silently resolves to an empty env var and authentication will fail with no clear error.</p>
+</div>
 <p>Then add to your Robusta Helm values:</p>
 <div class="language-yaml highlight"><pre><span></span><code><span id="__span-5-1"><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a><span class="nt">holmes</span><span class="p">:</span>
 </span><span id="__span-5-2"><a id="__codelineno-5-2" name="__codelineno-5-2" href="#__codelineno-5-2"></a><span class="w">  </span><span class="nt">additionalEnvVars</span><span class="p">:</span>
@@ -5441,8 +5481,13 @@
 <p>Create a Kubernetes secret containing the client certificates:</p>
 <div class="language-bash highlight"><pre><span></span><code><span id="__span-8-1"><a id="__codelineno-8-1" name="__codelineno-8-1" href="#__codelineno-8-1"></a>kubectl<span class="w"> </span>create<span class="w"> </span>secret<span class="w"> </span>generic<span class="w"> </span>elasticsearch-client-certs<span class="w"> </span><span class="se">\</span>
 </span><span id="__span-8-2"><a id="__codelineno-8-2" name="__codelineno-8-2" href="#__codelineno-8-2"></a><span class="w">  </span>--from-file<span class="o">=</span>tls.crt<span class="o">=</span>/path/to/client.crt<span class="w"> </span><span class="se">\</span>
-</span><span id="__span-8-3"><a id="__codelineno-8-3" name="__codelineno-8-3" href="#__codelineno-8-3"></a><span class="w">  </span>--from-file<span class="o">=</span>tls.key<span class="o">=</span>/path/to/client.key
+</span><span id="__span-8-3"><a id="__codelineno-8-3" name="__codelineno-8-3" href="#__codelineno-8-3"></a><span class="w">  </span>--from-file<span class="o">=</span>tls.key<span class="o">=</span>/path/to/client.key<span class="w"> </span><span class="se">\</span>
+</span><span id="__span-8-4"><a id="__codelineno-8-4" name="__codelineno-8-4" href="#__codelineno-8-4"></a><span class="w">  </span>-n<span class="w"> </span>holmes
 </span></code></pre></div>
+<div class="admonition note">
+<p class="admonition-title">Namespace must match Holmes' deployment</p>
+<p>Create the secret in the same namespace where Holmes runs. The <code>-n holmes</code> flag in the <strong>Holmes Helm</strong> tab and <code>-n default</code> in the <strong>Robusta Helm</strong> tab match each chart's documented defaults — adjust if you installed Holmes/Robusta into a different namespace. A secret in the wrong namespace silently resolves to an empty env var and authentication will fail with no clear error.</p>
+</div>
 <p>Then mount the secret into the Holmes container using <code>additionalVolumes</code> and <code>additionalVolumeMounts</code>:</p>
 <div class="language-yaml highlight"><pre><span></span><code><span id="__span-9-1"><a id="__codelineno-9-1" name="__codelineno-9-1" href="#__codelineno-9-1"></a><span class="nt">additionalEnvVars</span><span class="p">:</span>
 </span><span id="__span-9-2"><a id="__codelineno-9-2" name="__codelineno-9-2" href="#__codelineno-9-2"></a><span class="w">  </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">ELASTICSEARCH_URL</span>
@@ -5471,8 +5516,13 @@
 <p>Create a Kubernetes secret containing the client certificates:</p>
 <div class="language-bash highlight"><pre><span></span><code><span id="__span-10-1"><a id="__codelineno-10-1" name="__codelineno-10-1" href="#__codelineno-10-1"></a>kubectl<span class="w"> </span>create<span class="w"> </span>secret<span class="w"> </span>generic<span class="w"> </span>elasticsearch-client-certs<span class="w"> </span><span class="se">\</span>
 </span><span id="__span-10-2"><a id="__codelineno-10-2" name="__codelineno-10-2" href="#__codelineno-10-2"></a><span class="w">  </span>--from-file<span class="o">=</span>tls.crt<span class="o">=</span>/path/to/client.crt<span class="w"> </span><span class="se">\</span>
-</span><span id="__span-10-3"><a id="__codelineno-10-3" name="__codelineno-10-3" href="#__codelineno-10-3"></a><span class="w">  </span>--from-file<span class="o">=</span>tls.key<span class="o">=</span>/path/to/client.key
+</span><span id="__span-10-3"><a id="__codelineno-10-3" name="__codelineno-10-3" href="#__codelineno-10-3"></a><span class="w">  </span>--from-file<span class="o">=</span>tls.key<span class="o">=</span>/path/to/client.key<span class="w"> </span><span class="se">\</span>
+</span><span id="__span-10-4"><a id="__codelineno-10-4" name="__codelineno-10-4" href="#__codelineno-10-4"></a><span class="w">  </span>-n<span class="w"> </span>default
 </span></code></pre></div>
+<div class="admonition note">
+<p class="admonition-title">Namespace must match Holmes' deployment</p>
+<p>Create the secret in the same namespace where Holmes runs. The <code>-n holmes</code> flag in the <strong>Holmes Helm</strong> tab and <code>-n default</code> in the <strong>Robusta Helm</strong> tab match each chart's documented defaults — adjust if you installed Holmes/Robusta into a different namespace. A secret in the wrong namespace silently resolves to an empty env var and authentication will fail with no clear error.</p>
+</div>
 <p>Then add to your Robusta Helm values:</p>
 <div class="language-yaml highlight"><pre><span></span><code><span id="__span-11-1"><a id="__codelineno-11-1" name="__codelineno-11-1" href="#__codelineno-11-1"></a><span class="nt">holmes</span><span class="p">:</span>
 </span><span id="__span-11-2"><a id="__codelineno-11-2" name="__codelineno-11-2" href="#__codelineno-11-2"></a><span class="w">  </span><span class="nt">additionalEnvVars</span><span class="p">:</span>

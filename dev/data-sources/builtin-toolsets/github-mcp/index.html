@@ -1838,6 +1838,8 @@
       
         
       
+        
+      
     
     
     
@@ -3593,6 +3595,34 @@
     
   
     SQLite
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../victoriametrics/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    VictoriaMetrics
   
 
     
@@ -6005,7 +6035,12 @@
 <li><code>assign_copilot_to_issue</code> - Delegate tasks to GitHub Copilot</li>
 </ul>
 <h3 id="customizing-toolsets">Customizing Toolsets<a class="headerlink" href="#customizing-toolsets" title="Permanent link">&para;</a></h3>
-<p>To use a different set of toolsets, override <code>config.toolsets</code>:</p>
+<p>HolmesGPT exposes two config knobs that control which tools the MCP server makes available:</p>
+<ul>
+<li><strong><code>config.toolsets</code></strong> — comma-separated list of toolset <em>groups</em>. Every tool in each selected group becomes available.</li>
+<li><strong><code>config.tools</code></strong> — comma-separated list of individual tool names. When set, this is a <strong>hard allowlist</strong> and takes precedence over <code>toolsets</code> (Holmes only gets exactly these tools regardless of what toolsets are configured). Leave empty to expose every tool from the selected toolsets.</li>
+</ul>
+<p><strong>Example — restrict by toolset group:</strong></p>
 <div class="language-yaml highlight"><pre><span></span><code><span id="__span-23-1"><a id="__codelineno-23-1" name="__codelineno-23-1" href="#__codelineno-23-1"></a><span class="nt">mcpAddons</span><span class="p">:</span>
 </span><span id="__span-23-2"><a id="__codelineno-23-2" name="__codelineno-23-2" href="#__codelineno-23-2"></a><span class="w">  </span><span class="nt">github</span><span class="p">:</span>
 </span><span id="__span-23-3"><a id="__codelineno-23-3" name="__codelineno-23-3" href="#__codelineno-23-3"></a><span class="w">    </span><span class="nt">enabled</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">true</span>
@@ -6015,16 +6050,15 @@
 </span><span id="__span-23-7"><a id="__codelineno-23-7" name="__codelineno-23-7" href="#__codelineno-23-7"></a><span class="w">      </span><span class="c1"># Only enable specific toolsets</span>
 </span><span id="__span-23-8"><a id="__codelineno-23-8" name="__codelineno-23-8" href="#__codelineno-23-8"></a><span class="w">      </span><span class="nt">toolsets</span><span class="p">:</span><span class="w"> </span><span class="s">&quot;pull_requests,actions&quot;</span>
 </span></code></pre></div>
-<p>For fine-grained control, you can also specify individual tools with <code>config.tools</code>:</p>
+<p><strong>Example — restrict to specific tools (bypasses <code>toolsets</code>):</strong></p>
 <div class="language-yaml highlight"><pre><span></span><code><span id="__span-24-1"><a id="__codelineno-24-1" name="__codelineno-24-1" href="#__codelineno-24-1"></a><span class="nt">mcpAddons</span><span class="p">:</span>
 </span><span id="__span-24-2"><a id="__codelineno-24-2" name="__codelineno-24-2" href="#__codelineno-24-2"></a><span class="w">  </span><span class="nt">github</span><span class="p">:</span>
 </span><span id="__span-24-3"><a id="__codelineno-24-3" name="__codelineno-24-3" href="#__codelineno-24-3"></a><span class="w">    </span><span class="nt">enabled</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">true</span>
 </span><span id="__span-24-4"><a id="__codelineno-24-4" name="__codelineno-24-4" href="#__codelineno-24-4"></a><span class="w">    </span><span class="nt">auth</span><span class="p">:</span>
 </span><span id="__span-24-5"><a id="__codelineno-24-5" name="__codelineno-24-5" href="#__codelineno-24-5"></a><span class="w">      </span><span class="nt">secretName</span><span class="p">:</span><span class="w"> </span><span class="s">&quot;github-mcp-token&quot;</span>
 </span><span id="__span-24-6"><a id="__codelineno-24-6" name="__codelineno-24-6" href="#__codelineno-24-6"></a><span class="w">    </span><span class="nt">config</span><span class="p">:</span>
-</span><span id="__span-24-7"><a id="__codelineno-24-7" name="__codelineno-24-7" href="#__codelineno-24-7"></a><span class="w">      </span><span class="nt">toolsets</span><span class="p">:</span><span class="w"> </span><span class="s">&quot;&quot;</span><span class="w">  </span><span class="c1"># Disable toolsets</span>
-</span><span id="__span-24-8"><a id="__codelineno-24-8" name="__codelineno-24-8" href="#__codelineno-24-8"></a><span class="w">      </span><span class="c1"># Only enable specific tools</span>
-</span><span id="__span-24-9"><a id="__codelineno-24-9" name="__codelineno-24-9" href="#__codelineno-24-9"></a><span class="w">      </span><span class="nt">tools</span><span class="p">:</span><span class="w"> </span><span class="s">&quot;get_file_contents,list_commits,list_workflow_runs,get_job_logs&quot;</span>
+</span><span id="__span-24-7"><a id="__codelineno-24-7" name="__codelineno-24-7" href="#__codelineno-24-7"></a><span class="w">      </span><span class="c1"># `tools` is a hard allowlist — `toolsets` is ignored when this is set.</span>
+</span><span id="__span-24-8"><a id="__codelineno-24-8" name="__codelineno-24-8" href="#__codelineno-24-8"></a><span class="w">      </span><span class="nt">tools</span><span class="p">:</span><span class="w"> </span><span class="s">&quot;get_file_contents,list_commits,list_workflow_runs,get_job_logs&quot;</span>
 </span></code></pre></div>
 <p>For the full list of available tools and toolsets, see the <a href="https://github.com/github/github-mcp-server">GitHub MCP Server documentation</a>.</p>
 <h2 id="testing-the-connection">Testing the Connection<a class="headerlink" href="#testing-the-connection" title="Permanent link">&para;</a></h2>

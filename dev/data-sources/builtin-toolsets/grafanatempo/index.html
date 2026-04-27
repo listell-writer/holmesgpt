@@ -1838,6 +1838,8 @@
       
         
       
+        
+      
     
     
     
@@ -2570,18 +2572,17 @@
     <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
       
         <li class="md-nav__item">
-  <a href="#proxying-through-grafana" class="md-nav__link">
+  <a href="#when-to-use-this" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Proxying through Grafana
+        When to Use This
       
     </span>
   </a>
   
-    <nav class="md-nav" aria-label="Proxying through Grafana">
-      <ul class="md-nav__list">
-        
-          <li class="md-nav__item">
+</li>
+      
+        <li class="md-nav__item">
   <a href="#prerequisites" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -2591,40 +2592,46 @@
   </a>
   
 </li>
-        
-          <li class="md-nav__item">
-  <a href="#configuration-grafana-proxy" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Configuration (Grafana Proxy)
-      
-    </span>
-  </a>
-  
-</li>
-        
-      </ul>
-    </nav>
-  
-</li>
       
         <li class="md-nav__item">
-  <a href="#direct-connection" class="md-nav__link">
+  <a href="#configuration" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Direct Connection
+        Configuration
       
     </span>
   </a>
   
-    <nav class="md-nav" aria-label="Direct Connection">
+    <nav class="md-nav" aria-label="Configuration">
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
-  <a href="#configuration-direct-connection" class="md-nav__link">
+  <a href="#self-hosted-tempo-via-grafana-proxy" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Configuration (Direct Connection)
+        Self-Hosted Tempo via Grafana Proxy
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#self-hosted-tempo-direct-connection" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Self-Hosted Tempo - Direct Connection
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#grafana-cloud" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Grafana Cloud
       
     </span>
   </a>
@@ -3516,6 +3523,34 @@
     
   
     SQLite
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../victoriametrics/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    VictoriaMetrics
   
 
     
@@ -5140,18 +5175,17 @@
     <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
       
         <li class="md-nav__item">
-  <a href="#proxying-through-grafana" class="md-nav__link">
+  <a href="#when-to-use-this" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Proxying through Grafana
+        When to Use This
       
     </span>
   </a>
   
-    <nav class="md-nav" aria-label="Proxying through Grafana">
-      <ul class="md-nav__list">
-        
-          <li class="md-nav__item">
+</li>
+      
+        <li class="md-nav__item">
   <a href="#prerequisites" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -5161,40 +5195,46 @@
   </a>
   
 </li>
-        
-          <li class="md-nav__item">
-  <a href="#configuration-grafana-proxy" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Configuration (Grafana Proxy)
-      
-    </span>
-  </a>
-  
-</li>
-        
-      </ul>
-    </nav>
-  
-</li>
       
         <li class="md-nav__item">
-  <a href="#direct-connection" class="md-nav__link">
+  <a href="#configuration" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Direct Connection
+        Configuration
       
     </span>
   </a>
   
-    <nav class="md-nav" aria-label="Direct Connection">
+    <nav class="md-nav" aria-label="Configuration">
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
-  <a href="#configuration-direct-connection" class="md-nav__link">
+  <a href="#self-hosted-tempo-via-grafana-proxy" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Configuration (Direct Connection)
+        Self-Hosted Tempo via Grafana Proxy
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#self-hosted-tempo-direct-connection" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Self-Hosted Tempo - Direct Connection
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#grafana-cloud" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Grafana Cloud
       
     </span>
   </a>
@@ -5406,161 +5446,319 @@
 
 
 <h1 id="tempo">Tempo<a class="headerlink" href="#tempo" title="Permanent link">&para;</a></h1>
-<p>By enabling this toolset, HolmesGPT will be able to fetch trace information from Tempo to debug performance related issues, like high latency in your application.</p>
-<h2 id="proxying-through-grafana">Proxying through Grafana<a class="headerlink" href="#proxying-through-grafana" title="Permanent link">&para;</a></h2>
-<p>This is the recommended approach because we intend to add more capabilities to the toolset that are only available with Grafana.</p>
-<h3 id="prerequisites">Prerequisites<a class="headerlink" href="#prerequisites" title="Permanent link">&para;</a></h3>
-<p>A <a href="https://grafana.com/docs/grafana/latest/administration/service-accounts/">Grafana service account token</a> with the following permissions:</p>
+<p>Connect HolmesGPT to Tempo for distributed trace analysis. Useful for diagnosing performance issues like high latency, slow operations, and request failures across microservices.</p>
+<h2 id="when-to-use-this">When to Use This<a class="headerlink" href="#when-to-use-this" title="Permanent link">&para;</a></h2>
 <ul>
-<li>Basic role -&gt; Viewer</li>
-<li>Data sources -&gt; Reader</li>
+<li>✅ Your applications emit distributed traces to Tempo</li>
+<li>✅ You need to debug latency or identify slow operations</li>
+<li>✅ You want to correlate errors with specific traces</li>
 </ul>
-<p>Check out this <a href="https://www.loom.com/share/f969ab3af509444693802254ab040791?sid=aa8b3c65-2696-4f69-ae47-bb96e8e03c47">video</a> on creating a Grafana service account token.</p>
-<p><strong>Getting Grafana URL</strong></p>
-<p>You can find the Grafana URL required for Tempo in your Grafana cloud account settings.</p>
-<p><strong>Obtaining the datasource UID</strong></p>
-<p>You may have multiple Tempo data sources set up in Grafana. HolmesGPT uses a single Tempo datasource to fetch the traces and it needs to know the UID of this datasource.</p>
-<p>A simple way to get the datasource UID is to access the Grafana API by running the following request:</p>
-<div class="language-bash highlight"><pre><span></span><code><span id="__span-0-1"><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="c1"># port forward if you are using Robusta&#39;s Grafana from your Kubernetes cluster</span>
+<h2 id="prerequisites">Prerequisites<a class="headerlink" href="#prerequisites" title="Permanent link">&para;</a></h2>
+<ul>
+<li>Tempo instance receiving traces from your applications</li>
+<li>Grafana with a Tempo datasource configured (recommended) OR direct Tempo API access</li>
+</ul>
+<h2 id="configuration">Configuration<a class="headerlink" href="#configuration" title="Permanent link">&para;</a></h2>
+<p>HolmesGPT supports three ways to connect to Tempo. Pick the one that matches your setup:</p>
+<table>
+<thead>
+<tr>
+<th>Setup</th>
+<th>When to use</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><a href="#self-hosted-tempo-via-grafana-proxy">Self-Hosted Tempo via Grafana Proxy</a> (recommended)</td>
+<td>You run your own Grafana with a Tempo datasource configured</td>
+</tr>
+<tr>
+<td><a href="#self-hosted-tempo-direct-connection">Self-Hosted Tempo - Direct Connection</a></td>
+<td>Self-hosted Tempo without Grafana, including multi-tenant setups needing <code>X-Scope-OrgID</code></td>
+</tr>
+<tr>
+<td><a href="#grafana-cloud">Grafana Cloud</a></td>
+<td>Your Grafana Cloud stack (queries Tempo via your Grafana Cloud Grafana)</td>
+</tr>
+</tbody>
+</table>
+<h3 id="self-hosted-tempo-via-grafana-proxy">Self-Hosted Tempo via Grafana Proxy<a class="headerlink" href="#self-hosted-tempo-via-grafana-proxy" title="Permanent link">&para;</a></h3>
+<p>HolmesGPT queries your self-hosted Tempo through your Grafana instance's datasource proxy. Recommended when you already have Grafana — it handles authentication and you only need one API key. This is also the only mode that produces clickable "View in Grafana" links in Holmes's responses.</p>
+<p><strong>Required:</strong></p>
+<ul>
+<li>A <a href="https://grafana.com/docs/grafana/latest/administration/service-accounts/">Grafana service account token</a> with:<ul>
+<li>Basic role → Viewer</li>
+<li>Data sources → Reader</li>
+</ul>
+</li>
+<li>Tempo datasource UID from Grafana</li>
+</ul>
+<p>See this <a href="https://www.loom.com/share/f969ab3af509444693802254ab040791?sid=aa8b3c65-2696-4f69-ae47-bb96e8e03c47">video</a> for a walkthrough of creating the service account token.</p>
+<p><strong>Find your Tempo datasource UID:</strong></p>
+<div class="language-bash highlight"><pre><span></span><code><span id="__span-0-1"><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="c1"># Port forward to Grafana</span>
 </span><span id="__span-0-2"><a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a>kubectl<span class="w"> </span>port-forward<span class="w"> </span>svc/robusta-grafana<span class="w"> </span><span class="m">3000</span>:80
-</span><span id="__span-0-3"><a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a><span class="c1"># List the Tempo data sources</span>
-</span><span id="__span-0-4"><a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a>curl<span class="w"> </span>-s<span class="w"> </span>-u<span class="w"> </span>&lt;username&gt;:&lt;password&gt;<span class="w"> </span>http://localhost:3000/api/datasources<span class="w"> </span><span class="p">|</span><span class="w"> </span>jq<span class="w"> </span><span class="s1">&#39;.[] | select(.type == &quot;tempo&quot;)&#39;</span>
+</span><span id="__span-0-3"><a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a>
+</span><span id="__span-0-4"><a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a><span class="c1"># Get Tempo datasource UID</span>
+</span><span id="__span-0-5"><a id="__codelineno-0-5" name="__codelineno-0-5" href="#__codelineno-0-5"></a>curl<span class="w"> </span>-s<span class="w"> </span>-u<span class="w"> </span>&lt;username&gt;:&lt;password&gt;<span class="w"> </span>http://localhost:3000/api/datasources<span class="w"> </span><span class="p">|</span><span class="w"> </span>jq<span class="w"> </span><span class="s1">&#39;.[] | select(.type == &quot;tempo&quot;) | .uid&#39;</span>
 </span></code></pre></div>
-<p>This will return something like:</p>
-<div class="language-json highlight"><pre><span></span><code><span id="__span-1-1"><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a><span class="p">{</span>
-</span><span id="__span-1-2"><a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a><span class="w">    </span><span class="nt">&quot;id&quot;</span><span class="p">:</span><span class="w"> </span><span class="mi">3</span><span class="p">,</span>
-</span><span id="__span-1-3"><a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a><span class="w">    </span><span class="nt">&quot;uid&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;klja8hsa-8a9c-4b35-1230-7baab22b02ee&quot;</span><span class="p">,</span>
-</span><span id="__span-1-4"><a id="__codelineno-1-4" name="__codelineno-1-4" href="#__codelineno-1-4"></a><span class="w">    </span><span class="nt">&quot;orgId&quot;</span><span class="p">:</span><span class="w"> </span><span class="mi">1</span><span class="p">,</span>
-</span><span id="__span-1-5"><a id="__codelineno-1-5" name="__codelineno-1-5" href="#__codelineno-1-5"></a><span class="w">    </span><span class="nt">&quot;name&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;Tempo&quot;</span><span class="p">,</span>
-</span><span id="__span-1-6"><a id="__codelineno-1-6" name="__codelineno-1-6" href="#__codelineno-1-6"></a><span class="w">    </span><span class="nt">&quot;type&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;tempo&quot;</span><span class="p">,</span>
-</span><span id="__span-1-7"><a id="__codelineno-1-7" name="__codelineno-1-7" href="#__codelineno-1-7"></a><span class="w">    </span><span class="nt">&quot;typeName&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;Tempo&quot;</span><span class="p">,</span>
-</span><span id="__span-1-8"><a id="__codelineno-1-8" name="__codelineno-1-8" href="#__codelineno-1-8"></a><span class="w">    </span><span class="nt">&quot;typeLogoUrl&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;/public/app/plugins/datasource/tempo/img/tempo_icon.svg&quot;</span><span class="p">,</span>
-</span><span id="__span-1-9"><a id="__codelineno-1-9" name="__codelineno-1-9" href="#__codelineno-1-9"></a><span class="w">    </span><span class="nt">&quot;access&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;proxy&quot;</span><span class="p">,</span>
-</span><span id="__span-1-10"><a id="__codelineno-1-10" name="__codelineno-1-10" href="#__codelineno-1-10"></a><span class="w">    </span><span class="nt">&quot;url&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;http://tempo-query-frontend.tempo:3100&quot;</span><span class="p">,</span>
-</span><span id="__span-1-11"><a id="__codelineno-1-11" name="__codelineno-1-11" href="#__codelineno-1-11"></a><span class="w">    </span><span class="nt">&quot;user&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;&quot;</span><span class="p">,</span>
-</span><span id="__span-1-12"><a id="__codelineno-1-12" name="__codelineno-1-12" href="#__codelineno-1-12"></a><span class="w">    </span><span class="nt">&quot;database&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;&quot;</span><span class="p">,</span>
-</span><span id="__span-1-13"><a id="__codelineno-1-13" name="__codelineno-1-13" href="#__codelineno-1-13"></a><span class="w">    </span><span class="nt">&quot;basicAuth&quot;</span><span class="p">:</span><span class="w"> </span><span class="kc">false</span><span class="p">,</span>
-</span><span id="__span-1-14"><a id="__codelineno-1-14" name="__codelineno-1-14" href="#__codelineno-1-14"></a><span class="w">    </span><span class="nt">&quot;isDefault&quot;</span><span class="p">:</span><span class="w"> </span><span class="kc">false</span><span class="p">,</span>
-</span><span id="__span-1-15"><a id="__codelineno-1-15" name="__codelineno-1-15" href="#__codelineno-1-15"></a><span class="w">    </span><span class="nt">&quot;jsonData&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">{</span>
-</span><span id="__span-1-16"><a id="__codelineno-1-16" name="__codelineno-1-16" href="#__codelineno-1-16"></a><span class="w">        </span><span class="nt">&quot;tlsSkipVerify&quot;</span><span class="p">:</span><span class="w"> </span><span class="kc">true</span>
-</span><span id="__span-1-17"><a id="__codelineno-1-17" name="__codelineno-1-17" href="#__codelineno-1-17"></a><span class="w">    </span><span class="p">},</span>
-</span><span id="__span-1-18"><a id="__codelineno-1-18" name="__codelineno-1-18" href="#__codelineno-1-18"></a><span class="w">    </span><span class="nt">&quot;readOnly&quot;</span><span class="p">:</span><span class="w"> </span><span class="kc">false</span>
-</span><span id="__span-1-19"><a id="__codelineno-1-19" name="__codelineno-1-19" href="#__codelineno-1-19"></a><span class="p">}</span>
-</span></code></pre></div>
-<p>In this case, the Tempo datasource UID is <code>klja8hsa-8a9c-4b35-1230-7baab22b02ee</code>.</p>
-<h3 id="configuration-grafana-proxy">Configuration (Grafana Proxy)<a class="headerlink" href="#configuration-grafana-proxy" title="Permanent link">&para;</a></h3>
-<div class="tabbed-set tabbed-alternate" data-tabs="1:2"><input checked="checked" id="configuration-grafana-proxy-holmes-cli" name="__tabbed_1" type="radio" /><input id="configuration-grafana-proxy-robusta-helm-chart" name="__tabbed_1" type="radio" /><div class="tabbed-labels"><label for="configuration-grafana-proxy-holmes-cli">Holmes CLI</label><label for="configuration-grafana-proxy-robusta-helm-chart">Robusta Helm Chart</label></div>
+<div class="tabbed-set tabbed-alternate" data-tabs="1:3"><input checked="checked" id="self-hosted-tempo-via-grafana-proxy-holmes-cli" name="__tabbed_1" type="radio" /><input id="self-hosted-tempo-via-grafana-proxy-holmes-helm-chart" name="__tabbed_1" type="radio" /><input id="self-hosted-tempo-via-grafana-proxy-robusta-helm-chart" name="__tabbed_1" type="radio" /><div class="tabbed-labels"><label for="self-hosted-tempo-via-grafana-proxy-holmes-cli">Holmes CLI</label><label for="self-hosted-tempo-via-grafana-proxy-holmes-helm-chart">Holmes Helm Chart</label><label for="self-hosted-tempo-via-grafana-proxy-robusta-helm-chart">Robusta Helm Chart</label></div>
 <div class="tabbed-content">
 <div class="tabbed-block">
 <p>Add the following to <strong>~/.holmes/config.yaml</strong>. Create the file if it doesn't exist:</p>
-<div class="language-yaml highlight"><pre><span></span><code><span id="__span-2-1"><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a><span class="nt">toolsets</span><span class="p">:</span>
-</span><span id="__span-2-2"><a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a><span class="w">  </span><span class="nt">grafana/tempo</span><span class="p">:</span>
-</span><span id="__span-2-3"><a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a><span class="w">    </span><span class="nt">enabled</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">true</span>
-</span><span id="__span-2-4"><a id="__codelineno-2-4" name="__codelineno-2-4" href="#__codelineno-2-4"></a><span class="w">    </span><span class="nt">config</span><span class="p">:</span>
-</span><span id="__span-2-5"><a id="__codelineno-2-5" name="__codelineno-2-5" href="#__codelineno-2-5"></a><span class="w">      </span><span class="nt">api_key</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">&lt;your grafana service account token&gt;</span>
-</span><span id="__span-2-6"><a id="__codelineno-2-6" name="__codelineno-2-6" href="#__codelineno-2-6"></a><span class="w">      </span><span class="nt">api_url</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">&lt;your grafana url&gt;</span><span class="w"> </span><span class="c1"># e.g. https://acme-corp.grafana.net</span>
-</span><span id="__span-2-7"><a id="__codelineno-2-7" name="__codelineno-2-7" href="#__codelineno-2-7"></a><span class="w">      </span><span class="nt">grafana_datasource_uid</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">&lt;the UID of the tempo data source in Grafana&gt;</span>
+<div class="language-yaml highlight"><pre><span></span><code><span id="__span-1-1"><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a><span class="nt">toolsets</span><span class="p">:</span>
+</span><span id="__span-1-2"><a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a><span class="w">  </span><span class="nt">grafana/tempo</span><span class="p">:</span>
+</span><span id="__span-1-3"><a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a><span class="w">    </span><span class="nt">enabled</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">true</span>
+</span><span id="__span-1-4"><a id="__codelineno-1-4" name="__codelineno-1-4" href="#__codelineno-1-4"></a><span class="w">    </span><span class="nt">config</span><span class="p">:</span>
+</span><span id="__span-1-5"><a id="__codelineno-1-5" name="__codelineno-1-5" href="#__codelineno-1-5"></a><span class="w">      </span><span class="nt">api_url</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">&lt;your grafana url&gt;</span><span class="w">  </span><span class="c1"># e.g. http://grafana.monitoring.svc.cluster.local</span>
+</span><span id="__span-1-6"><a id="__codelineno-1-6" name="__codelineno-1-6" href="#__codelineno-1-6"></a><span class="w">      </span><span class="nt">api_key</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">&lt;your grafana service account token&gt;</span>
+</span><span id="__span-1-7"><a id="__codelineno-1-7" name="__codelineno-1-7" href="#__codelineno-1-7"></a><span class="w">      </span><span class="nt">grafana_datasource_uid</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">&lt;the UID of the tempo data source in Grafana&gt;</span>
 </span></code></pre></div>
 <p>After making changes to your configuration, run:
-<div class="language-bash highlight"><pre><span></span><code><span id="__span-3-1"><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a>holmes<span class="w"> </span>toolset<span class="w"> </span>refresh
+<div class="language-bash highlight"><pre><span></span><code><span id="__span-2-1"><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a>holmes<span class="w"> </span>toolset<span class="w"> </span>refresh
 </span></code></pre></div></p>
 <p>To test, run:</p>
-<div class="language-bash highlight"><pre><span></span><code><span id="__span-4-1"><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a>holmes<span class="w"> </span>ask<span class="w"> </span><span class="s2">&quot;The payments DB is very slow, check tempo for any trace data&quot;</span>
+<div class="language-bash highlight"><pre><span></span><code><span id="__span-3-1"><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a>holmes<span class="w"> </span>ask<span class="w"> </span><span class="s2">&quot;The payments DB is very slow, check tempo for any trace data&quot;</span>
 </span></code></pre></div>
 </div>
 <div class="tabbed-block">
-<div class="language-yaml highlight"><pre><span></span><code><span id="__span-5-1"><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a><span class="nt">holmes</span><span class="p">:</span>
-</span><span id="__span-5-2"><a id="__codelineno-5-2" name="__codelineno-5-2" href="#__codelineno-5-2"></a><span class="w">  </span><span class="nt">toolsets</span><span class="p">:</span>
-</span><span id="__span-5-3"><a id="__codelineno-5-3" name="__codelineno-5-3" href="#__codelineno-5-3"></a><span class="w">    </span><span class="nt">grafana/tempo</span><span class="p">:</span>
-</span><span id="__span-5-4"><a id="__codelineno-5-4" name="__codelineno-5-4" href="#__codelineno-5-4"></a><span class="w">      </span><span class="nt">enabled</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">true</span>
-</span><span id="__span-5-5"><a id="__codelineno-5-5" name="__codelineno-5-5" href="#__codelineno-5-5"></a><span class="w">      </span><span class="nt">config</span><span class="p">:</span>
-</span><span id="__span-5-6"><a id="__codelineno-5-6" name="__codelineno-5-6" href="#__codelineno-5-6"></a><span class="w">        </span><span class="nt">api_key</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">&lt;your grafana API key&gt;</span>
-</span><span id="__span-5-7"><a id="__codelineno-5-7" name="__codelineno-5-7" href="#__codelineno-5-7"></a><span class="w">        </span><span class="nt">api_url</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">&lt;your grafana url&gt;</span><span class="w"> </span><span class="c1"># e.g. https://acme-corp.grafana.net</span>
-</span><span id="__span-5-8"><a id="__codelineno-5-8" name="__codelineno-5-8" href="#__codelineno-5-8"></a><span class="w">        </span><span class="nt">grafana_datasource_uid</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">&lt;the UID of the tempo data source in Grafana&gt;</span>
+<p>First, create a Kubernetes secret with your Grafana service account token:</p>
+<div class="language-bash highlight"><pre><span></span><code><span id="__span-4-1"><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a>kubectl<span class="w"> </span>create<span class="w"> </span>secret<span class="w"> </span>generic<span class="w"> </span>grafana-tempo-api-key<span class="w"> </span><span class="se">\</span>
+</span><span id="__span-4-2"><a id="__codelineno-4-2" name="__codelineno-4-2" href="#__codelineno-4-2"></a><span class="w">  </span>--from-literal<span class="o">=</span>api-key<span class="o">=</span>your-grafana-service-account-token<span class="w"> </span><span class="se">\</span>
+</span><span id="__span-4-3"><a id="__codelineno-4-3" name="__codelineno-4-3" href="#__codelineno-4-3"></a><span class="w">  </span>-n<span class="w"> </span>holmes
+</span></code></pre></div>
+<div class="admonition note">
+<p class="admonition-title">Namespace must match Holmes' deployment</p>
+<p>Create the secret in the same namespace where Holmes runs. The <code>-n holmes</code> flag in the <strong>Holmes Helm</strong> tab and <code>-n default</code> in the <strong>Robusta Helm</strong> tab match each chart's documented defaults — adjust if you installed Holmes/Robusta into a different namespace. A secret in the wrong namespace silently resolves to an empty env var and authentication will fail with no clear error.</p>
+</div>
+<p>Then add to your Holmes Helm values:</p>
+<div class="language-yaml highlight"><pre><span></span><code><span id="__span-5-1"><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a><span class="nt">additionalEnvVars</span><span class="p">:</span>
+</span><span id="__span-5-2"><a id="__codelineno-5-2" name="__codelineno-5-2" href="#__codelineno-5-2"></a><span class="w">  </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">GRAFANA_TEMPO_API_KEY</span>
+</span><span id="__span-5-3"><a id="__codelineno-5-3" name="__codelineno-5-3" href="#__codelineno-5-3"></a><span class="w">    </span><span class="nt">valueFrom</span><span class="p">:</span>
+</span><span id="__span-5-4"><a id="__codelineno-5-4" name="__codelineno-5-4" href="#__codelineno-5-4"></a><span class="w">      </span><span class="nt">secretKeyRef</span><span class="p">:</span>
+</span><span id="__span-5-5"><a id="__codelineno-5-5" name="__codelineno-5-5" href="#__codelineno-5-5"></a><span class="w">        </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">grafana-tempo-api-key</span>
+</span><span id="__span-5-6"><a id="__codelineno-5-6" name="__codelineno-5-6" href="#__codelineno-5-6"></a><span class="w">        </span><span class="nt">key</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">api-key</span>
+</span><span id="__span-5-7"><a id="__codelineno-5-7" name="__codelineno-5-7" href="#__codelineno-5-7"></a>
+</span><span id="__span-5-8"><a id="__codelineno-5-8" name="__codelineno-5-8" href="#__codelineno-5-8"></a><span class="nt">toolsets</span><span class="p">:</span>
+</span><span id="__span-5-9"><a id="__codelineno-5-9" name="__codelineno-5-9" href="#__codelineno-5-9"></a><span class="w">  </span><span class="nt">grafana/tempo</span><span class="p">:</span>
+</span><span id="__span-5-10"><a id="__codelineno-5-10" name="__codelineno-5-10" href="#__codelineno-5-10"></a><span class="w">    </span><span class="nt">enabled</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">true</span>
+</span><span id="__span-5-11"><a id="__codelineno-5-11" name="__codelineno-5-11" href="#__codelineno-5-11"></a><span class="w">    </span><span class="nt">config</span><span class="p">:</span>
+</span><span id="__span-5-12"><a id="__codelineno-5-12" name="__codelineno-5-12" href="#__codelineno-5-12"></a><span class="w">      </span><span class="nt">api_url</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">&lt;your grafana url&gt;</span><span class="w">  </span><span class="c1"># e.g. http://grafana.monitoring.svc.cluster.local</span>
+</span><span id="__span-5-13"><a id="__codelineno-5-13" name="__codelineno-5-13" href="#__codelineno-5-13"></a><span class="w">      </span><span class="nt">api_key</span><span class="p">:</span><span class="w"> </span><span class="s">&quot;{{</span><span class="nv"> </span><span class="s">env.GRAFANA_TEMPO_API_KEY</span><span class="nv"> </span><span class="s">}}&quot;</span>
+</span><span id="__span-5-14"><a id="__codelineno-5-14" name="__codelineno-5-14" href="#__codelineno-5-14"></a><span class="w">      </span><span class="nt">grafana_datasource_uid</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">&lt;the UID of the tempo data source in Grafana&gt;</span>
 </span></code></pre></div>
 </div>
+<div class="tabbed-block">
+<p>First, create a Kubernetes secret with your Grafana service account token:</p>
+<div class="language-bash highlight"><pre><span></span><code><span id="__span-6-1"><a id="__codelineno-6-1" name="__codelineno-6-1" href="#__codelineno-6-1"></a>kubectl<span class="w"> </span>create<span class="w"> </span>secret<span class="w"> </span>generic<span class="w"> </span>grafana-tempo-api-key<span class="w"> </span><span class="se">\</span>
+</span><span id="__span-6-2"><a id="__codelineno-6-2" name="__codelineno-6-2" href="#__codelineno-6-2"></a><span class="w">  </span>--from-literal<span class="o">=</span>api-key<span class="o">=</span>your-grafana-service-account-token<span class="w"> </span><span class="se">\</span>
+</span><span id="__span-6-3"><a id="__codelineno-6-3" name="__codelineno-6-3" href="#__codelineno-6-3"></a><span class="w">  </span>-n<span class="w"> </span>default
+</span></code></pre></div>
+<div class="admonition note">
+<p class="admonition-title">Namespace must match Holmes' deployment</p>
+<p>Create the secret in the same namespace where Holmes runs. The <code>-n holmes</code> flag in the <strong>Holmes Helm</strong> tab and <code>-n default</code> in the <strong>Robusta Helm</strong> tab match each chart's documented defaults — adjust if you installed Holmes/Robusta into a different namespace. A secret in the wrong namespace silently resolves to an empty env var and authentication will fail with no clear error.</p>
+</div>
+<p>Then add to your Robusta Helm values:</p>
+<div class="language-yaml highlight"><pre><span></span><code><span id="__span-7-1"><a id="__codelineno-7-1" name="__codelineno-7-1" href="#__codelineno-7-1"></a><span class="nt">holmes</span><span class="p">:</span>
+</span><span id="__span-7-2"><a id="__codelineno-7-2" name="__codelineno-7-2" href="#__codelineno-7-2"></a><span class="w">  </span><span class="nt">additionalEnvVars</span><span class="p">:</span>
+</span><span id="__span-7-3"><a id="__codelineno-7-3" name="__codelineno-7-3" href="#__codelineno-7-3"></a><span class="w">    </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">GRAFANA_TEMPO_API_KEY</span>
+</span><span id="__span-7-4"><a id="__codelineno-7-4" name="__codelineno-7-4" href="#__codelineno-7-4"></a><span class="w">      </span><span class="nt">valueFrom</span><span class="p">:</span>
+</span><span id="__span-7-5"><a id="__codelineno-7-5" name="__codelineno-7-5" href="#__codelineno-7-5"></a><span class="w">        </span><span class="nt">secretKeyRef</span><span class="p">:</span>
+</span><span id="__span-7-6"><a id="__codelineno-7-6" name="__codelineno-7-6" href="#__codelineno-7-6"></a><span class="w">          </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">grafana-tempo-api-key</span>
+</span><span id="__span-7-7"><a id="__codelineno-7-7" name="__codelineno-7-7" href="#__codelineno-7-7"></a><span class="w">          </span><span class="nt">key</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">api-key</span>
+</span><span id="__span-7-8"><a id="__codelineno-7-8" name="__codelineno-7-8" href="#__codelineno-7-8"></a><span class="w">  </span><span class="nt">toolsets</span><span class="p">:</span>
+</span><span id="__span-7-9"><a id="__codelineno-7-9" name="__codelineno-7-9" href="#__codelineno-7-9"></a><span class="w">    </span><span class="nt">grafana/tempo</span><span class="p">:</span>
+</span><span id="__span-7-10"><a id="__codelineno-7-10" name="__codelineno-7-10" href="#__codelineno-7-10"></a><span class="w">      </span><span class="nt">enabled</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">true</span>
+</span><span id="__span-7-11"><a id="__codelineno-7-11" name="__codelineno-7-11" href="#__codelineno-7-11"></a><span class="w">      </span><span class="nt">config</span><span class="p">:</span>
+</span><span id="__span-7-12"><a id="__codelineno-7-12" name="__codelineno-7-12" href="#__codelineno-7-12"></a><span class="w">        </span><span class="nt">api_url</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">&lt;your grafana url&gt;</span><span class="w">  </span><span class="c1"># e.g. http://grafana.monitoring.svc.cluster.local</span>
+</span><span id="__span-7-13"><a id="__codelineno-7-13" name="__codelineno-7-13" href="#__codelineno-7-13"></a><span class="w">        </span><span class="nt">api_key</span><span class="p">:</span><span class="w"> </span><span class="s">&quot;{{</span><span class="nv"> </span><span class="s">env.GRAFANA_TEMPO_API_KEY</span><span class="nv"> </span><span class="s">}}&quot;</span>
+</span><span id="__span-7-14"><a id="__codelineno-7-14" name="__codelineno-7-14" href="#__codelineno-7-14"></a><span class="w">        </span><span class="nt">grafana_datasource_uid</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">&lt;the UID of the tempo data source in Grafana&gt;</span>
+</span></code></pre></div>
+<p>Update your Helm values and run a Helm upgrade:
+<div class="language-bash highlight"><pre><span></span><code><span id="__span-8-1"><a id="__codelineno-8-1" name="__codelineno-8-1" href="#__codelineno-8-1"></a>helm<span class="w"> </span>upgrade<span class="w"> </span>robusta<span class="w"> </span>robusta/robusta<span class="w"> </span>--values<span class="o">=</span>generated_values.yaml<span class="w"> </span>--set<span class="w"> </span><span class="nv">clusterName</span><span class="o">=</span>&lt;YOUR_CLUSTER_NAME&gt;
+</span></code></pre></div></p>
 </div>
 </div>
-<h2 id="direct-connection">Direct Connection<a class="headerlink" href="#direct-connection" title="Permanent link">&para;</a></h2>
-<p>The toolset can directly connect to a Tempo instance without proxying through a Grafana instance. This is done by not setting the <code>grafana_datasource_uid</code> field. Not setting this field makes HolmesGPT assume that it is directly connecting to Tempo.</p>
-<h3 id="configuration-direct-connection">Configuration (Direct Connection)<a class="headerlink" href="#configuration-direct-connection" title="Permanent link">&para;</a></h3>
-<div class="tabbed-set tabbed-alternate" data-tabs="2:2"><input checked="checked" id="configuration-direct-connection-holmes-cli" name="__tabbed_2" type="radio" /><input id="configuration-direct-connection-robusta-helm-chart" name="__tabbed_2" type="radio" /><div class="tabbed-labels"><label for="configuration-direct-connection-holmes-cli">Holmes CLI</label><label for="configuration-direct-connection-robusta-helm-chart">Robusta Helm Chart</label></div>
+</div>
+<h3 id="self-hosted-tempo-direct-connection">Self-Hosted Tempo - Direct Connection<a class="headerlink" href="#self-hosted-tempo-direct-connection" title="Permanent link">&para;</a></h3>
+<p>HolmesGPT connects directly to a self-hosted Tempo API endpoint without going through Grafana.</p>
+<div class="tabbed-set tabbed-alternate" data-tabs="2:3"><input checked="checked" id="self-hosted-tempo-direct-connection-holmes-cli" name="__tabbed_2" type="radio" /><input id="self-hosted-tempo-direct-connection-holmes-helm-chart" name="__tabbed_2" type="radio" /><input id="self-hosted-tempo-direct-connection-robusta-helm-chart" name="__tabbed_2" type="radio" /><div class="tabbed-labels"><label for="self-hosted-tempo-direct-connection-holmes-cli">Holmes CLI</label><label for="self-hosted-tempo-direct-connection-holmes-helm-chart">Holmes Helm Chart</label><label for="self-hosted-tempo-direct-connection-robusta-helm-chart">Robusta Helm Chart</label></div>
 <div class="tabbed-content">
 <div class="tabbed-block">
 <p>Add the following to <strong>~/.holmes/config.yaml</strong>. Create the file if it doesn't exist:</p>
-<div class="language-yaml highlight"><pre><span></span><code><span id="__span-6-1"><a id="__codelineno-6-1" name="__codelineno-6-1" href="#__codelineno-6-1"></a><span class="nt">toolsets</span><span class="p">:</span>
-</span><span id="__span-6-2"><a id="__codelineno-6-2" name="__codelineno-6-2" href="#__codelineno-6-2"></a><span class="w">  </span><span class="nt">grafana/tempo</span><span class="p">:</span>
-</span><span id="__span-6-3"><a id="__codelineno-6-3" name="__codelineno-6-3" href="#__codelineno-6-3"></a><span class="w">    </span><span class="nt">enabled</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">true</span>
-</span><span id="__span-6-4"><a id="__codelineno-6-4" name="__codelineno-6-4" href="#__codelineno-6-4"></a><span class="w">    </span><span class="nt">config</span><span class="p">:</span>
-</span><span id="__span-6-5"><a id="__codelineno-6-5" name="__codelineno-6-5" href="#__codelineno-6-5"></a><span class="w">      </span><span class="nt">api_url</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">http://tempo.monitoring</span>
-</span><span id="__span-6-6"><a id="__codelineno-6-6" name="__codelineno-6-6" href="#__codelineno-6-6"></a><span class="w">      </span><span class="nt">additional_headers</span><span class="p">:</span>
-</span><span id="__span-6-7"><a id="__codelineno-6-7" name="__codelineno-6-7" href="#__codelineno-6-7"></a><span class="w">        </span><span class="nt">X-Scope-OrgID</span><span class="p">:</span><span class="w"> </span><span class="s">&quot;&lt;tenant</span><span class="nv"> </span><span class="s">id&gt;&quot;</span><span class="w"> </span><span class="c1"># Set the X-Scope-OrgID if tempo multitenancy is enabled</span>
+<div class="language-yaml highlight"><pre><span></span><code><span id="__span-9-1"><a id="__codelineno-9-1" name="__codelineno-9-1" href="#__codelineno-9-1"></a><span class="nt">toolsets</span><span class="p">:</span>
+</span><span id="__span-9-2"><a id="__codelineno-9-2" name="__codelineno-9-2" href="#__codelineno-9-2"></a><span class="w">  </span><span class="nt">grafana/tempo</span><span class="p">:</span>
+</span><span id="__span-9-3"><a id="__codelineno-9-3" name="__codelineno-9-3" href="#__codelineno-9-3"></a><span class="w">    </span><span class="nt">enabled</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">true</span>
+</span><span id="__span-9-4"><a id="__codelineno-9-4" name="__codelineno-9-4" href="#__codelineno-9-4"></a><span class="w">    </span><span class="nt">config</span><span class="p">:</span>
+</span><span id="__span-9-5"><a id="__codelineno-9-5" name="__codelineno-9-5" href="#__codelineno-9-5"></a><span class="w">      </span><span class="nt">api_url</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">http://tempo.monitoring.svc.cluster.local:3200</span>
+</span><span id="__span-9-6"><a id="__codelineno-9-6" name="__codelineno-9-6" href="#__codelineno-9-6"></a><span class="w">      </span><span class="nt">additional_headers</span><span class="p">:</span>
+</span><span id="__span-9-7"><a id="__codelineno-9-7" name="__codelineno-9-7" href="#__codelineno-9-7"></a><span class="w">        </span><span class="nt">X-Scope-OrgID</span><span class="p">:</span><span class="w"> </span><span class="s">&quot;&lt;tenant</span><span class="nv"> </span><span class="s">id&gt;&quot;</span><span class="w">  </span><span class="c1"># Only needed for multi-tenant Tempo</span>
 </span></code></pre></div>
 <p>After making changes to your configuration, run:
-<div class="language-bash highlight"><pre><span></span><code><span id="__span-7-1"><a id="__codelineno-7-1" name="__codelineno-7-1" href="#__codelineno-7-1"></a>holmes<span class="w"> </span>toolset<span class="w"> </span>refresh
+<div class="language-bash highlight"><pre><span></span><code><span id="__span-10-1"><a id="__codelineno-10-1" name="__codelineno-10-1" href="#__codelineno-10-1"></a>holmes<span class="w"> </span>toolset<span class="w"> </span>refresh
 </span></code></pre></div></p>
 </div>
 <div class="tabbed-block">
-<div class="language-yaml highlight"><pre><span></span><code><span id="__span-8-1"><a id="__codelineno-8-1" name="__codelineno-8-1" href="#__codelineno-8-1"></a><span class="nt">holmes</span><span class="p">:</span>
-</span><span id="__span-8-2"><a id="__codelineno-8-2" name="__codelineno-8-2" href="#__codelineno-8-2"></a><span class="w">  </span><span class="nt">toolsets</span><span class="p">:</span>
-</span><span id="__span-8-3"><a id="__codelineno-8-3" name="__codelineno-8-3" href="#__codelineno-8-3"></a><span class="w">    </span><span class="nt">grafana/tempo</span><span class="p">:</span>
-</span><span id="__span-8-4"><a id="__codelineno-8-4" name="__codelineno-8-4" href="#__codelineno-8-4"></a><span class="w">      </span><span class="nt">enabled</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">true</span>
-</span><span id="__span-8-5"><a id="__codelineno-8-5" name="__codelineno-8-5" href="#__codelineno-8-5"></a><span class="w">      </span><span class="nt">config</span><span class="p">:</span>
-</span><span id="__span-8-6"><a id="__codelineno-8-6" name="__codelineno-8-6" href="#__codelineno-8-6"></a><span class="w">        </span><span class="nt">api_url</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">http://tempo.monitoring</span>
-</span><span id="__span-8-7"><a id="__codelineno-8-7" name="__codelineno-8-7" href="#__codelineno-8-7"></a><span class="w">        </span><span class="nt">additional_headers</span><span class="p">:</span>
-</span><span id="__span-8-8"><a id="__codelineno-8-8" name="__codelineno-8-8" href="#__codelineno-8-8"></a><span class="w">          </span><span class="nt">X-Scope-OrgID</span><span class="p">:</span><span class="w"> </span><span class="s">&quot;&lt;tenant</span><span class="nv"> </span><span class="s">id&gt;&quot;</span><span class="w"> </span><span class="c1"># Set the X-Scope-OrgID if tempo multitenancy is enabled</span>
+<p>No Kubernetes secret is needed in this mode — direct Tempo connections don't carry an API key.</p>
+<div class="language-yaml highlight"><pre><span></span><code><span id="__span-11-1"><a id="__codelineno-11-1" name="__codelineno-11-1" href="#__codelineno-11-1"></a><span class="nt">toolsets</span><span class="p">:</span>
+</span><span id="__span-11-2"><a id="__codelineno-11-2" name="__codelineno-11-2" href="#__codelineno-11-2"></a><span class="w">  </span><span class="nt">grafana/tempo</span><span class="p">:</span>
+</span><span id="__span-11-3"><a id="__codelineno-11-3" name="__codelineno-11-3" href="#__codelineno-11-3"></a><span class="w">    </span><span class="nt">enabled</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">true</span>
+</span><span id="__span-11-4"><a id="__codelineno-11-4" name="__codelineno-11-4" href="#__codelineno-11-4"></a><span class="w">    </span><span class="nt">config</span><span class="p">:</span>
+</span><span id="__span-11-5"><a id="__codelineno-11-5" name="__codelineno-11-5" href="#__codelineno-11-5"></a><span class="w">      </span><span class="nt">api_url</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">http://tempo.monitoring.svc.cluster.local:3200</span>
+</span><span id="__span-11-6"><a id="__codelineno-11-6" name="__codelineno-11-6" href="#__codelineno-11-6"></a><span class="w">      </span><span class="nt">additional_headers</span><span class="p">:</span>
+</span><span id="__span-11-7"><a id="__codelineno-11-7" name="__codelineno-11-7" href="#__codelineno-11-7"></a><span class="w">        </span><span class="nt">X-Scope-OrgID</span><span class="p">:</span><span class="w"> </span><span class="s">&quot;&lt;tenant</span><span class="nv"> </span><span class="s">id&gt;&quot;</span><span class="w">  </span><span class="c1"># Only needed for multi-tenant Tempo</span>
 </span></code></pre></div>
+</div>
+<div class="tabbed-block">
+<p>No Kubernetes secret is needed in this mode — direct Tempo connections don't carry an API key.</p>
+<div class="language-yaml highlight"><pre><span></span><code><span id="__span-12-1"><a id="__codelineno-12-1" name="__codelineno-12-1" href="#__codelineno-12-1"></a><span class="nt">holmes</span><span class="p">:</span>
+</span><span id="__span-12-2"><a id="__codelineno-12-2" name="__codelineno-12-2" href="#__codelineno-12-2"></a><span class="w">  </span><span class="nt">toolsets</span><span class="p">:</span>
+</span><span id="__span-12-3"><a id="__codelineno-12-3" name="__codelineno-12-3" href="#__codelineno-12-3"></a><span class="w">    </span><span class="nt">grafana/tempo</span><span class="p">:</span>
+</span><span id="__span-12-4"><a id="__codelineno-12-4" name="__codelineno-12-4" href="#__codelineno-12-4"></a><span class="w">      </span><span class="nt">enabled</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">true</span>
+</span><span id="__span-12-5"><a id="__codelineno-12-5" name="__codelineno-12-5" href="#__codelineno-12-5"></a><span class="w">      </span><span class="nt">config</span><span class="p">:</span>
+</span><span id="__span-12-6"><a id="__codelineno-12-6" name="__codelineno-12-6" href="#__codelineno-12-6"></a><span class="w">        </span><span class="nt">api_url</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">http://tempo.monitoring.svc.cluster.local:3200</span>
+</span><span id="__span-12-7"><a id="__codelineno-12-7" name="__codelineno-12-7" href="#__codelineno-12-7"></a><span class="w">        </span><span class="nt">additional_headers</span><span class="p">:</span>
+</span><span id="__span-12-8"><a id="__codelineno-12-8" name="__codelineno-12-8" href="#__codelineno-12-8"></a><span class="w">          </span><span class="nt">X-Scope-OrgID</span><span class="p">:</span><span class="w"> </span><span class="s">&quot;&lt;tenant</span><span class="nv"> </span><span class="s">id&gt;&quot;</span><span class="w">  </span><span class="c1"># Only needed for multi-tenant Tempo</span>
+</span></code></pre></div>
+</div>
+</div>
+</div>
+<h3 id="grafana-cloud">Grafana Cloud<a class="headerlink" href="#grafana-cloud" title="Permanent link">&para;</a></h3>
+<p>Query Tempo through your Grafana Cloud Grafana instance's datasource proxy. Same flow as the self-hosted proxy option, just pointed at your Grafana Cloud URL.</p>
+<p><strong>Required:</strong></p>
+<ul>
+<li>Your Grafana Cloud Grafana URL (e.g., <code>https://myorg.grafana.net</code>)</li>
+<li>A Grafana Cloud service account token with:<ul>
+<li>Basic role → Viewer</li>
+<li>Data sources → Reader</li>
+</ul>
+</li>
+<li>Tempo datasource UID from your Grafana Cloud Grafana</li>
+</ul>
+<p><strong>Find your Tempo datasource UID:</strong></p>
+<p>In your Grafana Cloud Grafana UI → Connections → Data sources → click on the Tempo datasource. The UID appears in the URL. Or via the API:</p>
+<div class="language-bash highlight"><pre><span></span><code><span id="__span-13-1"><a id="__codelineno-13-1" name="__codelineno-13-1" href="#__codelineno-13-1"></a>curl<span class="w"> </span>-s<span class="w"> </span>-H<span class="w"> </span><span class="s2">&quot;Authorization: Bearer &lt;service-account-token&gt;&quot;</span><span class="w"> </span>https://&lt;your-stack&gt;.grafana.net/api/datasources<span class="w"> </span><span class="p">|</span><span class="w"> </span>jq<span class="w"> </span><span class="s1">&#39;.[] | select(.type == &quot;tempo&quot;) | .uid&#39;</span>
+</span></code></pre></div>
+<div class="tabbed-set tabbed-alternate" data-tabs="3:3"><input checked="checked" id="grafana-cloud-holmes-cli" name="__tabbed_3" type="radio" /><input id="grafana-cloud-holmes-helm-chart" name="__tabbed_3" type="radio" /><input id="grafana-cloud-robusta-helm-chart" name="__tabbed_3" type="radio" /><div class="tabbed-labels"><label for="grafana-cloud-holmes-cli">Holmes CLI</label><label for="grafana-cloud-holmes-helm-chart">Holmes Helm Chart</label><label for="grafana-cloud-robusta-helm-chart">Robusta Helm Chart</label></div>
+<div class="tabbed-content">
+<div class="tabbed-block">
+<div class="language-yaml highlight"><pre><span></span><code><span id="__span-14-1"><a id="__codelineno-14-1" name="__codelineno-14-1" href="#__codelineno-14-1"></a><span class="nt">toolsets</span><span class="p">:</span>
+</span><span id="__span-14-2"><a id="__codelineno-14-2" name="__codelineno-14-2" href="#__codelineno-14-2"></a><span class="w">  </span><span class="nt">grafana/tempo</span><span class="p">:</span>
+</span><span id="__span-14-3"><a id="__codelineno-14-3" name="__codelineno-14-3" href="#__codelineno-14-3"></a><span class="w">    </span><span class="nt">enabled</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">true</span>
+</span><span id="__span-14-4"><a id="__codelineno-14-4" name="__codelineno-14-4" href="#__codelineno-14-4"></a><span class="w">    </span><span class="nt">config</span><span class="p">:</span>
+</span><span id="__span-14-5"><a id="__codelineno-14-5" name="__codelineno-14-5" href="#__codelineno-14-5"></a><span class="w">      </span><span class="nt">api_url</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">https://&lt;your-stack&gt;.grafana.net</span>
+</span><span id="__span-14-6"><a id="__codelineno-14-6" name="__codelineno-14-6" href="#__codelineno-14-6"></a><span class="w">      </span><span class="nt">api_key</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">&lt;grafana cloud service account token&gt;</span>
+</span><span id="__span-14-7"><a id="__codelineno-14-7" name="__codelineno-14-7" href="#__codelineno-14-7"></a><span class="w">      </span><span class="nt">grafana_datasource_uid</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">&lt;the UID of the Tempo datasource&gt;</span>
+</span></code></pre></div>
+</div>
+<div class="tabbed-block">
+<p>First, create a Kubernetes secret with your Grafana Cloud service account token:</p>
+<div class="language-bash highlight"><pre><span></span><code><span id="__span-15-1"><a id="__codelineno-15-1" name="__codelineno-15-1" href="#__codelineno-15-1"></a>kubectl<span class="w"> </span>create<span class="w"> </span>secret<span class="w"> </span>generic<span class="w"> </span>grafana-cloud-tempo-api-key<span class="w"> </span><span class="se">\</span>
+</span><span id="__span-15-2"><a id="__codelineno-15-2" name="__codelineno-15-2" href="#__codelineno-15-2"></a><span class="w">  </span>--from-literal<span class="o">=</span>api-key<span class="o">=</span>your-grafana-cloud-service-account-token<span class="w"> </span><span class="se">\</span>
+</span><span id="__span-15-3"><a id="__codelineno-15-3" name="__codelineno-15-3" href="#__codelineno-15-3"></a><span class="w">  </span>-n<span class="w"> </span>holmes
+</span></code></pre></div>
+<div class="admonition note">
+<p class="admonition-title">Namespace must match Holmes' deployment</p>
+<p>Create the secret in the same namespace where Holmes runs. The <code>-n holmes</code> flag in the <strong>Holmes Helm</strong> tab and <code>-n default</code> in the <strong>Robusta Helm</strong> tab match each chart's documented defaults — adjust if you installed Holmes/Robusta into a different namespace. A secret in the wrong namespace silently resolves to an empty env var and authentication will fail with no clear error.</p>
+</div>
+<p>Then add to your Holmes Helm values:</p>
+<div class="language-yaml highlight"><pre><span></span><code><span id="__span-16-1"><a id="__codelineno-16-1" name="__codelineno-16-1" href="#__codelineno-16-1"></a><span class="nt">additionalEnvVars</span><span class="p">:</span>
+</span><span id="__span-16-2"><a id="__codelineno-16-2" name="__codelineno-16-2" href="#__codelineno-16-2"></a><span class="w">  </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">GRAFANA_CLOUD_TEMPO_API_KEY</span>
+</span><span id="__span-16-3"><a id="__codelineno-16-3" name="__codelineno-16-3" href="#__codelineno-16-3"></a><span class="w">    </span><span class="nt">valueFrom</span><span class="p">:</span>
+</span><span id="__span-16-4"><a id="__codelineno-16-4" name="__codelineno-16-4" href="#__codelineno-16-4"></a><span class="w">      </span><span class="nt">secretKeyRef</span><span class="p">:</span>
+</span><span id="__span-16-5"><a id="__codelineno-16-5" name="__codelineno-16-5" href="#__codelineno-16-5"></a><span class="w">        </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">grafana-cloud-tempo-api-key</span>
+</span><span id="__span-16-6"><a id="__codelineno-16-6" name="__codelineno-16-6" href="#__codelineno-16-6"></a><span class="w">        </span><span class="nt">key</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">api-key</span>
+</span><span id="__span-16-7"><a id="__codelineno-16-7" name="__codelineno-16-7" href="#__codelineno-16-7"></a>
+</span><span id="__span-16-8"><a id="__codelineno-16-8" name="__codelineno-16-8" href="#__codelineno-16-8"></a><span class="nt">toolsets</span><span class="p">:</span>
+</span><span id="__span-16-9"><a id="__codelineno-16-9" name="__codelineno-16-9" href="#__codelineno-16-9"></a><span class="w">  </span><span class="nt">grafana/tempo</span><span class="p">:</span>
+</span><span id="__span-16-10"><a id="__codelineno-16-10" name="__codelineno-16-10" href="#__codelineno-16-10"></a><span class="w">    </span><span class="nt">enabled</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">true</span>
+</span><span id="__span-16-11"><a id="__codelineno-16-11" name="__codelineno-16-11" href="#__codelineno-16-11"></a><span class="w">    </span><span class="nt">config</span><span class="p">:</span>
+</span><span id="__span-16-12"><a id="__codelineno-16-12" name="__codelineno-16-12" href="#__codelineno-16-12"></a><span class="w">      </span><span class="nt">api_url</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">https://&lt;your-stack&gt;.grafana.net</span>
+</span><span id="__span-16-13"><a id="__codelineno-16-13" name="__codelineno-16-13" href="#__codelineno-16-13"></a><span class="w">      </span><span class="nt">api_key</span><span class="p">:</span><span class="w"> </span><span class="s">&quot;{{</span><span class="nv"> </span><span class="s">env.GRAFANA_CLOUD_TEMPO_API_KEY</span><span class="nv"> </span><span class="s">}}&quot;</span>
+</span><span id="__span-16-14"><a id="__codelineno-16-14" name="__codelineno-16-14" href="#__codelineno-16-14"></a><span class="w">      </span><span class="nt">grafana_datasource_uid</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">&lt;the UID of the Tempo datasource&gt;</span>
+</span></code></pre></div>
+</div>
+<div class="tabbed-block">
+<p>First, create a Kubernetes secret with your Grafana Cloud service account token:</p>
+<div class="language-bash highlight"><pre><span></span><code><span id="__span-17-1"><a id="__codelineno-17-1" name="__codelineno-17-1" href="#__codelineno-17-1"></a>kubectl<span class="w"> </span>create<span class="w"> </span>secret<span class="w"> </span>generic<span class="w"> </span>grafana-cloud-tempo-api-key<span class="w"> </span><span class="se">\</span>
+</span><span id="__span-17-2"><a id="__codelineno-17-2" name="__codelineno-17-2" href="#__codelineno-17-2"></a><span class="w">  </span>--from-literal<span class="o">=</span>api-key<span class="o">=</span>your-grafana-cloud-service-account-token<span class="w"> </span><span class="se">\</span>
+</span><span id="__span-17-3"><a id="__codelineno-17-3" name="__codelineno-17-3" href="#__codelineno-17-3"></a><span class="w">  </span>-n<span class="w"> </span>default
+</span></code></pre></div>
+<div class="admonition note">
+<p class="admonition-title">Namespace must match Holmes' deployment</p>
+<p>Create the secret in the same namespace where Holmes runs. The <code>-n holmes</code> flag in the <strong>Holmes Helm</strong> tab and <code>-n default</code> in the <strong>Robusta Helm</strong> tab match each chart's documented defaults — adjust if you installed Holmes/Robusta into a different namespace. A secret in the wrong namespace silently resolves to an empty env var and authentication will fail with no clear error.</p>
+</div>
+<p>Then add to your Robusta Helm values:</p>
+<div class="language-yaml highlight"><pre><span></span><code><span id="__span-18-1"><a id="__codelineno-18-1" name="__codelineno-18-1" href="#__codelineno-18-1"></a><span class="nt">holmes</span><span class="p">:</span>
+</span><span id="__span-18-2"><a id="__codelineno-18-2" name="__codelineno-18-2" href="#__codelineno-18-2"></a><span class="w">  </span><span class="nt">additionalEnvVars</span><span class="p">:</span>
+</span><span id="__span-18-3"><a id="__codelineno-18-3" name="__codelineno-18-3" href="#__codelineno-18-3"></a><span class="w">    </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">GRAFANA_CLOUD_TEMPO_API_KEY</span>
+</span><span id="__span-18-4"><a id="__codelineno-18-4" name="__codelineno-18-4" href="#__codelineno-18-4"></a><span class="w">      </span><span class="nt">valueFrom</span><span class="p">:</span>
+</span><span id="__span-18-5"><a id="__codelineno-18-5" name="__codelineno-18-5" href="#__codelineno-18-5"></a><span class="w">        </span><span class="nt">secretKeyRef</span><span class="p">:</span>
+</span><span id="__span-18-6"><a id="__codelineno-18-6" name="__codelineno-18-6" href="#__codelineno-18-6"></a><span class="w">          </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">grafana-cloud-tempo-api-key</span>
+</span><span id="__span-18-7"><a id="__codelineno-18-7" name="__codelineno-18-7" href="#__codelineno-18-7"></a><span class="w">          </span><span class="nt">key</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">api-key</span>
+</span><span id="__span-18-8"><a id="__codelineno-18-8" name="__codelineno-18-8" href="#__codelineno-18-8"></a><span class="w">  </span><span class="nt">toolsets</span><span class="p">:</span>
+</span><span id="__span-18-9"><a id="__codelineno-18-9" name="__codelineno-18-9" href="#__codelineno-18-9"></a><span class="w">    </span><span class="nt">grafana/tempo</span><span class="p">:</span>
+</span><span id="__span-18-10"><a id="__codelineno-18-10" name="__codelineno-18-10" href="#__codelineno-18-10"></a><span class="w">      </span><span class="nt">enabled</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">true</span>
+</span><span id="__span-18-11"><a id="__codelineno-18-11" name="__codelineno-18-11" href="#__codelineno-18-11"></a><span class="w">      </span><span class="nt">config</span><span class="p">:</span>
+</span><span id="__span-18-12"><a id="__codelineno-18-12" name="__codelineno-18-12" href="#__codelineno-18-12"></a><span class="w">        </span><span class="nt">api_url</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">https://&lt;your-stack&gt;.grafana.net</span>
+</span><span id="__span-18-13"><a id="__codelineno-18-13" name="__codelineno-18-13" href="#__codelineno-18-13"></a><span class="w">        </span><span class="nt">api_key</span><span class="p">:</span><span class="w"> </span><span class="s">&quot;{{</span><span class="nv"> </span><span class="s">env.GRAFANA_CLOUD_TEMPO_API_KEY</span><span class="nv"> </span><span class="s">}}&quot;</span>
+</span><span id="__span-18-14"><a id="__codelineno-18-14" name="__codelineno-18-14" href="#__codelineno-18-14"></a><span class="w">        </span><span class="nt">grafana_datasource_uid</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">&lt;the UID of the Tempo datasource&gt;</span>
+</span></code></pre></div>
+<p>Update your Helm values and run a Helm upgrade:
+<div class="language-bash highlight"><pre><span></span><code><span id="__span-19-1"><a id="__codelineno-19-1" name="__codelineno-19-1" href="#__codelineno-19-1"></a>helm<span class="w"> </span>upgrade<span class="w"> </span>robusta<span class="w"> </span>robusta/robusta<span class="w"> </span>--values<span class="o">=</span>generated_values.yaml<span class="w"> </span>--set<span class="w"> </span><span class="nv">clusterName</span><span class="o">=</span>&lt;YOUR_CLUSTER_NAME&gt;
+</span></code></pre></div></p>
 </div>
 </div>
 </div>
 <h2 id="advanced-configuration">Advanced Configuration<a class="headerlink" href="#advanced-configuration" title="Permanent link">&para;</a></h2>
 <h3 id="ssl-verification">SSL Verification<a class="headerlink" href="#ssl-verification" title="Permanent link">&para;</a></h3>
 <p>For self-signed certificates, you can disable SSL verification:</p>
-<div class="language-yaml highlight"><pre><span></span><code><span id="__span-9-1"><a id="__codelineno-9-1" name="__codelineno-9-1" href="#__codelineno-9-1"></a><span class="nt">toolsets</span><span class="p">:</span>
-</span><span id="__span-9-2"><a id="__codelineno-9-2" name="__codelineno-9-2" href="#__codelineno-9-2"></a><span class="w">  </span><span class="nt">grafana/tempo</span><span class="p">:</span>
-</span><span id="__span-9-3"><a id="__codelineno-9-3" name="__codelineno-9-3" href="#__codelineno-9-3"></a><span class="w">    </span><span class="nt">enabled</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">true</span>
-</span><span id="__span-9-4"><a id="__codelineno-9-4" name="__codelineno-9-4" href="#__codelineno-9-4"></a><span class="w">    </span><span class="nt">config</span><span class="p">:</span>
-</span><span id="__span-9-5"><a id="__codelineno-9-5" name="__codelineno-9-5" href="#__codelineno-9-5"></a><span class="w">      </span><span class="nt">api_url</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">https://tempo.internal</span>
-</span><span id="__span-9-6"><a id="__codelineno-9-6" name="__codelineno-9-6" href="#__codelineno-9-6"></a><span class="w">      </span><span class="nt">verify_ssl</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">false</span><span class="w">  </span><span class="c1"># Disable SSL verification (default: true)</span>
+<div class="language-yaml highlight"><pre><span></span><code><span id="__span-20-1"><a id="__codelineno-20-1" name="__codelineno-20-1" href="#__codelineno-20-1"></a><span class="nt">toolsets</span><span class="p">:</span>
+</span><span id="__span-20-2"><a id="__codelineno-20-2" name="__codelineno-20-2" href="#__codelineno-20-2"></a><span class="w">  </span><span class="nt">grafana/tempo</span><span class="p">:</span>
+</span><span id="__span-20-3"><a id="__codelineno-20-3" name="__codelineno-20-3" href="#__codelineno-20-3"></a><span class="w">    </span><span class="nt">enabled</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">true</span>
+</span><span id="__span-20-4"><a id="__codelineno-20-4" name="__codelineno-20-4" href="#__codelineno-20-4"></a><span class="w">    </span><span class="nt">config</span><span class="p">:</span>
+</span><span id="__span-20-5"><a id="__codelineno-20-5" name="__codelineno-20-5" href="#__codelineno-20-5"></a><span class="w">      </span><span class="nt">api_url</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">https://tempo.internal</span>
+</span><span id="__span-20-6"><a id="__codelineno-20-6" name="__codelineno-20-6" href="#__codelineno-20-6"></a><span class="w">      </span><span class="nt">verify_ssl</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">false</span><span class="w">  </span><span class="c1"># Disable SSL verification (default: true)</span>
 </span></code></pre></div>
 <h3 id="external-url">External URL<a class="headerlink" href="#external-url" title="Permanent link">&para;</a></h3>
-<p>If HolmesGPT accesses Tempo through an internal URL but you want clickable links in results to use a different URL:</p>
-<div class="language-yaml highlight"><pre><span></span><code><span id="__span-10-1"><a id="__codelineno-10-1" name="__codelineno-10-1" href="#__codelineno-10-1"></a><span class="nt">toolsets</span><span class="p">:</span>
-</span><span id="__span-10-2"><a id="__codelineno-10-2" name="__codelineno-10-2" href="#__codelineno-10-2"></a><span class="w">  </span><span class="nt">grafana/tempo</span><span class="p">:</span>
-</span><span id="__span-10-3"><a id="__codelineno-10-3" name="__codelineno-10-3" href="#__codelineno-10-3"></a><span class="w">    </span><span class="nt">enabled</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">true</span>
-</span><span id="__span-10-4"><a id="__codelineno-10-4" name="__codelineno-10-4" href="#__codelineno-10-4"></a><span class="w">    </span><span class="nt">config</span><span class="p">:</span>
-</span><span id="__span-10-5"><a id="__codelineno-10-5" name="__codelineno-10-5" href="#__codelineno-10-5"></a><span class="w">      </span><span class="nt">api_url</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">http://tempo.internal:3100</span><span class="w">  </span><span class="c1"># Internal URL for API calls</span>
-</span><span id="__span-10-6"><a id="__codelineno-10-6" name="__codelineno-10-6" href="#__codelineno-10-6"></a><span class="w">      </span><span class="nt">external_url</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">https://tempo.example.com</span><span class="w">  </span><span class="c1"># URL for links in results</span>
-</span><span id="__span-10-7"><a id="__codelineno-10-7" name="__codelineno-10-7" href="#__codelineno-10-7"></a><span class="w">      </span><span class="nt">grafana_datasource_uid</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">&lt;tempo datasource uid&gt;</span>
+<p>Only applies to the <strong>Self-Hosted Tempo via Grafana Proxy</strong> setup. If HolmesGPT reaches Grafana through an internal URL but you want the clickable "View in Grafana" links in responses to use a public URL:</p>
+<div class="language-yaml highlight"><pre><span></span><code><span id="__span-21-1"><a id="__codelineno-21-1" name="__codelineno-21-1" href="#__codelineno-21-1"></a><span class="nt">toolsets</span><span class="p">:</span>
+</span><span id="__span-21-2"><a id="__codelineno-21-2" name="__codelineno-21-2" href="#__codelineno-21-2"></a><span class="w">  </span><span class="nt">grafana/tempo</span><span class="p">:</span>
+</span><span id="__span-21-3"><a id="__codelineno-21-3" name="__codelineno-21-3" href="#__codelineno-21-3"></a><span class="w">    </span><span class="nt">enabled</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">true</span>
+</span><span id="__span-21-4"><a id="__codelineno-21-4" name="__codelineno-21-4" href="#__codelineno-21-4"></a><span class="w">    </span><span class="nt">config</span><span class="p">:</span>
+</span><span id="__span-21-5"><a id="__codelineno-21-5" name="__codelineno-21-5" href="#__codelineno-21-5"></a><span class="w">      </span><span class="nt">api_url</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">http://grafana.monitoring.svc.cluster.local</span><span class="w">  </span><span class="c1"># Internal URL for API calls</span>
+</span><span id="__span-21-6"><a id="__codelineno-21-6" name="__codelineno-21-6" href="#__codelineno-21-6"></a><span class="w">      </span><span class="nt">api_key</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">&lt;your grafana API key&gt;</span>
+</span><span id="__span-21-7"><a id="__codelineno-21-7" name="__codelineno-21-7" href="#__codelineno-21-7"></a><span class="w">      </span><span class="nt">grafana_datasource_uid</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">&lt;tempo datasource uid&gt;</span>
+</span><span id="__span-21-8"><a id="__codelineno-21-8" name="__codelineno-21-8" href="#__codelineno-21-8"></a><span class="w">      </span><span class="nt">external_url</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">https://grafana.example.com</span><span class="w">  </span><span class="c1"># URL used in clickable links</span>
 </span></code></pre></div>
 <h3 id="custom-label-mappings">Custom Label Mappings<a class="headerlink" href="#custom-label-mappings" title="Permanent link">&para;</a></h3>
-<p>Tempo uses resource attributes to identify Kubernetes resources. If your setup uses different attribute names, you can customize the mappings:</p>
-<div class="language-yaml highlight"><pre><span></span><code><span id="__span-11-1"><a id="__codelineno-11-1" name="__codelineno-11-1" href="#__codelineno-11-1"></a><span class="nt">toolsets</span><span class="p">:</span>
-</span><span id="__span-11-2"><a id="__codelineno-11-2" name="__codelineno-11-2" href="#__codelineno-11-2"></a><span class="w">  </span><span class="nt">grafana/tempo</span><span class="p">:</span>
-</span><span id="__span-11-3"><a id="__codelineno-11-3" name="__codelineno-11-3" href="#__codelineno-11-3"></a><span class="w">    </span><span class="nt">enabled</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">true</span>
-</span><span id="__span-11-4"><a id="__codelineno-11-4" name="__codelineno-11-4" href="#__codelineno-11-4"></a><span class="w">    </span><span class="nt">config</span><span class="p">:</span>
-</span><span id="__span-11-5"><a id="__codelineno-11-5" name="__codelineno-11-5" href="#__codelineno-11-5"></a><span class="w">      </span><span class="nt">api_url</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">https://grafana.example.com</span>
-</span><span id="__span-11-6"><a id="__codelineno-11-6" name="__codelineno-11-6" href="#__codelineno-11-6"></a><span class="w">      </span><span class="nt">grafana_datasource_uid</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">&lt;tempo datasource uid&gt;</span>
-</span><span id="__span-11-7"><a id="__codelineno-11-7" name="__codelineno-11-7" href="#__codelineno-11-7"></a><span class="w">      </span><span class="nt">labels</span><span class="p">:</span>
-</span><span id="__span-11-8"><a id="__codelineno-11-8" name="__codelineno-11-8" href="#__codelineno-11-8"></a><span class="w">        </span><span class="nt">pod</span><span class="p">:</span><span class="w"> </span><span class="s">&quot;k8s.pod.name&quot;</span><span class="w">           </span><span class="c1"># default</span>
-</span><span id="__span-11-9"><a id="__codelineno-11-9" name="__codelineno-11-9" href="#__codelineno-11-9"></a><span class="w">        </span><span class="nt">namespace</span><span class="p">:</span><span class="w"> </span><span class="s">&quot;k8s.namespace.name&quot;</span><span class="w">  </span><span class="c1"># default</span>
-</span><span id="__span-11-10"><a id="__codelineno-11-10" name="__codelineno-11-10" href="#__codelineno-11-10"></a><span class="w">        </span><span class="nt">deployment</span><span class="p">:</span><span class="w"> </span><span class="s">&quot;k8s.deployment.name&quot;</span><span class="w">  </span><span class="c1"># default</span>
-</span><span id="__span-11-11"><a id="__codelineno-11-11" name="__codelineno-11-11" href="#__codelineno-11-11"></a><span class="w">        </span><span class="nt">node</span><span class="p">:</span><span class="w"> </span><span class="s">&quot;k8s.node.name&quot;</span><span class="w">         </span><span class="c1"># default</span>
-</span><span id="__span-11-12"><a id="__codelineno-11-12" name="__codelineno-11-12" href="#__codelineno-11-12"></a><span class="w">        </span><span class="nt">service</span><span class="p">:</span><span class="w"> </span><span class="s">&quot;service.name&quot;</span><span class="w">       </span><span class="c1"># default</span>
+<p>Tempo uses resource attributes to identify Kubernetes resources. If your setup uses non-default attribute names, you can customize the mappings:</p>
+<div class="language-yaml highlight"><pre><span></span><code><span id="__span-22-1"><a id="__codelineno-22-1" name="__codelineno-22-1" href="#__codelineno-22-1"></a><span class="nt">toolsets</span><span class="p">:</span>
+</span><span id="__span-22-2"><a id="__codelineno-22-2" name="__codelineno-22-2" href="#__codelineno-22-2"></a><span class="w">  </span><span class="nt">grafana/tempo</span><span class="p">:</span>
+</span><span id="__span-22-3"><a id="__codelineno-22-3" name="__codelineno-22-3" href="#__codelineno-22-3"></a><span class="w">    </span><span class="nt">enabled</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">true</span>
+</span><span id="__span-22-4"><a id="__codelineno-22-4" name="__codelineno-22-4" href="#__codelineno-22-4"></a><span class="w">    </span><span class="nt">config</span><span class="p">:</span>
+</span><span id="__span-22-5"><a id="__codelineno-22-5" name="__codelineno-22-5" href="#__codelineno-22-5"></a><span class="w">      </span><span class="nt">api_url</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">https://grafana.example.com</span>
+</span><span id="__span-22-6"><a id="__codelineno-22-6" name="__codelineno-22-6" href="#__codelineno-22-6"></a><span class="w">      </span><span class="nt">api_key</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">&lt;your grafana API key&gt;</span>
+</span><span id="__span-22-7"><a id="__codelineno-22-7" name="__codelineno-22-7" href="#__codelineno-22-7"></a><span class="w">      </span><span class="nt">grafana_datasource_uid</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">&lt;tempo datasource uid&gt;</span>
+</span><span id="__span-22-8"><a id="__codelineno-22-8" name="__codelineno-22-8" href="#__codelineno-22-8"></a><span class="w">      </span><span class="nt">labels</span><span class="p">:</span>
+</span><span id="__span-22-9"><a id="__codelineno-22-9" name="__codelineno-22-9" href="#__codelineno-22-9"></a><span class="w">        </span><span class="nt">pod</span><span class="p">:</span><span class="w"> </span><span class="s">&quot;k8s.pod.name&quot;</span><span class="w">           </span><span class="c1"># default</span>
+</span><span id="__span-22-10"><a id="__codelineno-22-10" name="__codelineno-22-10" href="#__codelineno-22-10"></a><span class="w">        </span><span class="nt">namespace</span><span class="p">:</span><span class="w"> </span><span class="s">&quot;k8s.namespace.name&quot;</span><span class="w">  </span><span class="c1"># default</span>
+</span><span id="__span-22-11"><a id="__codelineno-22-11" name="__codelineno-22-11" href="#__codelineno-22-11"></a><span class="w">        </span><span class="nt">deployment</span><span class="p">:</span><span class="w"> </span><span class="s">&quot;k8s.deployment.name&quot;</span><span class="w">  </span><span class="c1"># default</span>
+</span><span id="__span-22-12"><a id="__codelineno-22-12" name="__codelineno-22-12" href="#__codelineno-22-12"></a><span class="w">        </span><span class="nt">node</span><span class="p">:</span><span class="w"> </span><span class="s">&quot;k8s.node.name&quot;</span><span class="w">         </span><span class="c1"># default</span>
+</span><span id="__span-22-13"><a id="__codelineno-22-13" name="__codelineno-22-13" href="#__codelineno-22-13"></a><span class="w">        </span><span class="nt">service</span><span class="p">:</span><span class="w"> </span><span class="s">&quot;service.name&quot;</span><span class="w">       </span><span class="c1"># default</span>
 </span></code></pre></div>
 <h2 id="example-usage">Example Usage<a class="headerlink" href="#example-usage" title="Permanent link">&para;</a></h2>
 <h3 id="finding-slow-traces">Finding Slow Traces<a class="headerlink" href="#finding-slow-traces" title="Permanent link">&para;</a></h3>
-<div class="language-bash highlight"><pre><span></span><code><span id="__span-12-1"><a id="__codelineno-12-1" name="__codelineno-12-1" href="#__codelineno-12-1"></a>homles<span class="w"> </span>ask<span class="w"> </span><span class="s2">&quot;Find traces where the payment service is taking longer than 1 second&quot;</span>
+<div class="language-bash highlight"><pre><span></span><code><span id="__span-23-1"><a id="__codelineno-23-1" name="__codelineno-23-1" href="#__codelineno-23-1"></a>holmes<span class="w"> </span>ask<span class="w"> </span><span class="s2">&quot;Find traces where the payment service is taking longer than 1 second&quot;</span>
 </span></code></pre></div>
-<p>Holmes will use TraceQL to search for slow operations:
-<div class="language-text highlight"><pre><span></span><code><span id="__span-13-1"><a id="__codelineno-13-1" name="__codelineno-13-1" href="#__codelineno-13-1"></a>{resource.service.name=&quot;payment&quot; &amp;&amp; duration &gt; 1s}
-</span></code></pre></div></p>
+<p>Holmes will use TraceQL to search for slow operations:</p>
+<div class="language-text highlight"><pre><span></span><code><span id="__span-24-1"><a id="__codelineno-24-1" name="__codelineno-24-1" href="#__codelineno-24-1"></a>{resource.service.name=&quot;payment&quot; &amp;&amp; duration &gt; 1s}
+</span></code></pre></div>
 <h3 id="analyzing-errors">Analyzing Errors<a class="headerlink" href="#analyzing-errors" title="Permanent link">&para;</a></h3>
-<div class="language-bash highlight"><pre><span></span><code><span id="__span-14-1"><a id="__codelineno-14-1" name="__codelineno-14-1" href="#__codelineno-14-1"></a>homles<span class="w"> </span>ask<span class="w"> </span><span class="s2">&quot;Show me traces with HTTP 500 errors in the frontend service&quot;</span>
+<div class="language-bash highlight"><pre><span></span><code><span id="__span-25-1"><a id="__codelineno-25-1" name="__codelineno-25-1" href="#__codelineno-25-1"></a>holmes<span class="w"> </span>ask<span class="w"> </span><span class="s2">&quot;Show me traces with HTTP 500 errors in the frontend service&quot;</span>
 </span></code></pre></div>
-<p>Holmes will search using:
-<div class="language-text highlight"><pre><span></span><code><span id="__span-15-1"><a id="__codelineno-15-1" name="__codelineno-15-1" href="#__codelineno-15-1"></a>{resource.service.name=&quot;frontend&quot; &amp;&amp; span.http.status_code = 500}
-</span></code></pre></div></p>
+<p>Holmes will search using:</p>
+<div class="language-text highlight"><pre><span></span><code><span id="__span-26-1"><a id="__codelineno-26-1" name="__codelineno-26-1" href="#__codelineno-26-1"></a>{resource.service.name=&quot;frontend&quot; &amp;&amp; span.http.status_code = 500}
+</span></code></pre></div>
 <h2 id="capabilities">Capabilities<a class="headerlink" href="#capabilities" title="Permanent link">&para;</a></h2>
 <table>
 <thead>

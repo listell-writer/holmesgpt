@@ -1838,6 +1838,8 @@
       
         
       
+        
+      
     
     
     
@@ -2576,10 +2578,10 @@
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
-  <a href="#option-1-through-grafana-recommended" class="md-nav__link">
+  <a href="#self-hosted-loki-via-grafana-proxy" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Option 1: Through Grafana (Recommended)
+        Self-Hosted Loki via Grafana Proxy
       
     </span>
   </a>
@@ -2587,38 +2589,21 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#configuration-grafana-proxy" class="md-nav__link">
+  <a href="#self-hosted-loki-direct-connection" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Configuration (Grafana Proxy)
+        Self-Hosted Loki - Direct Connection
       
     </span>
   </a>
   
 </li>
-        
-      </ul>
-    </nav>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#direct-connection" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Direct Connection
-      
-    </span>
-  </a>
-  
-    <nav class="md-nav" aria-label="Direct Connection">
-      <ul class="md-nav__list">
         
           <li class="md-nav__item">
-  <a href="#configuration-direct-connection" class="md-nav__link">
+  <a href="#grafana-cloud" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Configuration (Direct Connection)
+        Grafana Cloud
       
     </span>
   </a>
@@ -3488,6 +3473,34 @@
     
   
     SQLite
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../victoriametrics/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    VictoriaMetrics
   
 
     
@@ -5146,10 +5159,10 @@
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
-  <a href="#option-1-through-grafana-recommended" class="md-nav__link">
+  <a href="#self-hosted-loki-via-grafana-proxy" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Option 1: Through Grafana (Recommended)
+        Self-Hosted Loki via Grafana Proxy
       
     </span>
   </a>
@@ -5157,38 +5170,21 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#configuration-grafana-proxy" class="md-nav__link">
+  <a href="#self-hosted-loki-direct-connection" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Configuration (Grafana Proxy)
+        Self-Hosted Loki - Direct Connection
       
     </span>
   </a>
   
 </li>
-        
-      </ul>
-    </nav>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#direct-connection" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Direct Connection
-      
-    </span>
-  </a>
-  
-    <nav class="md-nav" aria-label="Direct Connection">
-      <ul class="md-nav__list">
         
           <li class="md-nav__item">
-  <a href="#configuration-direct-connection" class="md-nav__link">
+  <a href="#grafana-cloud" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Configuration (Direct Connection)
+        Grafana Cloud
       
     </span>
   </a>
@@ -5374,30 +5370,52 @@
 </ul>
 </details>
 <h2 id="configuration">Configuration<a class="headerlink" href="#configuration" title="Permanent link">&para;</a></h2>
-<p>Choose one of the following methods:</p>
-<h3 id="option-1-through-grafana-recommended">Option 1: Through Grafana (Recommended)<a class="headerlink" href="#option-1-through-grafana-recommended" title="Permanent link">&para;</a></h3>
+<p>HolmesGPT supports three ways to connect to Loki. Pick the one that matches your setup:</p>
+<table>
+<thead>
+<tr>
+<th>Setup</th>
+<th>When to use</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><a href="#self-hosted-loki-via-grafana-proxy">Self-Hosted Loki via Grafana Proxy</a> (recommended)</td>
+<td>You run your own Grafana with a Loki datasource configured</td>
+</tr>
+<tr>
+<td><a href="#self-hosted-loki-direct-connection">Self-Hosted Loki - Direct Connection</a></td>
+<td>Self-hosted Loki without Grafana, including multi-tenant setups needing <code>X-Scope-OrgID</code></td>
+</tr>
+<tr>
+<td><a href="#grafana-cloud">Grafana Cloud</a></td>
+<td>Your Grafana Cloud stack (queries Loki via your Grafana Cloud Grafana)</td>
+</tr>
+</tbody>
+</table>
+<h3 id="self-hosted-loki-via-grafana-proxy">Self-Hosted Loki via Grafana Proxy<a class="headerlink" href="#self-hosted-loki-via-grafana-proxy" title="Permanent link">&para;</a></h3>
+<p>HolmesGPT queries your self-hosted Loki through your Grafana instance's datasource proxy. Recommended when you already have Grafana — it handles authentication and you only need one API key. This is also the only mode that produces clickable "View in Grafana" links in Holmes's responses.</p>
 <p><strong>Required:</strong></p>
 <ul>
 <li><a href="https://grafana.com/docs/grafana/latest/administration/service-accounts/">Grafana service account token</a> with Viewer role</li>
 <li>Loki datasource UID from Grafana</li>
 </ul>
-<p><strong>Find your Loki datasource UID:</strong>
+<p><strong>Find your Loki datasource UID:</strong></p>
 <div class="language-bash highlight"><pre><span></span><code><span id="__span-0-1"><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="c1"># Port forward to Grafana</span>
 </span><span id="__span-0-2"><a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a>kubectl<span class="w"> </span>port-forward<span class="w"> </span>svc/grafana<span class="w"> </span><span class="m">3000</span>:80
 </span><span id="__span-0-3"><a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a>
 </span><span id="__span-0-4"><a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a><span class="c1"># Get Loki datasource UID</span>
 </span><span id="__span-0-5"><a id="__codelineno-0-5" name="__codelineno-0-5" href="#__codelineno-0-5"></a>curl<span class="w"> </span>-s<span class="w"> </span>-u<span class="w"> </span>admin:admin<span class="w"> </span>http://localhost:3000/api/datasources<span class="w"> </span><span class="p">|</span><span class="w"> </span>jq<span class="w"> </span><span class="s1">&#39;.[] | select(.type == &quot;loki&quot;) | .uid&#39;</span>
-</span></code></pre></div></p>
-<h3 id="configuration-grafana-proxy">Configuration (Grafana Proxy)<a class="headerlink" href="#configuration-grafana-proxy" title="Permanent link">&para;</a></h3>
+</span></code></pre></div>
 <p>
 <div class="tabbed-set" data-tabs="1:3">
-<input checked="checked" id="__tabbed_37a7f3e5_2a8d_4e6d_a8d2_784bed13171a_1" name="__tabbed_37a7f3e5_2a8d_4e6d_a8d2_784bed13171a" type="radio">
-<input id="__tabbed_37a7f3e5_2a8d_4e6d_a8d2_784bed13171a_2" name="__tabbed_37a7f3e5_2a8d_4e6d_a8d2_784bed13171a" type="radio">
-<input id="__tabbed_37a7f3e5_2a8d_4e6d_a8d2_784bed13171a_3" name="__tabbed_37a7f3e5_2a8d_4e6d_a8d2_784bed13171a" type="radio">
+<input checked="checked" id="__tabbed_4243339d_701a_4d9a_9cb7_1b689ccb8110_1" name="__tabbed_4243339d_701a_4d9a_9cb7_1b689ccb8110" type="radio">
+<input id="__tabbed_4243339d_701a_4d9a_9cb7_1b689ccb8110_2" name="__tabbed_4243339d_701a_4d9a_9cb7_1b689ccb8110" type="radio">
+<input id="__tabbed_4243339d_701a_4d9a_9cb7_1b689ccb8110_3" name="__tabbed_4243339d_701a_4d9a_9cb7_1b689ccb8110" type="radio">
 <div class="tabbed-labels">
-<label for="__tabbed_37a7f3e5_2a8d_4e6d_a8d2_784bed13171a_1">Holmes CLI</label>
-<label for="__tabbed_37a7f3e5_2a8d_4e6d_a8d2_784bed13171a_2">Holmes Helm Chart</label>
-<label for="__tabbed_37a7f3e5_2a8d_4e6d_a8d2_784bed13171a_3">Robusta Helm Chart</label>
+<label for="__tabbed_4243339d_701a_4d9a_9cb7_1b689ccb8110_1">Holmes CLI</label>
+<label for="__tabbed_4243339d_701a_4d9a_9cb7_1b689ccb8110_2">Holmes Helm Chart</label>
+<label for="__tabbed_4243339d_701a_4d9a_9cb7_1b689ccb8110_3">Robusta Helm Chart</label>
 </div>
 <div class="tabbed-content">
 <div class="tabbed-block">
@@ -5406,8 +5424,8 @@
   grafana/loki:
     enabled: true
     config:
+      api_url: http://grafana.monitoring.svc.cluster.local  # Your Grafana URL
       api_key: &lt;your grafana API key&gt;
-      api_url: https://xxxxxxx.grafana.net # Your Grafana cloud account URL
       grafana_datasource_uid: &lt;the UID of the loki data source in Grafana&gt;</code></pre>
 </div>
 <div class="tabbed-block">
@@ -5416,8 +5434,8 @@
   grafana/loki:
     enabled: true
     config:
+      api_url: http://grafana.monitoring.svc.cluster.local  # Your Grafana URL
       api_key: &lt;your grafana API key&gt;
-      api_url: https://xxxxxxx.grafana.net # Your Grafana cloud account URL
       grafana_datasource_uid: &lt;the UID of the loki data source in Grafana&gt;</code></pre>
 <p>Apply the configuration:</p>
 <pre><code class="language-bash">helm upgrade holmes holmes/holmes --values=values.yaml</code></pre>
@@ -5429,26 +5447,25 @@
     grafana/loki:
       enabled: true
       config:
+        api_url: http://grafana.monitoring.svc.cluster.local  # Your Grafana URL
         api_key: &lt;your grafana API key&gt;
-        api_url: https://xxxxxxx.grafana.net # Your Grafana cloud account URL
         grafana_datasource_uid: &lt;the UID of the loki data source in Grafana&gt;</code></pre>
 <p>Apply the configuration:</p>
 <pre><code class="language-bash">helm upgrade robusta robusta/robusta --values=generated_values.yaml --set clusterName=&lt;YOUR_CLUSTER_NAME&gt;</code></pre>
 </div>
 </div>
 </div></p>
-<h2 id="direct-connection">Direct Connection<a class="headerlink" href="#direct-connection" title="Permanent link">&para;</a></h2>
-<p>The toolset can directly connect to a Loki instance without proxying through a Grafana instance. This is done by not setting the <code>grafana_datasource_uid</code> field. Not setting this field makes HolmesGPT assume that it is directly connecting to Loki.</p>
-<h3 id="configuration-direct-connection">Configuration (Direct Connection)<a class="headerlink" href="#configuration-direct-connection" title="Permanent link">&para;</a></h3>
+<h3 id="self-hosted-loki-direct-connection">Self-Hosted Loki - Direct Connection<a class="headerlink" href="#self-hosted-loki-direct-connection" title="Permanent link">&para;</a></h3>
+<p>HolmesGPT connects directly to a self-hosted Loki API endpoint without going through Grafana.</p>
 <p>
 <div class="tabbed-set" data-tabs="1:3">
-<input checked="checked" id="__tabbed_4b7ab89d_2410_49ab_9944_4256d24edfd9_1" name="__tabbed_4b7ab89d_2410_49ab_9944_4256d24edfd9" type="radio">
-<input id="__tabbed_4b7ab89d_2410_49ab_9944_4256d24edfd9_2" name="__tabbed_4b7ab89d_2410_49ab_9944_4256d24edfd9" type="radio">
-<input id="__tabbed_4b7ab89d_2410_49ab_9944_4256d24edfd9_3" name="__tabbed_4b7ab89d_2410_49ab_9944_4256d24edfd9" type="radio">
+<input checked="checked" id="__tabbed_3319fbaa_f409_43f4_b52f_10df3b0c5d4c_1" name="__tabbed_3319fbaa_f409_43f4_b52f_10df3b0c5d4c" type="radio">
+<input id="__tabbed_3319fbaa_f409_43f4_b52f_10df3b0c5d4c_2" name="__tabbed_3319fbaa_f409_43f4_b52f_10df3b0c5d4c" type="radio">
+<input id="__tabbed_3319fbaa_f409_43f4_b52f_10df3b0c5d4c_3" name="__tabbed_3319fbaa_f409_43f4_b52f_10df3b0c5d4c" type="radio">
 <div class="tabbed-labels">
-<label for="__tabbed_4b7ab89d_2410_49ab_9944_4256d24edfd9_1">Holmes CLI</label>
-<label for="__tabbed_4b7ab89d_2410_49ab_9944_4256d24edfd9_2">Holmes Helm Chart</label>
-<label for="__tabbed_4b7ab89d_2410_49ab_9944_4256d24edfd9_3">Robusta Helm Chart</label>
+<label for="__tabbed_3319fbaa_f409_43f4_b52f_10df3b0c5d4c_1">Holmes CLI</label>
+<label for="__tabbed_3319fbaa_f409_43f4_b52f_10df3b0c5d4c_2">Holmes Helm Chart</label>
+<label for="__tabbed_3319fbaa_f409_43f4_b52f_10df3b0c5d4c_3">Robusta Helm Chart</label>
 </div>
 <div class="tabbed-content">
 <div class="tabbed-block">
@@ -5457,9 +5474,9 @@
   grafana/loki:
     enabled: true
     config:
-      api_url: http://loki.logging
+      api_url: http://loki.monitoring.svc.cluster.local:3100
       additional_headers:
-        X-Scope-OrgID: &quot;&lt;tenant id&gt;&quot; # Set the X-Scope-OrgID if loki multitenancy is enabled</code></pre>
+        X-Scope-OrgID: &quot;&lt;tenant id&gt;&quot;  # Only needed for multi-tenant Loki</code></pre>
 </div>
 <div class="tabbed-block">
 <p>When using the <strong>standalone Holmes Helm Chart</strong>, update your <code>values.yaml</code>:</p>
@@ -5467,9 +5484,9 @@
   grafana/loki:
     enabled: true
     config:
-      api_url: http://loki.logging
+      api_url: http://loki.monitoring.svc.cluster.local:3100
       additional_headers:
-        X-Scope-OrgID: &quot;&lt;tenant id&gt;&quot; # Set the X-Scope-OrgID if loki multitenancy is enabled</code></pre>
+        X-Scope-OrgID: &quot;&lt;tenant id&gt;&quot;  # Only needed for multi-tenant Loki</code></pre>
 <p>Apply the configuration:</p>
 <pre><code class="language-bash">helm upgrade holmes holmes/holmes --values=values.yaml</code></pre>
 </div>
@@ -5480,9 +5497,69 @@
     grafana/loki:
       enabled: true
       config:
-        api_url: http://loki.logging
+        api_url: http://loki.monitoring.svc.cluster.local:3100
         additional_headers:
-          X-Scope-OrgID: &quot;&lt;tenant id&gt;&quot; # Set the X-Scope-OrgID if loki multitenancy is enabled</code></pre>
+          X-Scope-OrgID: &quot;&lt;tenant id&gt;&quot;  # Only needed for multi-tenant Loki</code></pre>
+<p>Apply the configuration:</p>
+<pre><code class="language-bash">helm upgrade robusta robusta/robusta --values=generated_values.yaml --set clusterName=&lt;YOUR_CLUSTER_NAME&gt;</code></pre>
+</div>
+</div>
+</div></p>
+<h3 id="grafana-cloud">Grafana Cloud<a class="headerlink" href="#grafana-cloud" title="Permanent link">&para;</a></h3>
+<p>Query Loki through your Grafana Cloud Grafana instance's datasource proxy. Same flow as the self-hosted proxy option, just pointed at your Grafana Cloud URL.</p>
+<p><strong>Required:</strong></p>
+<ul>
+<li>Your Grafana Cloud Grafana URL (e.g., <code>https://myorg.grafana.net</code>)</li>
+<li>A Grafana Cloud service account token with Viewer role</li>
+<li>Loki datasource UID from your Grafana Cloud Grafana</li>
+</ul>
+<p><strong>Find your Loki datasource UID:</strong></p>
+<p>In your Grafana Cloud Grafana UI → Connections → Data sources → click on the Loki datasource. The UID appears in the URL. Or via the API:</p>
+<div class="language-bash highlight"><pre><span></span><code><span id="__span-1-1"><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a>curl<span class="w"> </span>-s<span class="w"> </span>-H<span class="w"> </span><span class="s2">&quot;Authorization: Bearer &lt;service-account-token&gt;&quot;</span><span class="w"> </span>https://&lt;your-stack&gt;.grafana.net/api/datasources<span class="w"> </span><span class="p">|</span><span class="w"> </span>jq<span class="w"> </span><span class="s1">&#39;.[] | select(.type == &quot;loki&quot;) | .uid&#39;</span>
+</span></code></pre></div>
+<p>
+<div class="tabbed-set" data-tabs="1:3">
+<input checked="checked" id="__tabbed_40e41304_6759_4712_8e37_15d24564c8e2_1" name="__tabbed_40e41304_6759_4712_8e37_15d24564c8e2" type="radio">
+<input id="__tabbed_40e41304_6759_4712_8e37_15d24564c8e2_2" name="__tabbed_40e41304_6759_4712_8e37_15d24564c8e2" type="radio">
+<input id="__tabbed_40e41304_6759_4712_8e37_15d24564c8e2_3" name="__tabbed_40e41304_6759_4712_8e37_15d24564c8e2" type="radio">
+<div class="tabbed-labels">
+<label for="__tabbed_40e41304_6759_4712_8e37_15d24564c8e2_1">Holmes CLI</label>
+<label for="__tabbed_40e41304_6759_4712_8e37_15d24564c8e2_2">Holmes Helm Chart</label>
+<label for="__tabbed_40e41304_6759_4712_8e37_15d24564c8e2_3">Robusta Helm Chart</label>
+</div>
+<div class="tabbed-content">
+<div class="tabbed-block">
+<p>Add the following to <strong>~/.holmes/config.yaml</strong>. Create the file if it doesn't exist:</p>
+<pre><code class="language-yaml">toolsets:
+  grafana/loki:
+    enabled: true
+    config:
+      api_url: https://&lt;your-stack&gt;.grafana.net
+      api_key: &lt;grafana cloud service account token&gt;
+      grafana_datasource_uid: &lt;the UID of the Loki datasource&gt;</code></pre>
+</div>
+<div class="tabbed-block">
+<p>When using the <strong>standalone Holmes Helm Chart</strong>, update your <code>values.yaml</code>:</p>
+<pre><code class="language-yaml">toolsets:
+  grafana/loki:
+    enabled: true
+    config:
+      api_url: https://&lt;your-stack&gt;.grafana.net
+      api_key: &lt;grafana cloud service account token&gt;
+      grafana_datasource_uid: &lt;the UID of the Loki datasource&gt;</code></pre>
+<p>Apply the configuration:</p>
+<pre><code class="language-bash">helm upgrade holmes holmes/holmes --values=values.yaml</code></pre>
+</div>
+<div class="tabbed-block">
+<p>When using the <strong>Robusta Helm Chart</strong> (which includes HolmesGPT), update your <code>generated_values.yaml</code>:</p>
+<pre><code class="language-yaml">holmes:
+  toolsets:
+    grafana/loki:
+      enabled: true
+      config:
+        api_url: https://&lt;your-stack&gt;.grafana.net
+        api_key: &lt;grafana cloud service account token&gt;
+        grafana_datasource_uid: &lt;the UID of the Loki datasource&gt;</code></pre>
 <p>Apply the configuration:</p>
 <pre><code class="language-bash">helm upgrade robusta robusta/robusta --values=generated_values.yaml --set clusterName=&lt;YOUR_CLUSTER_NAME&gt;</code></pre>
 </div>
@@ -5493,13 +5570,13 @@
 <p>For self-signed certificates, you can disable SSL verification:</p>
 <p>
 <div class="tabbed-set" data-tabs="1:3">
-<input checked="checked" id="__tabbed_f6d1fbcf_ee24_4384_ad5b_1cc566673cd4_1" name="__tabbed_f6d1fbcf_ee24_4384_ad5b_1cc566673cd4" type="radio">
-<input id="__tabbed_f6d1fbcf_ee24_4384_ad5b_1cc566673cd4_2" name="__tabbed_f6d1fbcf_ee24_4384_ad5b_1cc566673cd4" type="radio">
-<input id="__tabbed_f6d1fbcf_ee24_4384_ad5b_1cc566673cd4_3" name="__tabbed_f6d1fbcf_ee24_4384_ad5b_1cc566673cd4" type="radio">
+<input checked="checked" id="__tabbed_d11893ea_4393_454d_ac76_8b6f90b5d719_1" name="__tabbed_d11893ea_4393_454d_ac76_8b6f90b5d719" type="radio">
+<input id="__tabbed_d11893ea_4393_454d_ac76_8b6f90b5d719_2" name="__tabbed_d11893ea_4393_454d_ac76_8b6f90b5d719" type="radio">
+<input id="__tabbed_d11893ea_4393_454d_ac76_8b6f90b5d719_3" name="__tabbed_d11893ea_4393_454d_ac76_8b6f90b5d719" type="radio">
 <div class="tabbed-labels">
-<label for="__tabbed_f6d1fbcf_ee24_4384_ad5b_1cc566673cd4_1">Holmes CLI</label>
-<label for="__tabbed_f6d1fbcf_ee24_4384_ad5b_1cc566673cd4_2">Holmes Helm Chart</label>
-<label for="__tabbed_f6d1fbcf_ee24_4384_ad5b_1cc566673cd4_3">Robusta Helm Chart</label>
+<label for="__tabbed_d11893ea_4393_454d_ac76_8b6f90b5d719_1">Holmes CLI</label>
+<label for="__tabbed_d11893ea_4393_454d_ac76_8b6f90b5d719_2">Holmes Helm Chart</label>
+<label for="__tabbed_d11893ea_4393_454d_ac76_8b6f90b5d719_3">Robusta Helm Chart</label>
 </div>
 <div class="tabbed-content">
 <div class="tabbed-block">
@@ -5537,16 +5614,16 @@
 </div>
 </div></p>
 <h3 id="external-url">External URL<a class="headerlink" href="#external-url" title="Permanent link">&para;</a></h3>
-<p>If HolmesGPT accesses Loki through an internal URL but you want clickable links in results to use a different URL:</p>
+<p>Only applies to the <strong>Self-Hosted Loki via Grafana Proxy</strong> setup. If HolmesGPT reaches Grafana through an internal URL but you want the clickable "View in Grafana" links in responses to use a public URL:</p>
 <p>
 <div class="tabbed-set" data-tabs="1:3">
-<input checked="checked" id="__tabbed_d50719fc_2407_452c_8d76_4bd010689790_1" name="__tabbed_d50719fc_2407_452c_8d76_4bd010689790" type="radio">
-<input id="__tabbed_d50719fc_2407_452c_8d76_4bd010689790_2" name="__tabbed_d50719fc_2407_452c_8d76_4bd010689790" type="radio">
-<input id="__tabbed_d50719fc_2407_452c_8d76_4bd010689790_3" name="__tabbed_d50719fc_2407_452c_8d76_4bd010689790" type="radio">
+<input checked="checked" id="__tabbed_66797513_0875_4af4_b9e0_3b7a6b7304f1_1" name="__tabbed_66797513_0875_4af4_b9e0_3b7a6b7304f1" type="radio">
+<input id="__tabbed_66797513_0875_4af4_b9e0_3b7a6b7304f1_2" name="__tabbed_66797513_0875_4af4_b9e0_3b7a6b7304f1" type="radio">
+<input id="__tabbed_66797513_0875_4af4_b9e0_3b7a6b7304f1_3" name="__tabbed_66797513_0875_4af4_b9e0_3b7a6b7304f1" type="radio">
 <div class="tabbed-labels">
-<label for="__tabbed_d50719fc_2407_452c_8d76_4bd010689790_1">Holmes CLI</label>
-<label for="__tabbed_d50719fc_2407_452c_8d76_4bd010689790_2">Holmes Helm Chart</label>
-<label for="__tabbed_d50719fc_2407_452c_8d76_4bd010689790_3">Robusta Helm Chart</label>
+<label for="__tabbed_66797513_0875_4af4_b9e0_3b7a6b7304f1_1">Holmes CLI</label>
+<label for="__tabbed_66797513_0875_4af4_b9e0_3b7a6b7304f1_2">Holmes Helm Chart</label>
+<label for="__tabbed_66797513_0875_4af4_b9e0_3b7a6b7304f1_3">Robusta Helm Chart</label>
 </div>
 <div class="tabbed-content">
 <div class="tabbed-block">
@@ -5555,8 +5632,10 @@
   grafana/loki:
     enabled: true
     config:
-      api_url: http://loki.internal:3100  # Internal URL for API calls
-      external_url: https://loki.example.com  # URL for links in results</code></pre>
+      api_url: http://grafana.monitoring.svc.cluster.local  # Internal URL for API calls
+      api_key: &lt;your grafana API key&gt;
+      grafana_datasource_uid: &lt;loki datasource UID&gt;
+      external_url: https://grafana.example.com  # URL used in clickable links</code></pre>
 </div>
 <div class="tabbed-block">
 <p>When using the <strong>standalone Holmes Helm Chart</strong>, update your <code>values.yaml</code>:</p>
@@ -5564,8 +5643,10 @@
   grafana/loki:
     enabled: true
     config:
-      api_url: http://loki.internal:3100  # Internal URL for API calls
-      external_url: https://loki.example.com  # URL for links in results</code></pre>
+      api_url: http://grafana.monitoring.svc.cluster.local  # Internal URL for API calls
+      api_key: &lt;your grafana API key&gt;
+      grafana_datasource_uid: &lt;loki datasource UID&gt;
+      external_url: https://grafana.example.com  # URL used in clickable links</code></pre>
 <p>Apply the configuration:</p>
 <pre><code class="language-bash">helm upgrade holmes holmes/holmes --values=values.yaml</code></pre>
 </div>
@@ -5576,8 +5657,10 @@
     grafana/loki:
       enabled: true
       config:
-        api_url: http://loki.internal:3100  # Internal URL for API calls
-        external_url: https://loki.example.com  # URL for links in results</code></pre>
+        api_url: http://grafana.monitoring.svc.cluster.local  # Internal URL for API calls
+        api_key: &lt;your grafana API key&gt;
+        grafana_datasource_uid: &lt;loki datasource UID&gt;
+        external_url: https://grafana.example.com  # URL used in clickable links</code></pre>
 <p>Apply the configuration:</p>
 <pre><code class="language-bash">helm upgrade robusta robusta/robusta --values=generated_values.yaml --set clusterName=&lt;YOUR_CLUSTER_NAME&gt;</code></pre>
 </div>
