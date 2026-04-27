@@ -1,0 +1,105 @@
+{# ---------------------------------------------------------------------------
+  Troubleshooting prompt for *external* AI coding agents (Claude Code, Cursor,
+  etc.) — NOT a prompt for Holmes' own LLM.
+
+  Rendered server-side by the Robusta frontend and exposed as
+  "Copy troubleshooting prompt for AI agents" next to a HolmesGPT error. The
+  user pastes the rendered output into their local coding agent, which then
+  has enough context to read their Helm values / Secrets and propose a fix.
+
+  Required variables:
+    error_message  - raw error text Holmes received (string, multi-line ok)
+
+  Optional variables:
+    model          - model alias the user has configured (e.g. "elephant-alpha")
+    provider       - inferred provider name: openai | anthropic | openrouter |
+                     azure | gemini | bedrock | vertex | ...
+    deployment     - "helm" | "docker" | "cli" | "robusta_saas"
+    cluster_name   - cluster the error came from, if known
+--------------------------------------------------------------------------- #}
+I'm running HolmesGPT and hit the following error{% if cluster_name %} on cluster `{{ cluster_name }}`{% endif %}:
+
+```
+{{ error_message }}
+```
+
+{% if model -%}
+Configured model alias: `{{ model }}`
+{% endif -%}
+{% if provider -%}
+Inferred LLM provider: `{{ provider }}`
+{% endif %}
+Please help me fix this. Work through the steps below — **don't change anything yet, propose a diff and the command to apply it, then wait for me to confirm.**
+
+## 1. Find my Holmes config
+
+Look for whichever of these applies to my setup:
+
+- **Helm**: my override values file (commonly `values.yaml`, `holmes-values.yaml`,
+  or `values.override.yaml`) plus the upstream chart at `helm/holmes/values.yaml`
+  if I have it checked out. Relevant keys:
+  - `additionalEnvVars` — API keys (`OPENAI_API_KEY`, `ANTHROPIC_API_KEY`,
+    `OPENROUTER_API_KEY`, `AZURE_API_KEY`, …) should come from a `secretKeyRef`,
+    not be hard-coded.
+  - `modelList` — every model alias must map to a real provider model and
+    include the provider prefix (`openrouter/openai/gpt-4.1`,
+    `anthropic/claude-sonnet-4-5-20250929`, etc.).
+- **Docker / docker-compose**: env vars on the `holmes` service.
+- **CLI**: `~/.holmes/config.yaml` and shell env (`OPENAI_API_KEY`, `MODEL`,
+  `CLASSIFIER_MODEL`, …).
+{%- if deployment == "robusta_saas" %}
+- **Robusta SaaS** (this is my case): I likely *can't* fix this myself because
+  the LLM key is managed on Robusta's side. Confirm that's the case, and if so
+  tell me to contact `support@robusta.dev` and stop. Only continue if you find
+  config I actually own.
+{%- endif %}
+
+## 2. Verify what the running pod actually sees
+
+```
+kubectl exec -n <namespace> deploy/holmes -- printenv \
+  | grep -iE 'API_KEY|API_BASE|MODEL|CLASSIFIER'
+```
+
+And check the Secret has the value you expect (no trailing whitespace, no
+accidental quotes, not stale):
+
+```
+kubectl get secret <secret-name> -n <namespace> -o json \
+  | jq '.data | map_values(@base64d)'
+```
+
+## 3. Map the error to a cause before proposing a fix
+
+- `401` / `User not found` / `Invalid API key` → key missing, malformed,
+  revoked, or the provider account is closed. Rotate the key in the provider
+  dashboard and update the Secret.
+- `404` / `model not found` → `modelList` alias points at a model name the
+  provider doesn't expose, or the provider prefix is missing.
+- `429` → rate limit / quota — check the provider dashboard.
+- `402` / `payment required` / `insufficient credits` → top up at the provider.
+- `litellm.BadRequestError ... LLM Provider NOT provided` → `modelList` entry
+  is missing the `<provider>/...` prefix.
+{%- if provider == "openrouter" or "openrouter" in error_message|lower or "openrouter" in (model or "")|lower %}
+- **OpenRouter-specific:** Holmes' default classifier model is not available
+  on OpenRouter. `CLASSIFIER_MODEL` must also be set to an OpenRouter model
+  (e.g. `openrouter/openai/gpt-4.1`). Confirm both `OPENROUTER_API_KEY` and
+  `CLASSIFIER_MODEL` are present.
+{%- endif %}
+
+## 4. Propose the fix
+
+Give me:
+1. A concrete diff against my values file (or `kubectl edit secret` patch).
+2. The `helm upgrade` command (or equivalent) to roll it out.
+3. A one-line `kubectl` command I can run afterwards to confirm the fix took.
+
+Use `valueFrom.secretKeyRef` for any credential — never inline a key in
+`values.yaml`.
+
+## Reference docs
+
+- HolmesGPT install & config: https://holmesgpt.dev/installation/kubernetes-installation/
+- AI providers and `modelList`: https://holmesgpt.dev/ai-providers/
+- Robusta + HolmesGPT integration: https://docs.robusta.dev/master/configuration/holmesgpt/index.html
+- LiteLLM provider auth params: https://docs.litellm.ai/docs/providers
