@@ -62,6 +62,47 @@ spec:
       affinity:
         {{- toYaml .Values.mcpAddons.confluenceMcp.affinity | nindent 8 }}
       {{- end }}
+      initContainers:
+      # Fails fast with a clear message if the wrong Atlassian token type is mounted.
+      # mcp-atlassian only does HTTP Basic against the tenant URL, which doesn't work with
+      # scoped service-account tokens (prefix "ATSTT") — those need the Atlassian API gateway
+      # with Bearer auth, which this addon doesn't expose. Without this check the pod boots
+      # fine and 401s only appear later, mid-investigation, with no actionable error.
+      - name: validate-token
+        image: "{{ .Values.mcpAddons.confluenceMcp.registry }}/{{ .Values.mcpAddons.confluenceMcp.image }}"
+        imagePullPolicy: {{ .Values.mcpAddons.confluenceMcp.imagePullPolicy | default "IfNotPresent" }}
+        command:
+        - sh
+        - -c
+        - |
+          if [ -z "$CONFLUENCE_API_TOKEN" ]; then
+            echo "ERROR: CONFLUENCE_API_TOKEN is empty. Check that secret '{{ .Values.mcpAddons.confluenceMcp.auth.secretName }}' exists and has key '{{ .Values.mcpAddons.confluenceMcp.auth.tokenKey | default "confluence-api-token" }}'." >&2
+            exit 1
+          fi
+          case "$CONFLUENCE_API_TOKEN" in
+            ATSTT*)
+              echo "ERROR: This is a scoped service-account API token (prefix 'ATSTT')." >&2
+              echo "" >&2
+              echo "The Confluence MCP addon (mcpAddons.confluenceMcp) only supports HTTP Basic auth" >&2
+              echo "against the tenant URL. Scoped tokens require Bearer auth via the Atlassian API" >&2
+              echo "gateway, which this addon does not expose, so they will always return 401." >&2
+              echo "" >&2
+              echo "Fix one of the following:" >&2
+              echo "  1. Generate a personal API token (prefix 'ATATT') at" >&2
+              echo "     https://id.atlassian.com/manage-profile/security/api-tokens" >&2
+              echo "     and replace the value in secret '{{ .Values.mcpAddons.confluenceMcp.auth.secretName }}'" >&2
+              echo "     under key '{{ .Values.mcpAddons.confluenceMcp.auth.tokenKey | default "confluence-api-token" }}'." >&2
+              echo "  2. Disable mcpAddons.confluenceMcp and enable the built-in 'toolsets.confluence'" >&2
+              echo "     instead — it supports scoped service-account tokens transparently." >&2
+              exit 1
+              ;;
+          esac
+        env:
+        - name: CONFLUENCE_API_TOKEN
+          valueFrom:
+            secretKeyRef:
+              name: {{ .Values.mcpAddons.confluenceMcp.auth.secretName }}
+              key: {{ .Values.mcpAddons.confluenceMcp.auth.tokenKey | default "confluence-api-token" }}
       containers:
       - name: confluence-mcp
         image: "{{ .Values.mcpAddons.confluenceMcp.registry }}/{{ .Values.mcpAddons.confluenceMcp.image }}"

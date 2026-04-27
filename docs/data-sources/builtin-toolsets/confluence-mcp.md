@@ -7,18 +7,35 @@ This integration uses the community-maintained [mcp-atlassian](https://github.co
 
 ## Prerequisites
 
-Before configuring the Confluence MCP server, you need an Atlassian API token.
+!!! warning "Use a personal API token, not a service-account token"
+    This MCP addon only supports **personal API tokens** (prefix `ATATT...`). It will return 401 on every request if you use a scoped service-account token (prefix `ATSTT...`), because the underlying `mcp-atlassian` server only does HTTP Basic auth against the tenant URL — service-account tokens require Bearer auth through the Atlassian API gateway, which this addon does not expose.
+
+    If you need to use a service-account token, use the built-in [Confluence toolset](confluence.md) instead — it handles both token types automatically.
+
+### Identifying your token type
+
+You can tell which kind of token you have from its prefix:
+
+| Prefix | Token type | Where you create it | Works with this MCP addon? |
+|--------|-----------|---------------------|----------------------------|
+| `ATATT...` | Personal API token | [id.atlassian.com/manage-profile/security/api-tokens](https://id.atlassian.com/manage-profile/security/api-tokens) (your own profile) | ✅ Yes |
+| `ATSTT...` | Scoped service-account token | [admin.atlassian.com](https://admin.atlassian.com) → **Directory** → service account → **API tokens** | ❌ No — use the [built-in Confluence toolset](confluence.md) instead |
+| `ATCTT...` | Atlassian Connect / OAuth context token | (issued automatically to apps) | ❌ No — not user-facing |
+
+### Creating a personal API token
 
 1. Go to [id.atlassian.com/manage-profile/security/api-tokens](https://id.atlassian.com/manage-profile/security/api-tokens)
 2. Click **Create API token**
 3. Set a label (e.g., "Holmes MCP")
 4. Click **Create**
 5. **Copy the token immediately** - it won't be shown again
+6. Verify it starts with `ATATT` — if it starts with `ATSTT`, you're on the service-account page; switch to your personal profile
 
 You'll also need:
 
 - Your Confluence instance URL (e.g., `https://your-company.atlassian.net/wiki`)
-- The email address associated with your Atlassian account
+- The email address associated with your Atlassian account (the one that owns the token above)
+- That account must have Confluence product access in your workspace (Atlassian Admin → **Products** → **Confluence** → **Users**)
 
 ## Configuration
 

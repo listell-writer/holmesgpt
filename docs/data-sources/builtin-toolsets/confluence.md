@@ -61,8 +61,12 @@ Works with both **Confluence Cloud** and **Confluence Data Center / Server**.
 
         --8<-- "snippets/helm_upgrade_command.md"
 
-    !!! note "Scoped tokens and service accounts"
-        Scoped API tokens and service account tokens on Confluence Cloud require routing through the Atlassian API gateway (`api.atlassian.com`). HolmesGPT auto-detects this and switches to the gateway transparently — no extra configuration needed. If auto-detection doesn't work, you can set `cloud_id` explicitly (find it at `https://yourcompany.atlassian.net/_edge/tenant_info`).
+    !!! tip "Things people get wrong here"
+        - **`api_url` is the bare instance URL — do not include `/wiki`.** Use `https://yourcompany.atlassian.net`, not `https://yourcompany.atlassian.net/wiki`. The `/wiki` path is added automatically.
+        - **`user` must be the email address that owns the token**, not a username or display name. For a service account, use the service account's email (e.g., `something@serviceaccount.atlassian.com`).
+        - **The account behind the token must have Confluence product access.** This is the most common cause of `403 "caller cannot access Confluence"` even when the token is valid. Service accounts in particular often only get Jira access by default — grant Confluence access in [Atlassian Admin](https://admin.atlassian.com){:target="_blank"} → **Products** → **Confluence** → **Users**.
+        - **Both personal API tokens (`ATATT...`) and scoped service-account tokens (`ATSTT...`) work with the same configuration above** — no extra fields, no different `auth_type`. If a token is rejected, the cause is almost always missing product access (see above), not the token format.
+        - **If you have an unusual network setup** (corporate proxy that blocks `<api_url>/_edge/tenant_info`, custom DNS), you may need to set `cloud_id` explicitly. Get it from `https://yourcompany.atlassian.net/_edge/tenant_info` while signed in to your browser. Most users never need this.
 
 === "Confluence Data Center / Server"
 
@@ -136,7 +140,7 @@ Works with both **Confluence Cloud** and **Confluence Data Center / Server**.
 | `user` | `null` | User email (Cloud) or username (Data Center). Required for basic auth. |
 | `auth_type` | `basic` | `basic` for Cloud or Data Center username/password. `bearer` for Data Center PATs. |
 | `api_path_prefix` | `/wiki` | Path prefix before `/rest/api`. Cloud uses `/wiki`. Data Center typically uses `""` (empty). |
-| `cloud_id` | `null` | Atlassian Cloud ID for the API gateway. Auto-detected for Cloud URLs when needed (scoped tokens / service accounts). |
+| `cloud_id` | `null` | Escape hatch for Cloud auth issues. Leave unset; only fill in if you are getting auth failures with valid credentials and your network blocks unauthenticated calls to `<api_url>/_edge/tenant_info`. |
 
 ## Tools
 
