@@ -30,7 +30,7 @@ spec:
           type: RuntimeDefault
       containers:
       - name: operator
-        image: "{{ .Values.operator.registry }}/{{ .Values.operator.image }}"
+        image: "{{ include "holmes.operator.image" . }}"
         imagePullPolicy: {{ .Values.operator.imagePullPolicy }}
         command:
           - python3

@@ -17,6 +17,12 @@ autoscaling:
   targetMemory: ""
   behavior: {}
 
+# NOTE: the image tag below is a placeholder that the release pipeline
+# (.github/workflows/build-docker-images.yaml) rewrites to the real version at
+# release time. If you are installing this chart directly from a source checkout
+# the placeholder will NOT be substituted and the install will fail fast with a
+# clear error. Use the released chart (`helm install holmesgpt robusta/holmes`)
+# or override the image tag with `--set image=holmes:<tag>` (e.g. holmes:latest).
 image: holmes:0.0.0
 registry: robustadev
 
@@ -621,6 +627,9 @@ operator:
   enabled: false  # Set to true to deploy the operator
 
   # Container image
+  # NOTE: the image tag below is a placeholder rewritten at release time by
+  # .github/workflows/build-docker-images.yaml. See the comment on `image:` near
+  # the top of this file for how to install the chart from a source checkout.
   image: holmes-operator:0.0.0
   registry: robustadev
   imagePullPolicy: IfNotPresent

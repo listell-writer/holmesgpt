@@ -1,4 +1,30 @@
 {{/*
+Resolve and validate the Holmes container image.
+values.yaml ships with image tag "0.0.0" — a placeholder rewritten by
+.github/workflows/build-docker-images.yaml at release time. Installing the
+chart directly from a source checkout (e.g. `helm install ./helm/holmes`)
+leaves the placeholder in place and produces an unhelpful ImagePullBackOff.
+Fail fast here with a message that points the user at the right install path.
+*/}}
+{{- define "holmes.image" -}}
+{{- if hasSuffix ":0.0.0" .Values.image -}}
+{{- fail (printf "\n\nThe image tag %q is a placeholder that the release pipeline rewrites at release time.\nYou appear to be installing the chart from a source checkout, where the placeholder has not been replaced.\n\nFix this with one of:\n  1. Install the released chart (recommended):\n       helm repo add robusta https://robusta-charts.storage.googleapis.com\n       helm install holmesgpt robusta/holmes -f values.yaml\n     See https://holmesgpt.dev/installation/kubernetes-installation/\n  2. Override the image tag explicitly, e.g.:\n       helm install ... --set image=holmes:latest\n  3. Check out a release tag (e.g. `git checkout <tag>`) before running `helm install` from source.\n" .Values.image) -}}
+{{- end -}}
+{{- printf "%s/%s" .Values.registry .Values.image -}}
+{{- end -}}
+
+{{/*
+Resolve and validate the Holmes operator container image. See holmes.image for
+context — same placeholder mechanism applies to operator.image.
+*/}}
+{{- define "holmes.operator.image" -}}
+{{- if hasSuffix ":0.0.0" .Values.operator.image -}}
+{{- fail (printf "\n\nThe operator.image tag %q is a placeholder that the release pipeline rewrites at release time.\nYou appear to be installing the chart from a source checkout, where the placeholder has not been replaced.\n\nFix this with one of:\n  1. Install the released chart (recommended):\n       helm repo add robusta https://robusta-charts.storage.googleapis.com\n       helm install holmesgpt robusta/holmes -f values.yaml\n     See https://holmesgpt.dev/installation/kubernetes-installation/\n  2. Override the operator image tag explicitly, e.g.:\n       helm install ... --set operator.image=holmes-operator:latest\n  3. Check out a release tag (e.g. `git checkout <tag>`) before running `helm install` from source.\n" .Values.operator.image) -}}
+{{- end -}}
+{{- printf "%s/%s" .Values.operator.registry .Values.operator.image -}}
+{{- end -}}
+
+{{/*
 Return the service account name to use
 */}}
 {{- define "holmes.serviceAccountName" -}}

@@ -48,7 +48,7 @@ spec:
       {{- end }}
       containers:
       - name: holmes
-        image: "{{ .Values.registry }}/{{ .Values.image }}"
+        image: "{{ include "holmes.image" . }}"
         imagePullPolicy: {{ .Values.imagePullPolicy }}
         # Read-only root filesystem for security hardening.
         # /tmp is mounted as a writable emptyDir for ephemeral tool result files.
