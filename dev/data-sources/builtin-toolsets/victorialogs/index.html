@@ -10,13 +10,13 @@
       
       
       
-        <link rel="canonical" href="https://holmesgpt.dev/dev/data-sources/builtin-toolsets/prometheus/">
+        <link rel="canonical" href="https://holmesgpt.dev/dev/data-sources/builtin-toolsets/victorialogs/">
       
       
-        <link rel="prev" href="../database-postgresql/">
+        <link rel="prev" href="../database-sqlite/">
       
       
-        <link rel="next" href="../prefect-mcp/">
+        <link rel="next" href="../victoriametrics/">
       
       
         
@@ -27,7 +27,7 @@
     
     
       
-        <title>Prometheus - HolmesGPT Documentation</title>
+        <title>VictoriaLogs - HolmesGPT Documentation</title>
       
     
     
@@ -89,7 +89,7 @@
     <div data-md-component="skip">
       
         
-        <a href="#prometheus" class="md-skip">
+        <a href="#victorialogs" class="md-skip">
           Skip to content
         </a>
       
@@ -140,7 +140,7 @@
         <div class="md-header__topic" data-md-component="header-topic">
           <span class="md-ellipsis">
             
-              Prometheus
+              VictoriaLogs
             
           </span>
         </div>
@@ -3043,37 +3043,10 @@
                 
   
   
-    
   
   
-  
-    <li class="md-nav__item md-nav__item--active">
-      
-      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
-      
-      
-        
-      
-      
-        <label class="md-nav__link md-nav__link--active" for="__toc">
-          
-  
-  
-  <span class="md-ellipsis">
-    
-  
-    Prometheus
-  
-
-    
-  </span>
-  
-  
-
-          <span class="md-nav__icon md-icon"></span>
-        </label>
-      
-      <a href="./" class="md-nav__link md-nav__link--active">
+    <li class="md-nav__item">
+      <a href="../prometheus/" class="md-nav__link">
         
   
   
@@ -3089,221 +3062,6 @@
   
 
       </a>
-      
-        
-
-<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
-  
-  
-  
-    
-  
-  
-    <label class="md-nav__title" for="__toc">
-      <span class="md-nav__icon md-icon"></span>
-      Table of contents
-    </label>
-    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
-      
-        <li class="md-nav__item">
-  <a href="#prerequisites" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Prerequisites
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#configuration" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Configuration
-      
-    </span>
-  </a>
-  
-    <nav class="md-nav" aria-label="Configuration">
-      <ul class="md-nav__list">
-        
-          <li class="md-nav__item">
-  <a href="#finding-your-prometheus-url" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Finding your Prometheus URL
-      
-    </span>
-  </a>
-  
-</li>
-        
-      </ul>
-    </nav>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#specific-providers" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Specific Providers
-      
-    </span>
-  </a>
-  
-    <nav class="md-nav" aria-label="Specific Providers">
-      <ul class="md-nav__list">
-        
-          <li class="md-nav__item">
-  <a href="#coralogix-prometheus" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Coralogix Prometheus
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#aws-managed-prometheus-amp" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        AWS Managed Prometheus (AMP)
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#google-managed-prometheus" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Google Managed Prometheus
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#azure-managed-prometheus" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Azure Managed Prometheus
-      
-    </span>
-  </a>
-  
-    <nav class="md-nav" aria-label="Azure Managed Prometheus">
-      <ul class="md-nav__list">
-        
-          <li class="md-nav__item">
-  <a href="#using-a-service-principal-client-secret" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Using a service principal (client secret)
-      
-    </span>
-  </a>
-  
-</li>
-        
-      </ul>
-    </nav>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#grafana-cloud-mimir" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Grafana Cloud (Mimir)
-      
-    </span>
-  </a>
-  
-    <nav class="md-nav" aria-label="Grafana Cloud (Mimir)">
-      <ul class="md-nav__list">
-        
-          <li class="md-nav__item">
-  <a href="#option-1-direct-prometheus-endpoint-recommended" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Option 1: Direct Prometheus Endpoint (Recommended)
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#option-2-grafana-api-proxy" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Option 2: Grafana API Proxy
-      
-    </span>
-  </a>
-  
-</li>
-        
-      </ul>
-    </nav>
-  
-</li>
-        
-      </ul>
-    </nav>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#advanced-configuration" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Advanced Configuration
-      
-    </span>
-  </a>
-  
-    <nav class="md-nav" aria-label="Advanced Configuration">
-      <ul class="md-nav__list">
-        
-          <li class="md-nav__item">
-  <a href="#variant-specific-fields" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Variant-specific fields
-      
-    </span>
-  </a>
-  
-</li>
-        
-      </ul>
-    </nav>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#capabilities" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Capabilities
-      
-    </span>
-  </a>
-  
-</li>
-      
-    </ul>
-  
-</nav>
-      
     </li>
   
 
@@ -3565,10 +3323,37 @@
                 
   
   
+    
   
   
-    <li class="md-nav__item">
-      <a href="../victorialogs/" class="md-nav__link">
+  
+    <li class="md-nav__item md-nav__item--active">
+      
+      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
+      
+      
+        
+      
+      
+        <label class="md-nav__link md-nav__link--active" for="__toc">
+          
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    VictoriaLogs
+  
+
+    
+  </span>
+  
+  
+
+          <span class="md-nav__icon md-icon"></span>
+        </label>
+      
+      <a href="./" class="md-nav__link md-nav__link--active">
         
   
   
@@ -3584,6 +3369,109 @@
   
 
       </a>
+      
+        
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#when-to-use-this" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        When to Use This
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#prerequisites" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Prerequisites
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#configuration" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Configuration
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Configuration">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#authentication" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Authentication
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#multi-tenancy" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Multi-tenancy
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#external-url-for-clickable-links" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        External URL for clickable links
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#common-use-cases" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Common Use Cases
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+      
     </li>
   
 
@@ -5228,6 +5116,17 @@
     <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
       
         <li class="md-nav__item">
+  <a href="#when-to-use-this" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        When to Use This
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#prerequisites" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -5251,10 +5150,32 @@
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
-  <a href="#finding-your-prometheus-url" class="md-nav__link">
+  <a href="#authentication" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Finding your Prometheus URL
+        Authentication
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#multi-tenancy" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Multi-tenancy
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#external-url-for-clickable-links" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        External URL for clickable links
       
     </span>
   </a>
@@ -5267,155 +5188,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#specific-providers" class="md-nav__link">
+  <a href="#common-use-cases" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Specific Providers
-      
-    </span>
-  </a>
-  
-    <nav class="md-nav" aria-label="Specific Providers">
-      <ul class="md-nav__list">
-        
-          <li class="md-nav__item">
-  <a href="#coralogix-prometheus" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Coralogix Prometheus
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#aws-managed-prometheus-amp" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        AWS Managed Prometheus (AMP)
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#google-managed-prometheus" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Google Managed Prometheus
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#azure-managed-prometheus" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Azure Managed Prometheus
-      
-    </span>
-  </a>
-  
-    <nav class="md-nav" aria-label="Azure Managed Prometheus">
-      <ul class="md-nav__list">
-        
-          <li class="md-nav__item">
-  <a href="#using-a-service-principal-client-secret" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Using a service principal (client secret)
-      
-    </span>
-  </a>
-  
-</li>
-        
-      </ul>
-    </nav>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#grafana-cloud-mimir" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Grafana Cloud (Mimir)
-      
-    </span>
-  </a>
-  
-    <nav class="md-nav" aria-label="Grafana Cloud (Mimir)">
-      <ul class="md-nav__list">
-        
-          <li class="md-nav__item">
-  <a href="#option-1-direct-prometheus-endpoint-recommended" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Option 1: Direct Prometheus Endpoint (Recommended)
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#option-2-grafana-api-proxy" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Option 2: Grafana API Proxy
-      
-    </span>
-  </a>
-  
-</li>
-        
-      </ul>
-    </nav>
-  
-</li>
-        
-      </ul>
-    </nav>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#advanced-configuration" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Advanced Configuration
-      
-    </span>
-  </a>
-  
-    <nav class="md-nav" aria-label="Advanced Configuration">
-      <ul class="md-nav__list">
-        
-          <li class="md-nav__item">
-  <a href="#variant-specific-fields" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Variant-specific fields
-      
-    </span>
-  </a>
-  
-</li>
-        
-      </ul>
-    </nav>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#capabilities" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Capabilities
+        Common Use Cases
       
     </span>
   </a>
@@ -5505,7 +5281,7 @@
 
 
   
-    <a href="https://github.com/HolmesGPT/holmesgpt/edit/master/docs/data-sources/builtin-toolsets/prometheus.md" title="Edit this page" class="md-content__button md-icon" rel="edit">
+    <a href="https://github.com/HolmesGPT/holmesgpt/edit/master/docs/data-sources/builtin-toolsets/victorialogs.md" title="Edit this page" class="md-content__button md-icon" rel="edit">
       
       <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M10 20H6V4h7v5h5v3.1l2-2V8l-6-6H6c-1.1 0-2 .9-2 2v16c0 1.1.9 2 2 2h4zm10.2-7c.1 0 .3.1.4.2l1.3 1.3c.2.2.2.6 0 .8l-1 1-2.1-2.1 1-1c.1-.1.2-.2.4-.2m0 3.9L14.1 23H12v-2.1l6.1-6.1z"/></svg>
     </a>
@@ -5514,57 +5290,63 @@
     
       
     
-    <a href="https://github.com/HolmesGPT/holmesgpt/raw/master/docs/data-sources/builtin-toolsets/prometheus.md" title="View source of this page" class="md-content__button md-icon">
+    <a href="https://github.com/HolmesGPT/holmesgpt/raw/master/docs/data-sources/builtin-toolsets/victorialogs.md" title="View source of this page" class="md-content__button md-icon">
       
       <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M17 18c.56 0 1 .44 1 1s-.44 1-1 1-1-.44-1-1 .44-1 1-1m0-3c-2.73 0-5.06 1.66-6 4 .94 2.34 3.27 4 6 4s5.06-1.66 6-4c-.94-2.34-3.27-4-6-4m0 6.5a2.5 2.5 0 0 1-2.5-2.5 2.5 2.5 0 0 1 2.5-2.5 2.5 2.5 0 0 1 2.5 2.5 2.5 2.5 0 0 1-2.5 2.5M9.27 20H6V4h7v5h5v4.07c.7.08 1.36.25 2 .49V8l-6-6H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h4.5a8.2 8.2 0 0 1-1.23-2"/></svg>
     </a>
   
 
 
-<h1 id="prometheus">Prometheus<a class="headerlink" href="#prometheus" title="Permanent link">&para;</a></h1>
-<p>Connect HolmesGPT to Prometheus for metrics analysis and query generation.</p>
+<h1 id="victorialogs">VictoriaLogs<a class="headerlink" href="#victorialogs" title="Permanent link">&para;</a></h1>
+<p>Connect HolmesGPT to <a href="https://docs.victoriametrics.com/victorialogs/">VictoriaLogs</a> for log analysis. Provides search, stream discovery, and field-value enumeration over your log database using LogsQL.</p>
+<h2 id="when-to-use-this">When to Use This<a class="headerlink" href="#when-to-use-this" title="Permanent link">&para;</a></h2>
+<ul>
+<li>✅ You aggregate logs in VictoriaLogs</li>
+<li>✅ You want HolmesGPT to query historical logs by stream label, field, or text</li>
+<li>✅ You need to inspect log distributions over time (hits/buckets)</li>
+</ul>
 <h2 id="prerequisites">Prerequisites<a class="headerlink" href="#prerequisites" title="Permanent link">&para;</a></h2>
 <ul>
-<li>A running and accessible Prometheus server</li>
-<li>Ensure HolmesGPT can connect to the Prometheus endpoint (see <a href="#finding-your-prometheus-url">Finding your Prometheus URL</a>)</li>
+<li>A reachable VictoriaLogs HTTP endpoint (default port: <code>9428</code>)</li>
 </ul>
+<details class="info">
+<summary>Available Log Sources</summary>
+<p>Multiple logging toolsets can be enabled simultaneously. HolmesGPT will use the most appropriate source for each investigation.</p>
+<ul>
+<li><strong><a href="../kubernetes/">Kubernetes logs</a></strong> - Direct pod log access (enabled by default)</li>
+<li><strong><a href="../grafanaloki/">Loki</a></strong> - Centralized logs via Loki</li>
+<li><strong><a href="../elasticsearch/">Elasticsearch / OpenSearch</a></strong> - Logs from Elasticsearch/OpenSearch</li>
+<li><strong><a href="../coralogix-logs/">Coralogix</a></strong> - Logs via Coralogix platform</li>
+<li><strong><a href="../datadog/">DataDog</a></strong> - Logs from DataDog</li>
+</ul>
+</details>
 <h2 id="configuration">Configuration<a class="headerlink" href="#configuration" title="Permanent link">&para;</a></h2>
 <p>
 <div class="tabbed-set" data-tabs="1:3">
-<input checked="checked" id="__tabbed_9e461c2a_7151_4290_adcf_d9b1576f1483_1" name="__tabbed_9e461c2a_7151_4290_adcf_d9b1576f1483" type="radio">
-<input id="__tabbed_9e461c2a_7151_4290_adcf_d9b1576f1483_2" name="__tabbed_9e461c2a_7151_4290_adcf_d9b1576f1483" type="radio">
-<input id="__tabbed_9e461c2a_7151_4290_adcf_d9b1576f1483_3" name="__tabbed_9e461c2a_7151_4290_adcf_d9b1576f1483" type="radio">
+<input checked="checked" id="__tabbed_f875e2f1_ac6c_4d45_b8fa_41d3c66e2551_1" name="__tabbed_f875e2f1_ac6c_4d45_b8fa_41d3c66e2551" type="radio">
+<input id="__tabbed_f875e2f1_ac6c_4d45_b8fa_41d3c66e2551_2" name="__tabbed_f875e2f1_ac6c_4d45_b8fa_41d3c66e2551" type="radio">
+<input id="__tabbed_f875e2f1_ac6c_4d45_b8fa_41d3c66e2551_3" name="__tabbed_f875e2f1_ac6c_4d45_b8fa_41d3c66e2551" type="radio">
 <div class="tabbed-labels">
-<label for="__tabbed_9e461c2a_7151_4290_adcf_d9b1576f1483_1">Holmes CLI</label>
-<label for="__tabbed_9e461c2a_7151_4290_adcf_d9b1576f1483_2">Holmes Helm Chart</label>
-<label for="__tabbed_9e461c2a_7151_4290_adcf_d9b1576f1483_3">Robusta Helm Chart</label>
+<label for="__tabbed_f875e2f1_ac6c_4d45_b8fa_41d3c66e2551_1">Holmes CLI</label>
+<label for="__tabbed_f875e2f1_ac6c_4d45_b8fa_41d3c66e2551_2">Holmes Helm Chart</label>
+<label for="__tabbed_f875e2f1_ac6c_4d45_b8fa_41d3c66e2551_3">Robusta Helm Chart</label>
 </div>
 <div class="tabbed-content">
 <div class="tabbed-block">
 <p>Add the following to <strong>~/.holmes/config.yaml</strong>. Create the file if it doesn't exist:</p>
 <pre><code class="language-yaml">toolsets:
-    prometheus/metrics:
-        enabled: true
-        subtype: prometheus
-        config:
-            prometheus_url: http://&lt;your-prometheus-service&gt;:9090
-
-            # Optional:
-            #additional_headers:
-            #    Authorization: &quot;Basic &lt;base_64_encoded_string&gt;&quot;</code></pre>
+  victorialogs:
+    enabled: true
+    config:
+      api_url: http://victorialogs.monitoring.svc:9428</code></pre>
 </div>
 <div class="tabbed-block">
 <p>When using the <strong>standalone Holmes Helm Chart</strong>, update your <code>values.yaml</code>:</p>
 <pre><code class="language-yaml">toolsets:
-    prometheus/metrics:
-        enabled: true
-        subtype: prometheus
-        config:
-            prometheus_url: http://&lt;your-prometheus-service&gt;:9090
-
-            # Optional:
-            #additional_headers:
-            #    Authorization: &quot;Basic &lt;base_64_encoded_string&gt;&quot;</code></pre>
+  victorialogs:
+    enabled: true
+    config:
+      api_url: http://victorialogs.monitoring.svc:9428</code></pre>
 <p>Apply the configuration:</p>
 <pre><code class="language-bash">helm upgrade holmes holmes/holmes --values=values.yaml</code></pre>
 </div>
@@ -5572,536 +5354,219 @@
 <p>When using the <strong>Robusta Helm Chart</strong> (which includes HolmesGPT), update your <code>generated_values.yaml</code>:</p>
 <pre><code class="language-yaml">holmes:
   toolsets:
-      prometheus/metrics:
-          enabled: true
-          subtype: prometheus
-          config:
-              prometheus_url: http://&lt;your-prometheus-service&gt;:9090
-
-              # Optional:
-              #additional_headers:
-              #    Authorization: &quot;Basic &lt;base_64_encoded_string&gt;&quot;</code></pre>
+    victorialogs:
+      enabled: true
+      config:
+        api_url: http://victorialogs.monitoring.svc:9428</code></pre>
 <p>Apply the configuration:</p>
 <pre><code class="language-bash">helm upgrade robusta robusta/robusta --values=generated_values.yaml --set clusterName=&lt;YOUR_CLUSTER_NAME&gt;</code></pre>
 </div>
 </div>
 </div></p>
-<div class="admonition note">
-<p class="admonition-title">About <code>subtype</code></p>
-<p>The <code>subtype:</code> field tells HolmesGPT which Prometheus variant you're connecting to. For a plain self-hosted Prometheus use <code>prometheus</code>; variant-specific values (<code>victoriametrics</code>, <code>coralogix</code>, <code>grafana-cloud</code>, <code>aws-managed-prometheus</code>, <code>azure-managed-prometheus</code>, <code>google-managed-prometheus</code>) are shown in the sections below. The field is optional — HolmesGPT will infer the variant from the configuration fields when you omit it — but setting it makes the resulting toolset card light up under the correct integration in the UI.</p>
+<h3 id="authentication">Authentication<a class="headerlink" href="#authentication" title="Permanent link">&para;</a></h3>
+<p>VictoriaLogs supports basic authentication and bearer tokens.</p>
+<p><strong>Basic auth:</strong></p>
+<p>
+<div class="tabbed-set" data-tabs="1:3">
+<input checked="checked" id="__tabbed_b4b3eff0_8279_4b73_b6db_39011240dd20_1" name="__tabbed_b4b3eff0_8279_4b73_b6db_39011240dd20" type="radio">
+<input id="__tabbed_b4b3eff0_8279_4b73_b6db_39011240dd20_2" name="__tabbed_b4b3eff0_8279_4b73_b6db_39011240dd20" type="radio">
+<input id="__tabbed_b4b3eff0_8279_4b73_b6db_39011240dd20_3" name="__tabbed_b4b3eff0_8279_4b73_b6db_39011240dd20" type="radio">
+<div class="tabbed-labels">
+<label for="__tabbed_b4b3eff0_8279_4b73_b6db_39011240dd20_1">Holmes CLI</label>
+<label for="__tabbed_b4b3eff0_8279_4b73_b6db_39011240dd20_2">Holmes Helm Chart</label>
+<label for="__tabbed_b4b3eff0_8279_4b73_b6db_39011240dd20_3">Robusta Helm Chart</label>
 </div>
-<h3 id="finding-your-prometheus-url">Finding your Prometheus URL<a class="headerlink" href="#finding-your-prometheus-url" title="Permanent link">&para;</a></h3>
-<p>There are several ways to find your Prometheus URL:</p>
-<p><strong>Option 1: Simple method (port-forwarding)</strong></p>
-<div class="language-bash highlight"><pre><span></span><code><span id="__span-0-1"><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="c1"># Find Prometheus services</span>
-</span><span id="__span-0-2"><a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a>kubectl<span class="w"> </span>get<span class="w"> </span>svc<span class="w"> </span>-A<span class="w"> </span><span class="p">|</span><span class="w"> </span>grep<span class="w"> </span>prometheus
-</span><span id="__span-0-3"><a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a>
-</span><span id="__span-0-4"><a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a><span class="c1"># Port forward for testing</span>
-</span><span id="__span-0-5"><a id="__codelineno-0-5" name="__codelineno-0-5" href="#__codelineno-0-5"></a>kubectl<span class="w"> </span>port-forward<span class="w"> </span>svc/&lt;your-prometheus-service&gt;<span class="w"> </span><span class="m">9090</span>:9090<span class="w"> </span>-n<span class="w"> </span>&lt;namespace&gt;
-</span><span id="__span-0-6"><a id="__codelineno-0-6" name="__codelineno-0-6" href="#__codelineno-0-6"></a><span class="c1"># Then access Prometheus at: http://localhost:9090</span>
-</span></code></pre></div>
-<p><strong>Option 2: Advanced method (get full cluster DNS URL)</strong></p>
-<p>If you want to find the full internal DNS URL for Prometheus, run:</p>
-<div class="language-bash highlight"><pre><span></span><code><span id="__span-1-1"><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a>kubectl<span class="w"> </span>get<span class="w"> </span>svc<span class="w"> </span>--all-namespaces<span class="w"> </span>-o<span class="w"> </span><span class="nv">jsonpath</span><span class="o">=</span><span class="s1">&#39;{range .items[*]}{.metadata.name}{&quot;.&quot;}{.metadata.namespace}{&quot;.svc.cluster.local:&quot;}{.spec.ports[0].port}{&quot;\n&quot;}{end}&#39;</span><span class="w"> </span><span class="p">|</span><span class="w"> </span>grep<span class="w"> </span>prometheus<span class="w"> </span><span class="p">|</span><span class="w"> </span>grep<span class="w"> </span>-Ev<span class="w"> </span><span class="s1">&#39;operat|alertmanager|node|coredns|kubelet|kube-scheduler|etcd|controller&#39;</span><span class="w"> </span><span class="p">|</span><span class="w"> </span>awk<span class="w"> </span><span class="s1">&#39;{print &quot;http://&quot;$1}&#39;</span>
-</span></code></pre></div>
-<p>This will print all possible Prometheus service URLs in your cluster. Pick the one that matches your deployment.</p>
-<h2 id="specific-providers">Specific Providers<a class="headerlink" href="#specific-providers" title="Permanent link">&para;</a></h2>
-<h3 id="coralogix-prometheus">Coralogix Prometheus<a class="headerlink" href="#coralogix-prometheus" title="Permanent link">&para;</a></h3>
-<p>To use a Coralogix PromQL endpoint with HolmesGPT:</p>
-<ol>
-<li>Go to <a href="https://coralogix.com/docs/integrations/coralogix-endpoints/#promql">Coralogix Documentation</a> and choose the relevant PromQL endpoint for your region.</li>
-<li>In Coralogix, create an API key with permissions to query metrics (Data Flow → API Keys).</li>
-<li>
-<p>Create a Kubernetes secret for the API key and expose it as an environment variable in your Helm values:</p>
-<div class="language-yaml highlight"><pre><span></span><code><span id="__span-2-1"><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a><span class="nt">holmes</span><span class="p">:</span>
-</span><span id="__span-2-2"><a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a><span class="w">  </span><span class="nt">additionalEnvVars</span><span class="p">:</span>
-</span><span id="__span-2-3"><a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a><span class="w">    </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">CORALOGIX_API_KEY</span>
-</span><span id="__span-2-4"><a id="__codelineno-2-4" name="__codelineno-2-4" href="#__codelineno-2-4"></a><span class="w">      </span><span class="nt">valueFrom</span><span class="p">:</span>
-</span><span id="__span-2-5"><a id="__codelineno-2-5" name="__codelineno-2-5" href="#__codelineno-2-5"></a><span class="w">        </span><span class="nt">secretKeyRef</span><span class="p">:</span>
-</span><span id="__span-2-6"><a id="__codelineno-2-6" name="__codelineno-2-6" href="#__codelineno-2-6"></a><span class="w">          </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">coralogix-api-key</span>
-</span><span id="__span-2-7"><a id="__codelineno-2-7" name="__codelineno-2-7" href="#__codelineno-2-7"></a><span class="w">          </span><span class="nt">key</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">CORALOGIX_API_KEY</span>
-</span></code></pre></div>
-</li>
-<li>
-<p>Add the following under your toolsets in the Helm chart:</p>
-<div class="language-yaml highlight"><pre><span></span><code><span id="__span-3-1"><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a><span class="nt">holmes</span><span class="p">:</span>
-</span><span id="__span-3-2"><a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a><span class="w">  </span><span class="nt">toolsets</span><span class="p">:</span>
-</span><span id="__span-3-3"><a id="__codelineno-3-3" name="__codelineno-3-3" href="#__codelineno-3-3"></a><span class="w">    </span><span class="nt">prometheus/metrics</span><span class="p">:</span>
-</span><span id="__span-3-4"><a id="__codelineno-3-4" name="__codelineno-3-4" href="#__codelineno-3-4"></a><span class="w">      </span><span class="nt">enabled</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">true</span>
-</span><span id="__span-3-5"><a id="__codelineno-3-5" name="__codelineno-3-5" href="#__codelineno-3-5"></a><span class="w">      </span><span class="nt">subtype</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">coralogix</span>
-</span><span id="__span-3-6"><a id="__codelineno-3-6" name="__codelineno-3-6" href="#__codelineno-3-6"></a><span class="w">      </span><span class="nt">config</span><span class="p">:</span>
-</span><span id="__span-3-7"><a id="__codelineno-3-7" name="__codelineno-3-7" href="#__codelineno-3-7"></a><span class="w">        </span><span class="nt">prometheus_url</span><span class="p">:</span><span class="w"> </span><span class="s">&quot;https://prom-api.eu2.coralogix.com&quot;</span><span class="w">  </span><span class="c1"># Use your region&#39;s endpoint</span>
-</span><span id="__span-3-8"><a id="__codelineno-3-8" name="__codelineno-3-8" href="#__codelineno-3-8"></a><span class="w">        </span><span class="nt">additional_headers</span><span class="p">:</span>
-</span><span id="__span-3-9"><a id="__codelineno-3-9" name="__codelineno-3-9" href="#__codelineno-3-9"></a><span class="w">          </span><span class="nt">token</span><span class="p">:</span><span class="w"> </span><span class="s">&quot;{{</span><span class="nv"> </span><span class="s">env.CORALOGIX_API_KEY</span><span class="nv"> </span><span class="s">}}&quot;</span>
-</span><span id="__span-3-10"><a id="__codelineno-3-10" name="__codelineno-3-10" href="#__codelineno-3-10"></a><span class="w">        </span><span class="nt">discover_metrics_from_last_hours</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">72</span><span class="w">  </span><span class="c1"># Look back 72 hours for metrics</span>
-</span><span id="__span-3-11"><a id="__codelineno-3-11" name="__codelineno-3-11" href="#__codelineno-3-11"></a><span class="w">        </span><span class="nt">tool_calls_return_data</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">true</span>
-</span></code></pre></div>
-</li>
-</ol>
-<hr />
-<h3 id="aws-managed-prometheus-amp">AWS Managed Prometheus (AMP)<a class="headerlink" href="#aws-managed-prometheus-amp" title="Permanent link">&para;</a></h3>
-<p>To connect HolmesGPT to AWS Managed Prometheus:</p>
-<div class="language-yaml highlight"><pre><span></span><code><span id="__span-4-1"><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a><span class="nt">holmes</span><span class="p">:</span>
-</span><span id="__span-4-2"><a id="__codelineno-4-2" name="__codelineno-4-2" href="#__codelineno-4-2"></a><span class="w">  </span><span class="nt">toolsets</span><span class="p">:</span>
-</span><span id="__span-4-3"><a id="__codelineno-4-3" name="__codelineno-4-3" href="#__codelineno-4-3"></a><span class="w">    </span><span class="nt">prometheus/metrics</span><span class="p">:</span>
-</span><span id="__span-4-4"><a id="__codelineno-4-4" name="__codelineno-4-4" href="#__codelineno-4-4"></a><span class="w">      </span><span class="nt">enabled</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">true</span>
-</span><span id="__span-4-5"><a id="__codelineno-4-5" name="__codelineno-4-5" href="#__codelineno-4-5"></a><span class="w">      </span><span class="nt">subtype</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">aws-managed-prometheus</span>
-</span><span id="__span-4-6"><a id="__codelineno-4-6" name="__codelineno-4-6" href="#__codelineno-4-6"></a><span class="w">      </span><span class="nt">config</span><span class="p">:</span>
-</span><span id="__span-4-7"><a id="__codelineno-4-7" name="__codelineno-4-7" href="#__codelineno-4-7"></a><span class="w">        </span><span class="nt">prometheus_url</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">https://aps-workspaces.us-east-1.amazonaws.com/workspaces/ws-xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx/</span>
-</span><span id="__span-4-8"><a id="__codelineno-4-8" name="__codelineno-4-8" href="#__codelineno-4-8"></a><span class="w">        </span><span class="nt">aws_region</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">us-east-1</span>
-</span><span id="__span-4-9"><a id="__codelineno-4-9" name="__codelineno-4-9" href="#__codelineno-4-9"></a><span class="w">        </span><span class="nt">aws_service_name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">aps</span><span class="w">  </span><span class="c1"># Default value, can be omitted</span>
-</span><span id="__span-4-10"><a id="__codelineno-4-10" name="__codelineno-4-10" href="#__codelineno-4-10"></a><span class="w">        </span><span class="c1"># Optional: Specify credentials (otherwise uses default AWS credential chain)</span>
-</span><span id="__span-4-11"><a id="__codelineno-4-11" name="__codelineno-4-11" href="#__codelineno-4-11"></a><span class="w">        </span><span class="nt">aws_access_key</span><span class="p">:</span><span class="w"> </span><span class="s">&quot;{{</span><span class="nv"> </span><span class="s">env.AWS_ACCESS_KEY_ID</span><span class="nv"> </span><span class="s">}}&quot;</span>
-</span><span id="__span-4-12"><a id="__codelineno-4-12" name="__codelineno-4-12" href="#__codelineno-4-12"></a><span class="w">        </span><span class="nt">aws_secret_access_key</span><span class="p">:</span><span class="w"> </span><span class="s">&quot;{{</span><span class="nv"> </span><span class="s">env.AWS_SECRET_ACCESS_KEY</span><span class="nv"> </span><span class="s">}}&quot;</span>
-</span><span id="__span-4-13"><a id="__codelineno-4-13" name="__codelineno-4-13" href="#__codelineno-4-13"></a><span class="w">        </span><span class="c1"># Optional: Assume a role for cross-account access</span>
-</span><span id="__span-4-14"><a id="__codelineno-4-14" name="__codelineno-4-14" href="#__codelineno-4-14"></a><span class="w">        </span><span class="nt">assume_role_arn</span><span class="p">:</span><span class="w"> </span><span class="s">&quot;arn:aws:iam::123456789012:role/PrometheusReadRole&quot;</span>
-</span><span id="__span-4-15"><a id="__codelineno-4-15" name="__codelineno-4-15" href="#__codelineno-4-15"></a><span class="w">        </span><span class="nt">refresh_interval_seconds</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">900</span><span class="w">  </span><span class="c1"># Refresh AWS credentials every 15 minutes (default)</span>
-</span></code></pre></div>
-<p><strong>Notes:</strong>
-- The toolset automatically detects AWS configuration when <code>aws_region</code> is present
-- Uses SigV4 authentication for all requests
-- Supports IAM roles and cross-account access via <code>assume_role_arn</code>
-- Credentials refresh automatically based on <code>refresh_interval_seconds</code></p>
-<hr />
-<h3 id="google-managed-prometheus">Google Managed Prometheus<a class="headerlink" href="#google-managed-prometheus" title="Permanent link">&para;</a></h3>
-<p>Before configuring Holmes, make sure you have:</p>
-<ul>
-<li>Google Managed Prometheus enabled</li>
-<li>A Prometheus Frontend endpoint accessible from your cluster
-  (If you don’t already have one, you can create it following the instructions
-  <a href="https://docs.cloud.google.com/stackdriver/docs/managed-prometheus/query-api-ui#ui-prometheus">here</a> )</li>
-</ul>
-<p>To connect HolmesGPT to Google Cloud Managed Prometheus:</p>
-<div class="language-yaml highlight"><pre><span></span><code><span id="__span-5-1"><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a><span class="nt">holmes</span><span class="p">:</span>
-</span><span id="__span-5-2"><a id="__codelineno-5-2" name="__codelineno-5-2" href="#__codelineno-5-2"></a><span class="w">  </span><span class="nt">toolsets</span><span class="p">:</span>
-</span><span id="__span-5-3"><a id="__codelineno-5-3" name="__codelineno-5-3" href="#__codelineno-5-3"></a><span class="w">    </span><span class="nt">prometheus/metrics</span><span class="p">:</span>
-</span><span id="__span-5-4"><a id="__codelineno-5-4" name="__codelineno-5-4" href="#__codelineno-5-4"></a><span class="w">      </span><span class="nt">enabled</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">true</span>
-</span><span id="__span-5-5"><a id="__codelineno-5-5" name="__codelineno-5-5" href="#__codelineno-5-5"></a><span class="w">      </span><span class="nt">subtype</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">google-managed-prometheus</span>
-</span><span id="__span-5-6"><a id="__codelineno-5-6" name="__codelineno-5-6" href="#__codelineno-5-6"></a><span class="w">      </span><span class="nt">config</span><span class="p">:</span>
-</span><span id="__span-5-7"><a id="__codelineno-5-7" name="__codelineno-5-7" href="#__codelineno-5-7"></a><span class="w">        </span><span class="c1"># Set this to the URL of your Prometheus Frontend endpoint, it may change based on the namespace you deployed frontend to.</span>
-</span><span id="__span-5-8"><a id="__codelineno-5-8" name="__codelineno-5-8" href="#__codelineno-5-8"></a><span class="w">        </span><span class="nt">prometheus_url</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">http://frontend.default.svc.cluster.local:9090</span>
-</span></code></pre></div>
-<p><strong>Notes:</strong></p>
-<ul>
-<li>Authentication is handled automatically via Google Cloud (Workload Identity or default service account in the frontend deployed app)</li>
-<li>No additional headers or credentials are required</li>
-<li>The Prometheus Frontend endpoint must be accessible from the cluster</li>
-</ul>
-<h3 id="azure-managed-prometheus">Azure Managed Prometheus<a class="headerlink" href="#azure-managed-prometheus" title="Permanent link">&para;</a></h3>
-<p>Before configuring Holmes, make sure you have:</p>
-<ul>
-<li>An Azure Monitor workspace with Managed Prometheus enabled</li>
-<li>A service principal (or managed identity) that has access to the workspace</li>
-</ul>
-<h4 id="using-a-service-principal-client-secret">Using a service principal (client secret)<a class="headerlink" href="#using-a-service-principal-client-secret" title="Permanent link">&para;</a></h4>
-<div class="language-yaml highlight"><pre><span></span><code><span id="__span-6-1"><a id="__codelineno-6-1" name="__codelineno-6-1" href="#__codelineno-6-1"></a><span class="nt">holmes</span><span class="p">:</span>
-</span><span id="__span-6-2"><a id="__codelineno-6-2" name="__codelineno-6-2" href="#__codelineno-6-2"></a><span class="w">  </span><span class="nt">toolsets</span><span class="p">:</span>
-</span><span id="__span-6-3"><a id="__codelineno-6-3" name="__codelineno-6-3" href="#__codelineno-6-3"></a><span class="w">    </span><span class="nt">prometheus/metrics</span><span class="p">:</span>
-</span><span id="__span-6-4"><a id="__codelineno-6-4" name="__codelineno-6-4" href="#__codelineno-6-4"></a><span class="w">      </span><span class="nt">enabled</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">true</span>
-</span><span id="__span-6-5"><a id="__codelineno-6-5" name="__codelineno-6-5" href="#__codelineno-6-5"></a><span class="w">      </span><span class="nt">subtype</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">azure-managed-prometheus</span>
-</span><span id="__span-6-6"><a id="__codelineno-6-6" name="__codelineno-6-6" href="#__codelineno-6-6"></a><span class="w">      </span><span class="nt">config</span><span class="p">:</span>
-</span><span id="__span-6-7"><a id="__codelineno-6-7" name="__codelineno-6-7" href="#__codelineno-6-7"></a><span class="w">        </span><span class="nt">prometheus_url</span><span class="p">:</span><span class="w"> </span><span class="s">&quot;https://&lt;your-workspace&gt;.&lt;region&gt;.prometheus.monitor.azure.com:443/&quot;</span>
-</span><span id="__span-6-8"><a id="__codelineno-6-8" name="__codelineno-6-8" href="#__codelineno-6-8"></a><span class="w">  </span><span class="nt">additionalEnvVars</span><span class="p">:</span>
-</span><span id="__span-6-9"><a id="__codelineno-6-9" name="__codelineno-6-9" href="#__codelineno-6-9"></a><span class="w">    </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">AZURE_CLIENT_ID</span>
-</span><span id="__span-6-10"><a id="__codelineno-6-10" name="__codelineno-6-10" href="#__codelineno-6-10"></a><span class="w">      </span><span class="nt">value</span><span class="p">:</span><span class="w"> </span><span class="s">&quot;&lt;your-app-client-id&gt;&quot;</span>
-</span><span id="__span-6-11"><a id="__codelineno-6-11" name="__codelineno-6-11" href="#__codelineno-6-11"></a><span class="w">    </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">AZURE_TENANT_ID</span>
-</span><span id="__span-6-12"><a id="__codelineno-6-12" name="__codelineno-6-12" href="#__codelineno-6-12"></a><span class="w">      </span><span class="nt">value</span><span class="p">:</span><span class="w"> </span><span class="s">&quot;&lt;your-tenant-id&gt;&quot;</span>
-</span><span id="__span-6-13"><a id="__codelineno-6-13" name="__codelineno-6-13" href="#__codelineno-6-13"></a><span class="w">    </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">AZURE_CLIENT_SECRET</span>
-</span><span id="__span-6-14"><a id="__codelineno-6-14" name="__codelineno-6-14" href="#__codelineno-6-14"></a><span class="w">      </span><span class="nt">value</span><span class="p">:</span><span class="w"> </span><span class="s">&quot;&lt;your-client-secret&gt;&quot;</span>
-</span></code></pre></div>
-<p><strong>Notes:</strong>
-- <code>prometheus_url</code> must point to the Azure Managed Prometheus workspace endpoint (include the trailing slash).
-- No extra headers are required; authentication is handled through Azure AD (service principal or managed identity).
-- SSL is enabled by default (<code>verify_ssl: true</code>). Disable only if you know you need to trust a custom cert.</p>
-<h3 id="grafana-cloud-mimir">Grafana Cloud (Mimir)<a class="headerlink" href="#grafana-cloud-mimir" title="Permanent link">&para;</a></h3>
-<p>There are two ways to connect HolmesGPT to Grafana Cloud's Prometheus/Mimir endpoint.</p>
-<h4 id="option-1-direct-prometheus-endpoint-recommended">Option 1: Direct Prometheus Endpoint (Recommended)<a class="headerlink" href="#option-1-direct-prometheus-endpoint-recommended" title="Permanent link">&para;</a></h4>
-<p>Use Grafana Cloud's direct Prometheus endpoint with Basic authentication. This is the simplest approach.</p>
-<p><strong>Find your credentials:</strong></p>
-<ul>
-<li>Go to your Grafana Cloud portal → your stack → Prometheus card → <strong>Details</strong></li>
-<li>Note the <strong>remote write endpoint URL</strong> — remove the <code>/push</code> suffix to get the query endpoint</li>
-<li>Note the <strong>Username / Instance ID</strong> (a numeric ID)</li>
-<li>Generate a <strong>Cloud Access Policy token</strong> with <code>metrics:read</code> scope</li>
-</ul>
-<p>The query endpoint URL format is: <code>https://prometheus-prod-XX-prod-REGION.grafana.net/api/prom</code></p>
-<div class="tabbed-set tabbed-alternate" data-tabs="1:3"><input checked="checked" id="option-1-direct-prometheus-endpoint-recommended-holmes-cli" name="__tabbed_1" type="radio" /><input id="option-1-direct-prometheus-endpoint-recommended-holmes-helm-chart" name="__tabbed_1" type="radio" /><input id="option-1-direct-prometheus-endpoint-recommended-robusta-helm-chart" name="__tabbed_1" type="radio" /><div class="tabbed-labels"><label for="option-1-direct-prometheus-endpoint-recommended-holmes-cli">Holmes CLI</label><label for="option-1-direct-prometheus-endpoint-recommended-holmes-helm-chart">Holmes Helm Chart</label><label for="option-1-direct-prometheus-endpoint-recommended-robusta-helm-chart">Robusta Helm Chart</label></div>
 <div class="tabbed-content">
 <div class="tabbed-block">
 <p>Add the following to <strong>~/.holmes/config.yaml</strong>. Create the file if it doesn't exist:</p>
-<div class="language-yaml highlight"><pre><span></span><code><span id="__span-7-1"><a id="__codelineno-7-1" name="__codelineno-7-1" href="#__codelineno-7-1"></a><span class="nt">toolsets</span><span class="p">:</span>
-</span><span id="__span-7-2"><a id="__codelineno-7-2" name="__codelineno-7-2" href="#__codelineno-7-2"></a><span class="w">  </span><span class="nt">prometheus/metrics</span><span class="p">:</span>
-</span><span id="__span-7-3"><a id="__codelineno-7-3" name="__codelineno-7-3" href="#__codelineno-7-3"></a><span class="w">    </span><span class="nt">enabled</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">true</span>
-</span><span id="__span-7-4"><a id="__codelineno-7-4" name="__codelineno-7-4" href="#__codelineno-7-4"></a><span class="w">    </span><span class="nt">subtype</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">grafana-cloud</span>
-</span><span id="__span-7-5"><a id="__codelineno-7-5" name="__codelineno-7-5" href="#__codelineno-7-5"></a><span class="w">    </span><span class="nt">config</span><span class="p">:</span>
-</span><span id="__span-7-6"><a id="__codelineno-7-6" name="__codelineno-7-6" href="#__codelineno-7-6"></a><span class="w">      </span><span class="nt">prometheus_url</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">https://prometheus-prod-XX-prod-REGION.grafana.net/api/prom</span>
-</span><span id="__span-7-7"><a id="__codelineno-7-7" name="__codelineno-7-7" href="#__codelineno-7-7"></a><span class="w">      </span><span class="nt">additional_headers</span><span class="p">:</span>
-</span><span id="__span-7-8"><a id="__codelineno-7-8" name="__codelineno-7-8" href="#__codelineno-7-8"></a><span class="w">        </span><span class="nt">Authorization</span><span class="p">:</span><span class="w"> </span><span class="s">&quot;Basic</span><span class="nv"> </span><span class="s">&lt;base64_encoded_credentials&gt;&quot;</span>
-</span></code></pre></div>
-<p>The Basic auth credentials are <code>&lt;instance_id&gt;:&lt;cloud_access_policy_token&gt;</code> base64-encoded.</p>
-<p>After making changes to your configuration, run:
-<div class="language-bash highlight"><pre><span></span><code><span id="__span-8-1"><a id="__codelineno-8-1" name="__codelineno-8-1" href="#__codelineno-8-1"></a>holmes<span class="w"> </span>toolset<span class="w"> </span>refresh
-</span></code></pre></div></p>
+<pre><code class="language-yaml">toolsets:
+  victorialogs:
+    enabled: true
+    config:
+      api_url: https://victorialogs.example.com
+      username: holmes
+      password: &quot;{{ env.VICTORIALOGS_PASSWORD }}&quot;</code></pre>
 </div>
 <div class="tabbed-block">
-<p>First, create a Kubernetes secret with your credentials:</p>
-<div class="language-bash highlight"><pre><span></span><code><span id="__span-9-1"><a id="__codelineno-9-1" name="__codelineno-9-1" href="#__codelineno-9-1"></a><span class="c1"># Base64-encode your credentials: &lt;instance_id&gt;:&lt;cloud_access_policy_token&gt;</span>
-</span><span id="__span-9-2"><a id="__codelineno-9-2" name="__codelineno-9-2" href="#__codelineno-9-2"></a>kubectl<span class="w"> </span>create<span class="w"> </span>secret<span class="w"> </span>generic<span class="w"> </span>grafana-cloud-prometheus<span class="w"> </span><span class="se">\</span>
-</span><span id="__span-9-3"><a id="__codelineno-9-3" name="__codelineno-9-3" href="#__codelineno-9-3"></a><span class="w">  </span>--from-literal<span class="o">=</span>auth-header<span class="o">=</span><span class="s2">&quot;Basic </span><span class="k">$(</span><span class="nb">echo</span><span class="w"> </span>-n<span class="w"> </span><span class="s1">&#39;INSTANCE_ID:CLOUD_ACCESS_POLICY_TOKEN&#39;</span><span class="w"> </span><span class="p">|</span><span class="w"> </span>base64<span class="k">)</span><span class="s2">&quot;</span><span class="w"> </span><span class="se">\</span>
-</span><span id="__span-9-4"><a id="__codelineno-9-4" name="__codelineno-9-4" href="#__codelineno-9-4"></a><span class="w">  </span>-n<span class="w"> </span>holmes
-</span></code></pre></div>
-<div class="admonition note">
-<p class="admonition-title">Namespace must match Holmes' deployment</p>
-<p>Create the secret in the same namespace where Holmes runs. The <code>-n holmes</code> flag in the <strong>Holmes Helm</strong> tab and <code>-n default</code> in the <strong>Robusta Helm</strong> tab match each chart's documented defaults — adjust if you installed Holmes/Robusta into a different namespace. A secret in the wrong namespace silently resolves to an empty env var and authentication will fail with no clear error.</p>
-</div>
-<p>Then add to your Holmes Helm values:</p>
-<div class="language-yaml highlight"><pre><span></span><code><span id="__span-10-1"><a id="__codelineno-10-1" name="__codelineno-10-1" href="#__codelineno-10-1"></a><span class="nt">additionalEnvVars</span><span class="p">:</span>
-</span><span id="__span-10-2"><a id="__codelineno-10-2" name="__codelineno-10-2" href="#__codelineno-10-2"></a><span class="w">  </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">GRAFANA_CLOUD_PROM_AUTH</span>
-</span><span id="__span-10-3"><a id="__codelineno-10-3" name="__codelineno-10-3" href="#__codelineno-10-3"></a><span class="w">    </span><span class="nt">valueFrom</span><span class="p">:</span>
-</span><span id="__span-10-4"><a id="__codelineno-10-4" name="__codelineno-10-4" href="#__codelineno-10-4"></a><span class="w">      </span><span class="nt">secretKeyRef</span><span class="p">:</span>
-</span><span id="__span-10-5"><a id="__codelineno-10-5" name="__codelineno-10-5" href="#__codelineno-10-5"></a><span class="w">        </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">grafana-cloud-prometheus</span>
-</span><span id="__span-10-6"><a id="__codelineno-10-6" name="__codelineno-10-6" href="#__codelineno-10-6"></a><span class="w">        </span><span class="nt">key</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">auth-header</span>
-</span><span id="__span-10-7"><a id="__codelineno-10-7" name="__codelineno-10-7" href="#__codelineno-10-7"></a>
-</span><span id="__span-10-8"><a id="__codelineno-10-8" name="__codelineno-10-8" href="#__codelineno-10-8"></a><span class="nt">toolsets</span><span class="p">:</span>
-</span><span id="__span-10-9"><a id="__codelineno-10-9" name="__codelineno-10-9" href="#__codelineno-10-9"></a><span class="w">  </span><span class="nt">prometheus/metrics</span><span class="p">:</span>
-</span><span id="__span-10-10"><a id="__codelineno-10-10" name="__codelineno-10-10" href="#__codelineno-10-10"></a><span class="w">    </span><span class="nt">enabled</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">true</span>
-</span><span id="__span-10-11"><a id="__codelineno-10-11" name="__codelineno-10-11" href="#__codelineno-10-11"></a><span class="w">    </span><span class="nt">subtype</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">grafana-cloud</span>
-</span><span id="__span-10-12"><a id="__codelineno-10-12" name="__codelineno-10-12" href="#__codelineno-10-12"></a><span class="w">    </span><span class="nt">config</span><span class="p">:</span>
-</span><span id="__span-10-13"><a id="__codelineno-10-13" name="__codelineno-10-13" href="#__codelineno-10-13"></a><span class="w">      </span><span class="nt">prometheus_url</span><span class="p">:</span><span class="w"> </span><span class="s">&quot;https://prometheus-prod-XX-prod-REGION.grafana.net/api/prom&quot;</span>
-</span><span id="__span-10-14"><a id="__codelineno-10-14" name="__codelineno-10-14" href="#__codelineno-10-14"></a><span class="w">      </span><span class="nt">additional_headers</span><span class="p">:</span>
-</span><span id="__span-10-15"><a id="__codelineno-10-15" name="__codelineno-10-15" href="#__codelineno-10-15"></a><span class="w">        </span><span class="nt">Authorization</span><span class="p">:</span><span class="w"> </span><span class="s">&quot;{{</span><span class="nv"> </span><span class="s">env.GRAFANA_CLOUD_PROM_AUTH</span><span class="nv"> </span><span class="s">}}&quot;</span>
-</span></code></pre></div>
+<p>When using the <strong>standalone Holmes Helm Chart</strong>, update your <code>values.yaml</code>:</p>
+<pre><code class="language-yaml">toolsets:
+  victorialogs:
+    enabled: true
+    config:
+      api_url: https://victorialogs.example.com
+      username: holmes
+      password: &quot;{{ env.VICTORIALOGS_PASSWORD }}&quot;</code></pre>
+<p>Apply the configuration:</p>
+<pre><code class="language-bash">helm upgrade holmes holmes/holmes --values=values.yaml</code></pre>
 </div>
 <div class="tabbed-block">
-<p>First, create a Kubernetes secret with your credentials:</p>
-<div class="language-bash highlight"><pre><span></span><code><span id="__span-11-1"><a id="__codelineno-11-1" name="__codelineno-11-1" href="#__codelineno-11-1"></a><span class="c1"># Base64-encode your credentials: &lt;instance_id&gt;:&lt;cloud_access_policy_token&gt;</span>
-</span><span id="__span-11-2"><a id="__codelineno-11-2" name="__codelineno-11-2" href="#__codelineno-11-2"></a>kubectl<span class="w"> </span>create<span class="w"> </span>secret<span class="w"> </span>generic<span class="w"> </span>grafana-cloud-prometheus<span class="w"> </span><span class="se">\</span>
-</span><span id="__span-11-3"><a id="__codelineno-11-3" name="__codelineno-11-3" href="#__codelineno-11-3"></a><span class="w">  </span>--from-literal<span class="o">=</span>auth-header<span class="o">=</span><span class="s2">&quot;Basic </span><span class="k">$(</span><span class="nb">echo</span><span class="w"> </span>-n<span class="w"> </span><span class="s1">&#39;INSTANCE_ID:CLOUD_ACCESS_POLICY_TOKEN&#39;</span><span class="w"> </span><span class="p">|</span><span class="w"> </span>base64<span class="k">)</span><span class="s2">&quot;</span><span class="w"> </span><span class="se">\</span>
-</span><span id="__span-11-4"><a id="__codelineno-11-4" name="__codelineno-11-4" href="#__codelineno-11-4"></a><span class="w">  </span>-n<span class="w"> </span>default
-</span></code></pre></div>
-<div class="admonition note">
-<p class="admonition-title">Namespace must match Holmes' deployment</p>
-<p>Create the secret in the same namespace where Holmes runs. The <code>-n holmes</code> flag in the <strong>Holmes Helm</strong> tab and <code>-n default</code> in the <strong>Robusta Helm</strong> tab match each chart's documented defaults — adjust if you installed Holmes/Robusta into a different namespace. A secret in the wrong namespace silently resolves to an empty env var and authentication will fail with no clear error.</p>
-</div>
-<p>Then add to your Robusta Helm values:</p>
-<div class="language-yaml highlight"><pre><span></span><code><span id="__span-12-1"><a id="__codelineno-12-1" name="__codelineno-12-1" href="#__codelineno-12-1"></a><span class="nt">holmes</span><span class="p">:</span>
-</span><span id="__span-12-2"><a id="__codelineno-12-2" name="__codelineno-12-2" href="#__codelineno-12-2"></a><span class="w">  </span><span class="nt">additionalEnvVars</span><span class="p">:</span>
-</span><span id="__span-12-3"><a id="__codelineno-12-3" name="__codelineno-12-3" href="#__codelineno-12-3"></a><span class="w">    </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">GRAFANA_CLOUD_PROM_AUTH</span>
-</span><span id="__span-12-4"><a id="__codelineno-12-4" name="__codelineno-12-4" href="#__codelineno-12-4"></a><span class="w">      </span><span class="nt">valueFrom</span><span class="p">:</span>
-</span><span id="__span-12-5"><a id="__codelineno-12-5" name="__codelineno-12-5" href="#__codelineno-12-5"></a><span class="w">        </span><span class="nt">secretKeyRef</span><span class="p">:</span>
-</span><span id="__span-12-6"><a id="__codelineno-12-6" name="__codelineno-12-6" href="#__codelineno-12-6"></a><span class="w">          </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">grafana-cloud-prometheus</span>
-</span><span id="__span-12-7"><a id="__codelineno-12-7" name="__codelineno-12-7" href="#__codelineno-12-7"></a><span class="w">          </span><span class="nt">key</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">auth-header</span>
-</span><span id="__span-12-8"><a id="__codelineno-12-8" name="__codelineno-12-8" href="#__codelineno-12-8"></a><span class="w">  </span><span class="nt">toolsets</span><span class="p">:</span>
-</span><span id="__span-12-9"><a id="__codelineno-12-9" name="__codelineno-12-9" href="#__codelineno-12-9"></a><span class="w">    </span><span class="nt">prometheus/metrics</span><span class="p">:</span>
-</span><span id="__span-12-10"><a id="__codelineno-12-10" name="__codelineno-12-10" href="#__codelineno-12-10"></a><span class="w">      </span><span class="nt">enabled</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">true</span>
-</span><span id="__span-12-11"><a id="__codelineno-12-11" name="__codelineno-12-11" href="#__codelineno-12-11"></a><span class="w">      </span><span class="nt">subtype</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">grafana-cloud</span>
-</span><span id="__span-12-12"><a id="__codelineno-12-12" name="__codelineno-12-12" href="#__codelineno-12-12"></a><span class="w">      </span><span class="nt">config</span><span class="p">:</span>
-</span><span id="__span-12-13"><a id="__codelineno-12-13" name="__codelineno-12-13" href="#__codelineno-12-13"></a><span class="w">        </span><span class="nt">prometheus_url</span><span class="p">:</span><span class="w"> </span><span class="s">&quot;https://prometheus-prod-XX-prod-REGION.grafana.net/api/prom&quot;</span>
-</span><span id="__span-12-14"><a id="__codelineno-12-14" name="__codelineno-12-14" href="#__codelineno-12-14"></a><span class="w">        </span><span class="nt">additional_headers</span><span class="p">:</span>
-</span><span id="__span-12-15"><a id="__codelineno-12-15" name="__codelineno-12-15" href="#__codelineno-12-15"></a><span class="w">          </span><span class="nt">Authorization</span><span class="p">:</span><span class="w"> </span><span class="s">&quot;{{</span><span class="nv"> </span><span class="s">env.GRAFANA_CLOUD_PROM_AUTH</span><span class="nv"> </span><span class="s">}}&quot;</span>
-</span></code></pre></div>
-<p>Update your Helm values and run a Helm upgrade:
-<div class="language-bash highlight"><pre><span></span><code><span id="__span-13-1"><a id="__codelineno-13-1" name="__codelineno-13-1" href="#__codelineno-13-1"></a>helm<span class="w"> </span>upgrade<span class="w"> </span>robusta<span class="w"> </span>robusta/robusta<span class="w"> </span>--values<span class="o">=</span>generated_values.yaml<span class="w"> </span>--set<span class="w"> </span><span class="nv">clusterName</span><span class="o">=</span>&lt;YOUR_CLUSTER_NAME&gt;
-</span></code></pre></div></p>
+<p>When using the <strong>Robusta Helm Chart</strong> (which includes HolmesGPT), update your <code>generated_values.yaml</code>:</p>
+<pre><code class="language-yaml">holmes:
+  toolsets:
+    victorialogs:
+      enabled: true
+      config:
+        api_url: https://victorialogs.example.com
+        username: holmes
+        password: &quot;{{ env.VICTORIALOGS_PASSWORD }}&quot;</code></pre>
+<p>Apply the configuration:</p>
+<pre><code class="language-bash">helm upgrade robusta robusta/robusta --values=generated_values.yaml --set clusterName=&lt;YOUR_CLUSTER_NAME&gt;</code></pre>
 </div>
 </div>
+</div></p>
+<p><strong>Bearer token:</strong></p>
+<p>
+<div class="tabbed-set" data-tabs="1:3">
+<input checked="checked" id="__tabbed_b1a54ede_6c7d_4712_811c_88902e5324b3_1" name="__tabbed_b1a54ede_6c7d_4712_811c_88902e5324b3" type="radio">
+<input id="__tabbed_b1a54ede_6c7d_4712_811c_88902e5324b3_2" name="__tabbed_b1a54ede_6c7d_4712_811c_88902e5324b3" type="radio">
+<input id="__tabbed_b1a54ede_6c7d_4712_811c_88902e5324b3_3" name="__tabbed_b1a54ede_6c7d_4712_811c_88902e5324b3" type="radio">
+<div class="tabbed-labels">
+<label for="__tabbed_b1a54ede_6c7d_4712_811c_88902e5324b3_1">Holmes CLI</label>
+<label for="__tabbed_b1a54ede_6c7d_4712_811c_88902e5324b3_2">Holmes Helm Chart</label>
+<label for="__tabbed_b1a54ede_6c7d_4712_811c_88902e5324b3_3">Robusta Helm Chart</label>
 </div>
-<h4 id="option-2-grafana-api-proxy">Option 2: Grafana API Proxy<a class="headerlink" href="#option-2-grafana-api-proxy" title="Permanent link">&para;</a></h4>
-<p>Use Grafana's datasource proxy to route requests through the Grafana API. This approach uses a Grafana service account token.</p>
-<p><strong>Find your credentials:</strong></p>
-<ul>
-<li>Navigate to "Administration → Service accounts" in Grafana Cloud</li>
-<li>Create a new service account and generate a token (starts with <code>glsa_</code>)</li>
-<li>Find your Prometheus datasource UID:</li>
-</ul>
-<div class="language-bash highlight"><pre><span></span><code><span id="__span-14-1"><a id="__codelineno-14-1" name="__codelineno-14-1" href="#__codelineno-14-1"></a>curl<span class="w"> </span>-H<span class="w"> </span><span class="s2">&quot;Authorization: Bearer YOUR_GLSA_TOKEN&quot;</span><span class="w"> </span><span class="se">\</span>
-</span><span id="__span-14-2"><a id="__codelineno-14-2" name="__codelineno-14-2" href="#__codelineno-14-2"></a><span class="w">     </span><span class="s2">&quot;https://YOUR-INSTANCE.grafana.net/api/datasources&quot;</span><span class="w"> </span><span class="p">|</span><span class="w"> </span><span class="se">\</span>
-</span><span id="__span-14-3"><a id="__codelineno-14-3" name="__codelineno-14-3" href="#__codelineno-14-3"></a><span class="w">     </span>jq<span class="w"> </span><span class="s1">&#39;.[] | select(.type==&quot;prometheus&quot;) | {name, uid}&#39;</span>
-</span></code></pre></div>
-<div class="tabbed-set tabbed-alternate" data-tabs="2:3"><input checked="checked" id="option-2-grafana-api-proxy-holmes-cli" name="__tabbed_2" type="radio" /><input id="option-2-grafana-api-proxy-holmes-helm-chart" name="__tabbed_2" type="radio" /><input id="option-2-grafana-api-proxy-robusta-helm-chart" name="__tabbed_2" type="radio" /><div class="tabbed-labels"><label for="option-2-grafana-api-proxy-holmes-cli">Holmes CLI</label><label for="option-2-grafana-api-proxy-holmes-helm-chart">Holmes Helm Chart</label><label for="option-2-grafana-api-proxy-robusta-helm-chart">Robusta Helm Chart</label></div>
 <div class="tabbed-content">
 <div class="tabbed-block">
 <p>Add the following to <strong>~/.holmes/config.yaml</strong>. Create the file if it doesn't exist:</p>
-<div class="language-yaml highlight"><pre><span></span><code><span id="__span-15-1"><a id="__codelineno-15-1" name="__codelineno-15-1" href="#__codelineno-15-1"></a><span class="nt">toolsets</span><span class="p">:</span>
-</span><span id="__span-15-2"><a id="__codelineno-15-2" name="__codelineno-15-2" href="#__codelineno-15-2"></a><span class="w">  </span><span class="nt">prometheus/metrics</span><span class="p">:</span>
-</span><span id="__span-15-3"><a id="__codelineno-15-3" name="__codelineno-15-3" href="#__codelineno-15-3"></a><span class="w">    </span><span class="nt">enabled</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">true</span>
-</span><span id="__span-15-4"><a id="__codelineno-15-4" name="__codelineno-15-4" href="#__codelineno-15-4"></a><span class="w">    </span><span class="nt">subtype</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">grafana-cloud</span>
-</span><span id="__span-15-5"><a id="__codelineno-15-5" name="__codelineno-15-5" href="#__codelineno-15-5"></a><span class="w">    </span><span class="nt">config</span><span class="p">:</span>
-</span><span id="__span-15-6"><a id="__codelineno-15-6" name="__codelineno-15-6" href="#__codelineno-15-6"></a><span class="w">      </span><span class="nt">prometheus_url</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">https://YOUR-INSTANCE.grafana.net/api/datasources/proxy/uid/PROMETHEUS_DATASOURCE_UID</span>
-</span><span id="__span-15-7"><a id="__codelineno-15-7" name="__codelineno-15-7" href="#__codelineno-15-7"></a><span class="w">      </span><span class="nt">additional_headers</span><span class="p">:</span>
-</span><span id="__span-15-8"><a id="__codelineno-15-8" name="__codelineno-15-8" href="#__codelineno-15-8"></a><span class="w">        </span><span class="nt">Authorization</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">Bearer YOUR_GLSA_TOKEN</span>
-</span></code></pre></div>
-<p>After making changes to your configuration, run:
-<div class="language-bash highlight"><pre><span></span><code><span id="__span-16-1"><a id="__codelineno-16-1" name="__codelineno-16-1" href="#__codelineno-16-1"></a>holmes<span class="w"> </span>toolset<span class="w"> </span>refresh
-</span></code></pre></div></p>
+<pre><code class="language-yaml">toolsets:
+  victorialogs:
+    enabled: true
+    config:
+      api_url: https://victorialogs.example.com
+      bearer_token: &quot;{{ env.VICTORIALOGS_TOKEN }}&quot;</code></pre>
 </div>
 <div class="tabbed-block">
-<p>First, create a Kubernetes secret with your service account token:</p>
-<div class="language-bash highlight"><pre><span></span><code><span id="__span-17-1"><a id="__codelineno-17-1" name="__codelineno-17-1" href="#__codelineno-17-1"></a>kubectl<span class="w"> </span>create<span class="w"> </span>secret<span class="w"> </span>generic<span class="w"> </span>grafana-cloud-sa-token<span class="w"> </span><span class="se">\</span>
-</span><span id="__span-17-2"><a id="__codelineno-17-2" name="__codelineno-17-2" href="#__codelineno-17-2"></a><span class="w">  </span>--from-literal<span class="o">=</span><span class="nv">token</span><span class="o">=</span>YOUR_GLSA_TOKEN<span class="w"> </span><span class="se">\</span>
-</span><span id="__span-17-3"><a id="__codelineno-17-3" name="__codelineno-17-3" href="#__codelineno-17-3"></a><span class="w">  </span>-n<span class="w"> </span>holmes
-</span></code></pre></div>
-<div class="admonition note">
-<p class="admonition-title">Namespace must match Holmes' deployment</p>
-<p>Create the secret in the same namespace where Holmes runs. The <code>-n holmes</code> flag in the <strong>Holmes Helm</strong> tab and <code>-n default</code> in the <strong>Robusta Helm</strong> tab match each chart's documented defaults — adjust if you installed Holmes/Robusta into a different namespace. A secret in the wrong namespace silently resolves to an empty env var and authentication will fail with no clear error.</p>
-</div>
-<p>Then add to your Holmes Helm values:</p>
-<div class="language-yaml highlight"><pre><span></span><code><span id="__span-18-1"><a id="__codelineno-18-1" name="__codelineno-18-1" href="#__codelineno-18-1"></a><span class="nt">additionalEnvVars</span><span class="p">:</span>
-</span><span id="__span-18-2"><a id="__codelineno-18-2" name="__codelineno-18-2" href="#__codelineno-18-2"></a><span class="w">  </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">GRAFANA_CLOUD_SA_TOKEN</span>
-</span><span id="__span-18-3"><a id="__codelineno-18-3" name="__codelineno-18-3" href="#__codelineno-18-3"></a><span class="w">    </span><span class="nt">valueFrom</span><span class="p">:</span>
-</span><span id="__span-18-4"><a id="__codelineno-18-4" name="__codelineno-18-4" href="#__codelineno-18-4"></a><span class="w">      </span><span class="nt">secretKeyRef</span><span class="p">:</span>
-</span><span id="__span-18-5"><a id="__codelineno-18-5" name="__codelineno-18-5" href="#__codelineno-18-5"></a><span class="w">        </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">grafana-cloud-sa-token</span>
-</span><span id="__span-18-6"><a id="__codelineno-18-6" name="__codelineno-18-6" href="#__codelineno-18-6"></a><span class="w">        </span><span class="nt">key</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">token</span>
-</span><span id="__span-18-7"><a id="__codelineno-18-7" name="__codelineno-18-7" href="#__codelineno-18-7"></a>
-</span><span id="__span-18-8"><a id="__codelineno-18-8" name="__codelineno-18-8" href="#__codelineno-18-8"></a><span class="nt">toolsets</span><span class="p">:</span>
-</span><span id="__span-18-9"><a id="__codelineno-18-9" name="__codelineno-18-9" href="#__codelineno-18-9"></a><span class="w">  </span><span class="nt">prometheus/metrics</span><span class="p">:</span>
-</span><span id="__span-18-10"><a id="__codelineno-18-10" name="__codelineno-18-10" href="#__codelineno-18-10"></a><span class="w">    </span><span class="nt">enabled</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">true</span>
-</span><span id="__span-18-11"><a id="__codelineno-18-11" name="__codelineno-18-11" href="#__codelineno-18-11"></a><span class="w">    </span><span class="nt">subtype</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">grafana-cloud</span>
-</span><span id="__span-18-12"><a id="__codelineno-18-12" name="__codelineno-18-12" href="#__codelineno-18-12"></a><span class="w">    </span><span class="nt">config</span><span class="p">:</span>
-</span><span id="__span-18-13"><a id="__codelineno-18-13" name="__codelineno-18-13" href="#__codelineno-18-13"></a><span class="w">      </span><span class="nt">prometheus_url</span><span class="p">:</span><span class="w"> </span><span class="s">&quot;https://YOUR-INSTANCE.grafana.net/api/datasources/proxy/uid/PROMETHEUS_DATASOURCE_UID&quot;</span>
-</span><span id="__span-18-14"><a id="__codelineno-18-14" name="__codelineno-18-14" href="#__codelineno-18-14"></a><span class="w">      </span><span class="nt">additional_headers</span><span class="p">:</span>
-</span><span id="__span-18-15"><a id="__codelineno-18-15" name="__codelineno-18-15" href="#__codelineno-18-15"></a><span class="w">        </span><span class="nt">Authorization</span><span class="p">:</span><span class="w"> </span><span class="s">&quot;Bearer</span><span class="nv"> </span><span class="s">{{</span><span class="nv"> </span><span class="s">env.GRAFANA_CLOUD_SA_TOKEN</span><span class="nv"> </span><span class="s">}}&quot;</span>
-</span></code></pre></div>
+<p>When using the <strong>standalone Holmes Helm Chart</strong>, update your <code>values.yaml</code>:</p>
+<pre><code class="language-yaml">toolsets:
+  victorialogs:
+    enabled: true
+    config:
+      api_url: https://victorialogs.example.com
+      bearer_token: &quot;{{ env.VICTORIALOGS_TOKEN }}&quot;</code></pre>
+<p>Apply the configuration:</p>
+<pre><code class="language-bash">helm upgrade holmes holmes/holmes --values=values.yaml</code></pre>
 </div>
 <div class="tabbed-block">
-<p>First, create a Kubernetes secret with your service account token:</p>
-<div class="language-bash highlight"><pre><span></span><code><span id="__span-19-1"><a id="__codelineno-19-1" name="__codelineno-19-1" href="#__codelineno-19-1"></a>kubectl<span class="w"> </span>create<span class="w"> </span>secret<span class="w"> </span>generic<span class="w"> </span>grafana-cloud-sa-token<span class="w"> </span><span class="se">\</span>
-</span><span id="__span-19-2"><a id="__codelineno-19-2" name="__codelineno-19-2" href="#__codelineno-19-2"></a><span class="w">  </span>--from-literal<span class="o">=</span><span class="nv">token</span><span class="o">=</span>YOUR_GLSA_TOKEN<span class="w"> </span><span class="se">\</span>
-</span><span id="__span-19-3"><a id="__codelineno-19-3" name="__codelineno-19-3" href="#__codelineno-19-3"></a><span class="w">  </span>-n<span class="w"> </span>default
+<p>When using the <strong>Robusta Helm Chart</strong> (which includes HolmesGPT), update your <code>generated_values.yaml</code>:</p>
+<pre><code class="language-yaml">holmes:
+  toolsets:
+    victorialogs:
+      enabled: true
+      config:
+        api_url: https://victorialogs.example.com
+        bearer_token: &quot;{{ env.VICTORIALOGS_TOKEN }}&quot;</code></pre>
+<p>Apply the configuration:</p>
+<pre><code class="language-bash">helm upgrade robusta robusta/robusta --values=generated_values.yaml --set clusterName=&lt;YOUR_CLUSTER_NAME&gt;</code></pre>
+</div>
+</div>
+</div></p>
+<h3 id="multi-tenancy">Multi-tenancy<a class="headerlink" href="#multi-tenancy" title="Permanent link">&para;</a></h3>
+<p>VictoriaLogs uses <code>AccountID</code> and <code>ProjectID</code> headers for tenant routing. Set them via <code>headers</code>:</p>
+<p>
+<div class="tabbed-set" data-tabs="1:3">
+<input checked="checked" id="__tabbed_930fe597_bfc6_4583_acc6_d3036955fe09_1" name="__tabbed_930fe597_bfc6_4583_acc6_d3036955fe09" type="radio">
+<input id="__tabbed_930fe597_bfc6_4583_acc6_d3036955fe09_2" name="__tabbed_930fe597_bfc6_4583_acc6_d3036955fe09" type="radio">
+<input id="__tabbed_930fe597_bfc6_4583_acc6_d3036955fe09_3" name="__tabbed_930fe597_bfc6_4583_acc6_d3036955fe09" type="radio">
+<div class="tabbed-labels">
+<label for="__tabbed_930fe597_bfc6_4583_acc6_d3036955fe09_1">Holmes CLI</label>
+<label for="__tabbed_930fe597_bfc6_4583_acc6_d3036955fe09_2">Holmes Helm Chart</label>
+<label for="__tabbed_930fe597_bfc6_4583_acc6_d3036955fe09_3">Robusta Helm Chart</label>
+</div>
+<div class="tabbed-content">
+<div class="tabbed-block">
+<p>Add the following to <strong>~/.holmes/config.yaml</strong>. Create the file if it doesn't exist:</p>
+<pre><code class="language-yaml">toolsets:
+  victorialogs:
+    enabled: true
+    config:
+      api_url: https://victorialogs.example.com
+      headers:
+        AccountID: &quot;0&quot;
+        ProjectID: &quot;0&quot;</code></pre>
+</div>
+<div class="tabbed-block">
+<p>When using the <strong>standalone Holmes Helm Chart</strong>, update your <code>values.yaml</code>:</p>
+<pre><code class="language-yaml">toolsets:
+  victorialogs:
+    enabled: true
+    config:
+      api_url: https://victorialogs.example.com
+      headers:
+        AccountID: &quot;0&quot;
+        ProjectID: &quot;0&quot;</code></pre>
+<p>Apply the configuration:</p>
+<pre><code class="language-bash">helm upgrade holmes holmes/holmes --values=values.yaml</code></pre>
+</div>
+<div class="tabbed-block">
+<p>When using the <strong>Robusta Helm Chart</strong> (which includes HolmesGPT), update your <code>generated_values.yaml</code>:</p>
+<pre><code class="language-yaml">holmes:
+  toolsets:
+    victorialogs:
+      enabled: true
+      config:
+        api_url: https://victorialogs.example.com
+        headers:
+          AccountID: &quot;0&quot;
+          ProjectID: &quot;0&quot;</code></pre>
+<p>Apply the configuration:</p>
+<pre><code class="language-bash">helm upgrade robusta robusta/robusta --values=generated_values.yaml --set clusterName=&lt;YOUR_CLUSTER_NAME&gt;</code></pre>
+</div>
+</div>
+</div></p>
+<h3 id="external-url-for-clickable-links">External URL for clickable links<a class="headerlink" href="#external-url-for-clickable-links" title="Permanent link">&para;</a></h3>
+<p>If HolmesGPT calls an internal API URL but you want results to link to a public dashboard:</p>
+<p>
+<div class="tabbed-set" data-tabs="1:3">
+<input checked="checked" id="__tabbed_fef58934_c4e7_4439_9ac5_c1f24171a3e0_1" name="__tabbed_fef58934_c4e7_4439_9ac5_c1f24171a3e0" type="radio">
+<input id="__tabbed_fef58934_c4e7_4439_9ac5_c1f24171a3e0_2" name="__tabbed_fef58934_c4e7_4439_9ac5_c1f24171a3e0" type="radio">
+<input id="__tabbed_fef58934_c4e7_4439_9ac5_c1f24171a3e0_3" name="__tabbed_fef58934_c4e7_4439_9ac5_c1f24171a3e0" type="radio">
+<div class="tabbed-labels">
+<label for="__tabbed_fef58934_c4e7_4439_9ac5_c1f24171a3e0_1">Holmes CLI</label>
+<label for="__tabbed_fef58934_c4e7_4439_9ac5_c1f24171a3e0_2">Holmes Helm Chart</label>
+<label for="__tabbed_fef58934_c4e7_4439_9ac5_c1f24171a3e0_3">Robusta Helm Chart</label>
+</div>
+<div class="tabbed-content">
+<div class="tabbed-block">
+<p>Add the following to <strong>~/.holmes/config.yaml</strong>. Create the file if it doesn't exist:</p>
+<pre><code class="language-yaml">toolsets:
+  victorialogs:
+    enabled: true
+    config:
+      api_url: http://victorialogs.internal:9428
+      external_url: https://logs.example.com</code></pre>
+</div>
+<div class="tabbed-block">
+<p>When using the <strong>standalone Holmes Helm Chart</strong>, update your <code>values.yaml</code>:</p>
+<pre><code class="language-yaml">toolsets:
+  victorialogs:
+    enabled: true
+    config:
+      api_url: http://victorialogs.internal:9428
+      external_url: https://logs.example.com</code></pre>
+<p>Apply the configuration:</p>
+<pre><code class="language-bash">helm upgrade holmes holmes/holmes --values=values.yaml</code></pre>
+</div>
+<div class="tabbed-block">
+<p>When using the <strong>Robusta Helm Chart</strong> (which includes HolmesGPT), update your <code>generated_values.yaml</code>:</p>
+<pre><code class="language-yaml">holmes:
+  toolsets:
+    victorialogs:
+      enabled: true
+      config:
+        api_url: http://victorialogs.internal:9428
+        external_url: https://logs.example.com</code></pre>
+<p>Apply the configuration:</p>
+<pre><code class="language-bash">helm upgrade robusta robusta/robusta --values=generated_values.yaml --set clusterName=&lt;YOUR_CLUSTER_NAME&gt;</code></pre>
+</div>
+</div>
+</div></p>
+<h2 id="common-use-cases">Common Use Cases<a class="headerlink" href="#common-use-cases" title="Permanent link">&para;</a></h2>
+<div class="language-text highlight"><pre><span></span><code><span id="__span-0-1"><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a>Show error logs for the checkout service in the last 30 minutes
 </span></code></pre></div>
-<div class="admonition note">
-<p class="admonition-title">Namespace must match Holmes' deployment</p>
-<p>Create the secret in the same namespace where Holmes runs. The <code>-n holmes</code> flag in the <strong>Holmes Helm</strong> tab and <code>-n default</code> in the <strong>Robusta Helm</strong> tab match each chart's documented defaults — adjust if you installed Holmes/Robusta into a different namespace. A secret in the wrong namespace silently resolves to an empty env var and authentication will fail with no clear error.</p>
-</div>
-<p>Then add to your Robusta Helm values:</p>
-<div class="language-yaml highlight"><pre><span></span><code><span id="__span-20-1"><a id="__codelineno-20-1" name="__codelineno-20-1" href="#__codelineno-20-1"></a><span class="nt">holmes</span><span class="p">:</span>
-</span><span id="__span-20-2"><a id="__codelineno-20-2" name="__codelineno-20-2" href="#__codelineno-20-2"></a><span class="w">  </span><span class="nt">additionalEnvVars</span><span class="p">:</span>
-</span><span id="__span-20-3"><a id="__codelineno-20-3" name="__codelineno-20-3" href="#__codelineno-20-3"></a><span class="w">    </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">GRAFANA_CLOUD_SA_TOKEN</span>
-</span><span id="__span-20-4"><a id="__codelineno-20-4" name="__codelineno-20-4" href="#__codelineno-20-4"></a><span class="w">      </span><span class="nt">valueFrom</span><span class="p">:</span>
-</span><span id="__span-20-5"><a id="__codelineno-20-5" name="__codelineno-20-5" href="#__codelineno-20-5"></a><span class="w">        </span><span class="nt">secretKeyRef</span><span class="p">:</span>
-</span><span id="__span-20-6"><a id="__codelineno-20-6" name="__codelineno-20-6" href="#__codelineno-20-6"></a><span class="w">          </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">grafana-cloud-sa-token</span>
-</span><span id="__span-20-7"><a id="__codelineno-20-7" name="__codelineno-20-7" href="#__codelineno-20-7"></a><span class="w">          </span><span class="nt">key</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">token</span>
-</span><span id="__span-20-8"><a id="__codelineno-20-8" name="__codelineno-20-8" href="#__codelineno-20-8"></a><span class="w">  </span><span class="nt">toolsets</span><span class="p">:</span>
-</span><span id="__span-20-9"><a id="__codelineno-20-9" name="__codelineno-20-9" href="#__codelineno-20-9"></a><span class="w">    </span><span class="nt">prometheus/metrics</span><span class="p">:</span>
-</span><span id="__span-20-10"><a id="__codelineno-20-10" name="__codelineno-20-10" href="#__codelineno-20-10"></a><span class="w">      </span><span class="nt">enabled</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">true</span>
-</span><span id="__span-20-11"><a id="__codelineno-20-11" name="__codelineno-20-11" href="#__codelineno-20-11"></a><span class="w">      </span><span class="nt">subtype</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">grafana-cloud</span>
-</span><span id="__span-20-12"><a id="__codelineno-20-12" name="__codelineno-20-12" href="#__codelineno-20-12"></a><span class="w">      </span><span class="nt">config</span><span class="p">:</span>
-</span><span id="__span-20-13"><a id="__codelineno-20-13" name="__codelineno-20-13" href="#__codelineno-20-13"></a><span class="w">        </span><span class="nt">prometheus_url</span><span class="p">:</span><span class="w"> </span><span class="s">&quot;https://YOUR-INSTANCE.grafana.net/api/datasources/proxy/uid/PROMETHEUS_DATASOURCE_UID&quot;</span>
-</span><span id="__span-20-14"><a id="__codelineno-20-14" name="__codelineno-20-14" href="#__codelineno-20-14"></a><span class="w">        </span><span class="nt">additional_headers</span><span class="p">:</span>
-</span><span id="__span-20-15"><a id="__codelineno-20-15" name="__codelineno-20-15" href="#__codelineno-20-15"></a><span class="w">          </span><span class="nt">Authorization</span><span class="p">:</span><span class="w"> </span><span class="s">&quot;Bearer</span><span class="nv"> </span><span class="s">{{</span><span class="nv"> </span><span class="s">env.GRAFANA_CLOUD_SA_TOKEN</span><span class="nv"> </span><span class="s">}}&quot;</span>
+<div class="language-text highlight"><pre><span></span><code><span id="__span-1-1"><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a>Which services produced the most errors in the last hour?
 </span></code></pre></div>
-<p>Update your Helm values and run a Helm upgrade:
-<div class="language-bash highlight"><pre><span></span><code><span id="__span-21-1"><a id="__codelineno-21-1" name="__codelineno-21-1" href="#__codelineno-21-1"></a>helm<span class="w"> </span>upgrade<span class="w"> </span>robusta<span class="w"> </span>robusta/robusta<span class="w"> </span>--values<span class="o">=</span>generated_values.yaml<span class="w"> </span>--set<span class="w"> </span><span class="nv">clusterName</span><span class="o">=</span>&lt;YOUR_CLUSTER_NAME&gt;
-</span></code></pre></div></p>
-</div>
-</div>
-</div>
-<hr />
-<h2 id="advanced-configuration">Advanced Configuration<a class="headerlink" href="#advanced-configuration" title="Permanent link">&para;</a></h2>
-<p>You can further customize the Prometheus toolset with the following options:</p>
-<div class="language-yaml highlight"><pre><span></span><code><span id="__span-22-1"><a id="__codelineno-22-1" name="__codelineno-22-1" href="#__codelineno-22-1"></a><span class="nt">toolsets</span><span class="p">:</span>
-</span><span id="__span-22-2"><a id="__codelineno-22-2" name="__codelineno-22-2" href="#__codelineno-22-2"></a><span class="w">  </span><span class="nt">prometheus/metrics</span><span class="p">:</span>
-</span><span id="__span-22-3"><a id="__codelineno-22-3" name="__codelineno-22-3" href="#__codelineno-22-3"></a><span class="w">    </span><span class="nt">enabled</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">true</span>
-</span><span id="__span-22-4"><a id="__codelineno-22-4" name="__codelineno-22-4" href="#__codelineno-22-4"></a><span class="w">    </span><span class="nt">subtype</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">prometheus</span>
-</span><span id="__span-22-5"><a id="__codelineno-22-5" name="__codelineno-22-5" href="#__codelineno-22-5"></a><span class="w">    </span><span class="nt">config</span><span class="p">:</span>
-</span><span id="__span-22-6"><a id="__codelineno-22-6" name="__codelineno-22-6" href="#__codelineno-22-6"></a><span class="w">      </span><span class="nt">prometheus_url</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">http://prometheus-server.monitoring.svc.cluster.local:9090</span>
-</span><span id="__span-22-7"><a id="__codelineno-22-7" name="__codelineno-22-7" href="#__codelineno-22-7"></a><span class="w">      </span><span class="nt">additional_headers</span><span class="p">:</span>
-</span><span id="__span-22-8"><a id="__codelineno-22-8" name="__codelineno-22-8" href="#__codelineno-22-8"></a><span class="w">        </span><span class="nt">Authorization</span><span class="p">:</span><span class="w"> </span><span class="s">&quot;Basic</span><span class="nv"> </span><span class="s">&lt;base64_encoded_credentials&gt;&quot;</span>
-</span><span id="__span-22-9"><a id="__codelineno-22-9" name="__codelineno-22-9" href="#__codelineno-22-9"></a>
-</span><span id="__span-22-10"><a id="__codelineno-22-10" name="__codelineno-22-10" href="#__codelineno-22-10"></a><span class="w">      </span><span class="c1"># Discovery settings</span>
-</span><span id="__span-22-11"><a id="__codelineno-22-11" name="__codelineno-22-11" href="#__codelineno-22-11"></a><span class="w">      </span><span class="nt">discover_metrics_from_last_hours</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">1</span><span class="w">  </span><span class="c1"># Only return metrics with data in last N hours (default: 1)</span>
-</span><span id="__span-22-12"><a id="__codelineno-22-12" name="__codelineno-22-12" href="#__codelineno-22-12"></a>
-</span><span id="__span-22-13"><a id="__codelineno-22-13" name="__codelineno-22-13" href="#__codelineno-22-13"></a><span class="w">      </span><span class="c1"># Timeout configuration</span>
-</span><span id="__span-22-14"><a id="__codelineno-22-14" name="__codelineno-22-14" href="#__codelineno-22-14"></a><span class="w">      </span><span class="nt">query_timeout_seconds_default</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">20</span><span class="w">  </span><span class="c1"># Default timeout for PromQL queries (default: 20)</span>
-</span><span id="__span-22-15"><a id="__codelineno-22-15" name="__codelineno-22-15" href="#__codelineno-22-15"></a><span class="w">      </span><span class="nt">query_timeout_seconds_hard_max</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">180</span><span class="w">  </span><span class="c1"># Maximum allowed timeout for PromQL queries (default: 180)</span>
-</span><span id="__span-22-16"><a id="__codelineno-22-16" name="__codelineno-22-16" href="#__codelineno-22-16"></a><span class="w">      </span><span class="nt">metadata_timeout_seconds_default</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">20</span><span class="w">  </span><span class="c1"># Default timeout for metadata/discovery APIs (default: 20)</span>
-</span><span id="__span-22-17"><a id="__codelineno-22-17" name="__codelineno-22-17" href="#__codelineno-22-17"></a><span class="w">      </span><span class="nt">metadata_timeout_seconds_hard_max</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">60</span><span class="w">  </span><span class="c1"># Maximum allowed timeout for metadata APIs (default: 60)</span>
-</span><span id="__span-22-18"><a id="__codelineno-22-18" name="__codelineno-22-18" href="#__codelineno-22-18"></a>
-</span><span id="__span-22-19"><a id="__codelineno-22-19" name="__codelineno-22-19" href="#__codelineno-22-19"></a><span class="w">      </span><span class="c1"># Other options</span>
-</span><span id="__span-22-20"><a id="__codelineno-22-20" name="__codelineno-22-20" href="#__codelineno-22-20"></a><span class="w">      </span><span class="nt">rules_cache_duration_seconds</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">1800</span><span class="w">  </span><span class="c1"># Cache duration for Prometheus rules (default: 30 minutes)</span>
-</span><span id="__span-22-21"><a id="__codelineno-22-21" name="__codelineno-22-21" href="#__codelineno-22-21"></a><span class="w">      </span><span class="nt">verify_ssl</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">true</span><span class="w">  </span><span class="c1"># Enable SSL verification (default: true)</span>
-</span><span id="__span-22-22"><a id="__codelineno-22-22" name="__codelineno-22-22" href="#__codelineno-22-22"></a><span class="w">      </span><span class="nt">tool_calls_return_data</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">true</span><span class="w">  </span><span class="c1"># If false, disables returning Prometheus data (default: true)</span>
-</span><span id="__span-22-23"><a id="__codelineno-22-23" name="__codelineno-22-23" href="#__codelineno-22-23"></a><span class="w">      </span><span class="nt">additional_labels</span><span class="p">:</span><span class="w">  </span><span class="c1"># Additional labels to add to all queries</span>
-</span><span id="__span-22-24"><a id="__codelineno-22-24" name="__codelineno-22-24" href="#__codelineno-22-24"></a><span class="w">        </span><span class="nt">cluster</span><span class="p">:</span><span class="w"> </span><span class="s">&quot;production&quot;</span>
+<div class="language-text highlight"><pre><span></span><code><span id="__span-2-1"><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a>List the streams in namespace &quot;payments&quot; between 10:00 and 11:00 UTC
 </span></code></pre></div>
-<p><strong>Configuration options:</strong></p>
-<p><code>subtype</code> is set at the toolset level (sibling of <code>enabled:</code> and <code>config:</code>); the rest of the fields below go inside <code>config:</code>.</p>
-<table>
-<thead>
-<tr>
-<th>Option</th>
-<th>Default</th>
-<th>Description</th>
-</tr>
-</thead>
-<tbody>
-<tr>
-<td><code>subtype</code></td>
-<td>(inferred)</td>
-<td>Top-level field — picks the Prometheus variant. One of <code>prometheus</code>, <code>victoriametrics</code>, <code>coralogix</code>, <code>grafana-cloud</code>, <code>aws-managed-prometheus</code>, <code>azure-managed-prometheus</code>, <code>google-managed-prometheus</code>. Setting it is recommended; if omitted, HolmesGPT infers the variant from configuration fields (<code>aws_region</code> → AMP, Azure-specific fields → Azure) for backwards compatibility.</td>
-</tr>
-<tr>
-<td><code>prometheus_url</code></td>
-<td>(required for variants other than <code>prometheus</code>)</td>
-<td>Prometheus server URL (include protocol and port). For <code>subtype: prometheus</code> this is optional — if omitted, HolmesGPT auto-detects via the <code>PROMETHEUS_URL</code> env var or in-cluster service discovery.</td>
-</tr>
-<tr>
-<td><code>additional_headers</code></td>
-<td>per <code>subtype</code></td>
-<td>Authentication headers (e.g., <code>Authorization: Bearer token</code>). Variant defaults: empty for most; <code>coralogix</code> defaults to <code>{token: "{{ env.CORALOGIX_API_KEY }}"}</code>; <code>grafana-cloud</code> defaults to <code>{Authorization: "Basic {{ env.GRAFANA_CLOUD_AUTH }}"}</code>.</td>
-</tr>
-<tr>
-<td><code>discover_metrics_from_last_hours</code></td>
-<td><code>1</code> (<code>72</code> for <code>coralogix</code>)</td>
-<td>Only discover metrics with data in last N hours</td>
-</tr>
-<tr>
-<td><code>query_timeout_seconds_default</code></td>
-<td><code>20</code></td>
-<td>Default PromQL query timeout</td>
-</tr>
-<tr>
-<td><code>query_timeout_seconds_hard_max</code></td>
-<td><code>180</code></td>
-<td>Maximum query timeout</td>
-</tr>
-<tr>
-<td><code>metadata_timeout_seconds_default</code></td>
-<td><code>20</code></td>
-<td>Default metadata/discovery API timeout</td>
-</tr>
-<tr>
-<td><code>metadata_timeout_seconds_hard_max</code></td>
-<td><code>60</code></td>
-<td>Maximum metadata API timeout</td>
-</tr>
-<tr>
-<td><code>rules_cache_duration_seconds</code></td>
-<td><code>1800</code></td>
-<td>Cache duration for rules (set to <code>null</code> to disable)</td>
-</tr>
-<tr>
-<td><code>verify_ssl</code></td>
-<td><code>true</code> (<code>false</code> for <code>aws-managed-prometheus</code>)</td>
-<td>Enable SSL certificate verification</td>
-</tr>
-<tr>
-<td><code>tool_calls_return_data</code></td>
-<td><code>true</code></td>
-<td>Return Prometheus data (disable if hitting token limits)</td>
-</tr>
-<tr>
-<td><code>additional_labels</code></td>
-<td><code>{}</code></td>
-<td>Labels to add to all queries</td>
-</tr>
-</tbody>
-</table>
-<h3 id="variant-specific-fields">Variant-specific fields<a class="headerlink" href="#variant-specific-fields" title="Permanent link">&para;</a></h3>
-<p>These fields are only valid for specific <code>subtype</code> values:</p>
-<table>
-<thead>
-<tr>
-<th>Field</th>
-<th><code>subtype</code></th>
-<th>Required</th>
-<th>Description</th>
-</tr>
-</thead>
-<tbody>
-<tr>
-<td><code>aws_region</code></td>
-<td><code>aws-managed-prometheus</code></td>
-<td>Yes</td>
-<td>AWS region (e.g. <code>us-east-1</code>)</td>
-</tr>
-<tr>
-<td><code>aws_access_key</code> / <code>aws_secret_access_key</code></td>
-<td><code>aws-managed-prometheus</code></td>
-<td>No</td>
-<td>Falls back to default AWS credential chain when omitted</td>
-</tr>
-<tr>
-<td><code>aws_service_name</code></td>
-<td><code>aws-managed-prometheus</code></td>
-<td>No (default <code>aps</code>)</td>
-<td>AWS service name for SigV4</td>
-</tr>
-<tr>
-<td><code>assume_role_arn</code></td>
-<td><code>aws-managed-prometheus</code></td>
-<td>No</td>
-<td>IAM role to assume for cross-account access</td>
-</tr>
-<tr>
-<td><code>refresh_interval_seconds</code></td>
-<td><code>aws-managed-prometheus</code>, <code>azure-managed-prometheus</code></td>
-<td>No (default <code>900</code>)</td>
-<td>How often to refresh credentials — AWS STS creds for AMP, Azure AD bearer token for Azure</td>
-</tr>
-<tr>
-<td><code>azure_client_id</code> / <code>azure_client_secret</code> / <code>azure_tenant_id</code></td>
-<td><code>azure-managed-prometheus</code></td>
-<td>UI-required</td>
-<td>Azure AD service principal. CLI/Helm: omit to use managed identity (<code>azure_use_managed_id: true</code>) or <code>AZURE_*</code> env vars.</td>
-</tr>
-<tr>
-<td><code>azure_use_managed_id</code></td>
-<td><code>azure-managed-prometheus</code></td>
-<td>No (default <code>false</code>)</td>
-<td>Set <code>true</code> to use Azure managed identity instead of a service principal</td>
-</tr>
-<tr>
-<td><code>azure_resource</code> / <code>azure_metadata_endpoint</code> / <code>azure_token_endpoint</code></td>
-<td><code>azure-managed-prometheus</code></td>
-<td>No</td>
-<td>Azure AD endpoints — sensible defaults are applied automatically</td>
-</tr>
-</tbody>
-</table>
-<h2 id="capabilities">Capabilities<a class="headerlink" href="#capabilities" title="Permanent link">&para;</a></h2>
-<table>
-<thead>
-<tr>
-<th>Tool Name</th>
-<th>Description</th>
-</tr>
-</thead>
-<tbody>
-<tr>
-<td>list_prometheus_rules</td>
-<td>List all defined Prometheus rules with descriptions and annotations</td>
-</tr>
-<tr>
-<td>get_metric_names</td>
-<td>Get list of metric names (fastest discovery method) - requires match filter</td>
-</tr>
-<tr>
-<td>get_label_values</td>
-<td>Get all values for a specific label (e.g., pod names, namespaces)</td>
-</tr>
-<tr>
-<td>get_all_labels</td>
-<td>Get list of all label names available in Prometheus</td>
-</tr>
-<tr>
-<td>get_series</td>
-<td>Get time series matching a selector (returns full label sets)</td>
-</tr>
-<tr>
-<td>get_metric_metadata</td>
-<td>Get metadata (type, description, unit) for metrics</td>
-</tr>
-<tr>
-<td>execute_prometheus_instant_query</td>
-<td>Execute an instant PromQL query (single point in time)</td>
-</tr>
-<tr>
-<td>execute_prometheus_range_query</td>
-<td>Execute a range PromQL query for time series data with graph generation</td>
-</tr>
-</tbody>
-</table>
 
 
 
@@ -6139,7 +5604,7 @@
       <nav class="md-footer__inner md-grid" aria-label="Footer" >
         
           
-          <a href="../database-postgresql/" class="md-footer__link md-footer__link--prev" aria-label="Previous: PostgreSQL">
+          <a href="../database-sqlite/" class="md-footer__link md-footer__link--prev" aria-label="Previous: SQLite">
             <div class="md-footer__button md-icon">
               
               <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11z"/></svg>
@@ -6149,20 +5614,20 @@
                 Previous
               </span>
               <div class="md-ellipsis">
-                PostgreSQL
+                SQLite
               </div>
             </div>
           </a>
         
         
           
-          <a href="../prefect-mcp/" class="md-footer__link md-footer__link--next" aria-label="Next: Prefect (MCP)">
+          <a href="../victoriametrics/" class="md-footer__link md-footer__link--next" aria-label="Next: VictoriaMetrics">
             <div class="md-footer__title">
               <span class="md-footer__direction">
                 Next
               </span>
               <div class="md-ellipsis">
-                Prefect (MCP)
+                VictoriaMetrics
               </div>
             </div>
             <div class="md-footer__button md-icon">
