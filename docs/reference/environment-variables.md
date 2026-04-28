@@ -15,9 +15,9 @@ This page documents all environment variables that can be used to configure Holm
 - `GEMINI_API_KEY` - API key for Google Gemini models
 - `GOOGLE_API_KEY` - Alternative API key for Google services
 
-### Azure OpenAI
-- `AZURE_API_KEY` - API key for Azure OpenAI service
-- `AZURE_API_BASE` - Base URL for Azure OpenAI endpoint
+### Azure AI Foundry
+- `AZURE_API_KEY` - API key for Azure AI Foundry service
+- `AZURE_API_BASE` - Base URL for Azure AI Foundry endpoint
 - `AZURE_API_VERSION` - API version to use (e.g., "2024-02-15-preview")
 
 ### AWS Bedrock
@@ -159,6 +159,21 @@ Controls the logging verbosity of HolmesGPT.
 **Example:**
 ```bash
 export HOLMES_LOG_LEVEL="DEBUG"
+```
+
+### TRACE_TOKEN_USAGE
+When enabled, logs aggregated token usage (input, output, cached, total, cost) once per completed `/api/chat` request at `INFO` level. Useful for debugging token consumption and cost issues.
+
+**Default:** `false`
+
+**Example:**
+```bash
+export TRACE_TOKEN_USAGE="true"
+```
+
+**Sample output:**
+```
+Completed /api/chat request: ask=... (stream) | model=gpt-4o, input=45290, output=603, cached=0, total=45893, cost=$0.0656
 ```
 
 ### HOLMES_CACHE_DIR
