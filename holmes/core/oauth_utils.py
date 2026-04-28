@@ -280,6 +280,7 @@ def cli_oauth_flow(oauth: OAuthEndpoints, server_name: str) -> Optional[Dict[str
             redirect_uri=redirect_uri,
             client_id=oauth.client_id,
             code_verifier=code_verifier,
+            client_secret=oauth.client_secret,
         )
     except OAuthTokenExchangeError as e:
         logger.warning("CLI OAuth %s: token exchange failed: %s", server_name, e)
