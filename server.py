@@ -135,15 +135,25 @@ def sync_before_server_start():
             "Skipping holmes status and toolsets synchronization - not connected to Robusta platform"
         )
         return
+
+    realtime_enabled = True
+    if ENABLE_CONVERSATION_WORKER:
+        realtime_enabled = dal.is_realtime_enabled()
+        if not realtime_enabled:
+            logging.warning(
+                "Supabase Realtime is not enabled for this project (realtime.messages table not found). "
+                "Conversation worker will not be started, and realtime conversation flags will be disabled."
+            )
+
     try:
-        update_holmes_status_in_db(dal, config)
+        update_holmes_status_in_db(dal, config, realtime_enabled=realtime_enabled)
     except Exception:
         logging.error("Failed to update holmes status", exc_info=True)
     try:
         holmes_sync_toolsets_status(dal, config)
     except Exception:
         logging.error("Failed to synchronise holmes toolsets", exc_info=True)
-    if conversation_worker is not None:
+    if conversation_worker is not None and realtime_enabled:
         try:
             conversation_worker.start()
         except Exception:

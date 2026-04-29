@@ -63,7 +63,9 @@ class HolmesMetadata:
     namespace: Optional[str] = None
 
 
-def update_holmes_status_in_db(dal: SupabaseDal, config: Config):
+def update_holmes_status_in_db(
+    dal: SupabaseDal, config: Config, realtime_enabled: bool = True
+):
     logging.info("Updating status of holmes")
 
     if not config.cluster_name:
@@ -74,8 +76,10 @@ def update_holmes_status_in_db(dal: SupabaseDal, config: Config):
 
     metadata = HolmesMetadata(
         is_robusta_ai_enabled=config.should_try_robusta_ai,
-        supports_realtime_conversations=bool(ENABLE_CONVERSATION_WORKER),
-        requires_realtime_broadcast=bool(CONVERSATION_WORKER_USE_REALTIME_BROADCAST),
+        supports_realtime_conversations=bool(ENABLE_CONVERSATION_WORKER)
+        and realtime_enabled,
+        requires_realtime_broadcast=bool(CONVERSATION_WORKER_USE_REALTIME_BROADCAST)
+        and realtime_enabled,
         namespace=_detect_runner_namespace(),
     )
 

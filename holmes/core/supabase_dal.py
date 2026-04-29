@@ -756,6 +756,25 @@ class SupabaseDal:
 
         return self.account_id, session_token
 
+    def is_realtime_enabled(self) -> bool:
+        """Check whether Supabase Realtime is enabled for this project.
+
+        Calls the ``is_realtime_enabled`` Postgres RPC, which returns true when
+        the ``realtime.messages`` table exists. Returns False when the store is
+        disabled or when the RPC call fails.
+        """
+        if not self.enabled:
+            return False
+        try:
+            res = self.client.rpc("is_realtime_enabled", {}).execute()
+            return bool(res.data)
+        except Exception:
+            logging.exception(
+                "Supabase error while checking is_realtime_enabled",
+                exc_info=True,
+            )
+            return False
+
     def upsert_holmes_status(self, holmes_status_data: dict) -> None:
         if not self.enabled:
             logging.info(
