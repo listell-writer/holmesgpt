@@ -65,7 +65,7 @@ class HolmesMetadata:
 
 def update_holmes_status_in_db(
     dal: SupabaseDal, config: Config, realtime_enabled: bool = True
-):
+) -> None:
     logging.info("Updating status of holmes")
 
     if not config.cluster_name:
