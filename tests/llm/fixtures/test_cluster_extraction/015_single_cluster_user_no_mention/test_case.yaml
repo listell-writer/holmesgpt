@@ -1,0 +1,18 @@
+description: |
+  Reported failure: only one cluster is connected and the user asks a generic
+  question. With the current production prompt the LLM has no way to know
+  the cluster name (cluster list is not in the prompt) so RequestClusterSelection
+  is the technically-correct answer; downstream code defaults to the single
+  connected cluster anyway. With the with_cluster_list variant the LLM does
+  see the single cluster and should answer with it directly, saving the
+  fallback round-trip.
+available_clusters:
+  - prod
+conversation_history:
+  - role: user
+    content: "Any pods crashing?"
+expected_cluster: null
+expected_cluster_with_list: prod
+tags:
+  - reported-failure
+  - medium

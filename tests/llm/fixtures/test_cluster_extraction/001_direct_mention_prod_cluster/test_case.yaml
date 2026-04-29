@@ -1,0 +1,10 @@
+description: User explicitly names the cluster they want to investigate.
+available_clusters:
+  - prod
+  - staging
+conversation_history:
+  - role: user
+    content: "What's wrong with the prod cluster? I'm seeing failed pods."
+expected_cluster: prod
+tags:
+  - easy

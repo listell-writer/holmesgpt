@@ -1,0 +1,13 @@
+description: |
+  User refers to a region in plain English ("europe") while the cluster
+  name encodes that region (eu-west-1).
+available_clusters:
+  - eu-west-1
+  - us-east-1
+  - asia-pacific
+conversation_history:
+  - role: user
+    content: "I'm seeing high latency in europe, can you check?"
+expected_cluster: eu-west-1
+tags:
+  - hard

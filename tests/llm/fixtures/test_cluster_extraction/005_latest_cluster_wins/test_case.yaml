@@ -1,0 +1,17 @@
+description: |
+  Multi-turn conversation where the user changes target cluster mid-thread.
+  The prompt instructs the model to pick the LATEST cluster referenced.
+available_clusters:
+  - prod
+  - staging
+  - dev
+conversation_history:
+  - role: user
+    content: "Any issues with prod?"
+  - role: assistant
+    content: "Looking at prod cluster... I see one CrashLoopBackOff in default namespace."
+  - role: user
+    content: "Actually, can you check staging instead?"
+expected_cluster: staging
+tags:
+  - medium

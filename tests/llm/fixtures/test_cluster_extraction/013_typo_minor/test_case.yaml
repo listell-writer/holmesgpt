@@ -1,0 +1,13 @@
+description: |
+  User typos the cluster name. The model should still resolve it; downstream
+  case-insensitive lookup handles the actual mapping but only if the model
+  emits the canonical name.
+available_clusters:
+  - production
+  - staging
+conversation_history:
+  - role: user
+    content: "can you check prdocution nodes for me"
+expected_cluster: production
+tags:
+  - hard

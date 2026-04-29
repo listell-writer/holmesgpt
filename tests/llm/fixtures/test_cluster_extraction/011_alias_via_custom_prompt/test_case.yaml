@@ -1,0 +1,17 @@
+description: |
+  Per-account custom_extraction_prompt provides aliases mapping geographic
+  shorthand to actual cluster names. The LLM should honor the alias.
+available_clusters:
+  - tokyo-prod-1
+  - frankfurt-prod-1
+custom_extraction_prompt: |
+
+  Note for cluster resolution: users in this account refer to 'asia' as
+  tokyo-prod-1 and 'europe' as frankfurt-prod-1. Always map those words
+  to the corresponding cluster name.
+conversation_history:
+  - role: user
+    content: "Asia cluster is slow today, can you check?"
+expected_cluster: tokyo-prod-1
+tags:
+  - medium

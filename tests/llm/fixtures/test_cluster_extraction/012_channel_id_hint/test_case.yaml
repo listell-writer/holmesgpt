@@ -1,0 +1,18 @@
+description: |
+  The Slack channel id is mapped to a specific cluster via the per-account
+  custom_extraction_prompt. With no other hint in the message, the channel
+  should determine the cluster.
+available_clusters:
+  - prod-us
+  - prod-eu
+channel_id: "C1234567"
+custom_extraction_prompt: |
+
+  Channel mapping: messages in C1234567 are about prod-us. Messages in
+  C7654321 are about prod-eu.
+conversation_history:
+  - role: user
+    content: "Anything broken right now?"
+expected_cluster: prod-us
+tags:
+  - hard

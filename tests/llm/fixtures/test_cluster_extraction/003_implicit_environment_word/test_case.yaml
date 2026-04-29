@@ -1,0 +1,12 @@
+description: |
+  User refers to an environment by its full name ("staging environment")
+  while the connected cluster uses an abbreviation (stg-eu).
+available_clusters:
+  - prod-eu
+  - stg-eu
+conversation_history:
+  - role: user
+    content: "The staging environment is throwing errors since this morning."
+expected_cluster: stg-eu
+tags:
+  - hard

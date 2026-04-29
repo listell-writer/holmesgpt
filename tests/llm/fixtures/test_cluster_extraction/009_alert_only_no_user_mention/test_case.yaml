@@ -1,0 +1,16 @@
+description: |
+  Only an alert payload is present and it does not name a cluster. The user
+  has not yet typed anything specific. The model should not invent a cluster.
+available_clusters:
+  - prod
+  - staging
+conversation_history:
+  - role: user
+    content: |
+      PrometheusAlert: HighCPUUsage
+      labels:
+        node: ip-10-0-1-42
+        severity: warning
+expected_cluster: null
+tags:
+  - hard

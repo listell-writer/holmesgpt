@@ -1,0 +1,12 @@
+description: |
+  User shouts the cluster name in upper case. Production code does case-
+  insensitive matching against the cluster list afterwards, but the LLM
+  should still produce a recognizable cluster token.
+available_clusters:
+  - prod
+conversation_history:
+  - role: user
+    content: "What's happening on PROD CLUSTER right now?"
+expected_cluster: prod
+tags:
+  - easy

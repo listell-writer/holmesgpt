@@ -1,0 +1,14 @@
+description: |
+  Reported failure: user has a cluster literally named "production" and asks
+  about "production nodes". The current prompt does not include the cluster
+  list so the LLM has historically answered RequestClusterSelection.
+available_clusters:
+  - production
+  - staging
+conversation_history:
+  - role: user
+    content: "Show me the production nodes that are unhealthy."
+expected_cluster: production
+tags:
+  - hard
+  - reported-failure

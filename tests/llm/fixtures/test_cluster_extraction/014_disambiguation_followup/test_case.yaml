@@ -1,0 +1,17 @@
+description: |
+  After Holmes asked which cluster the user means, the user answers
+  positionally ("the second one"). The model needs to resolve the reference
+  using prior assistant turns.
+available_clusters:
+  - prod
+  - staging
+conversation_history:
+  - role: user
+    content: "anything broken?"
+  - role: assistant
+    content: "Which cluster would you like me to check - prod or staging?"
+  - role: user
+    content: "the second one"
+expected_cluster: staging
+tags:
+  - hard

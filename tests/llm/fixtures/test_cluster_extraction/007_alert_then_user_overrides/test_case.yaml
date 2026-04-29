@@ -1,0 +1,16 @@
+description: |
+  An alert mentions one cluster, then the user explicitly redirects to
+  another. The latest user-stated cluster should win.
+available_clusters:
+  - prod
+  - staging
+conversation_history:
+  - role: user
+    content: "PrometheusAlert: KubePodCrashLooping in cluster=staging namespace=default"
+  - role: assistant
+    content: "I see the alert from staging. Want me to investigate the pod?"
+  - role: user
+    content: "Forget the alert - check prod for me"
+expected_cluster: prod
+tags:
+  - medium

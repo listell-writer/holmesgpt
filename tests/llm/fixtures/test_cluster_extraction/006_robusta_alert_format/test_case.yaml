@@ -1,0 +1,17 @@
+description: |
+  An alert message in Robusta notification format (`*Source:* `cluster-x``).
+  Production code resolves this with regex before the LLM is called, but the
+  LLM should also handle it correctly when invoked.
+available_clusters:
+  - prod-cluster
+  - staging-cluster
+conversation_history:
+  - role: user
+    content: |
+      *Source:* `prod-cluster`
+      Pod `api-7b9c-xyz` is in CrashLoopBackOff in namespace `default`.
+  - role: user
+    content: "What's going on?"
+expected_cluster: prod-cluster
+tags:
+  - easy

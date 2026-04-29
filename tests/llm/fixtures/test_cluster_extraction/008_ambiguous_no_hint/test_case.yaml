@@ -1,0 +1,13 @@
+description: |
+  Multiple clusters connected, user gives no hint at all. The correct
+  behavior is to ask for clarification rather than guess.
+available_clusters:
+  - prod
+  - staging
+  - dev
+conversation_history:
+  - role: user
+    content: "Is the cluster having issues?"
+expected_cluster: null
+tags:
+  - easy
