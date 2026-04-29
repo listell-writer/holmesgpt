@@ -491,6 +491,7 @@ class ToolCallingLLM:
         request_context: Optional[Dict[str, Any]] = None,
         cancel_event: Optional[threading.Event] = None,
         approval_callback: Optional[ApprovalCallback] = None,
+        metadata: Optional[Dict[str, Any]] = None,
     ) -> LLMResult:
         """Synchronous wrapper around call_stream(). Drains the generator
         and reconstructs an LLMResult."""
@@ -511,6 +512,7 @@ class ToolCallingLLM:
                 tool_number_offset=tool_number_offset,
                 request_context=request_context,
                 iteration_offset=total_num_llm_calls,
+                metadata=metadata,
             )
 
             tool_decisions = None
@@ -957,6 +959,7 @@ class ToolCallingLLM:
         cancel_event: Optional[threading.Event] = None,
         tool_number_offset: int = 0,
         iteration_offset: int = 0,
+        completion_metadata: Optional[Dict[str, Any]] = None,
     ):
         """
         This function DOES NOT call llm.completion(stream=true).
@@ -1075,6 +1078,7 @@ class ToolCallingLLM:
                     temperature=TEMPERATURE,
                     stream=False,
                     drop_params=True,
+                    metadata=completion_metadata,
                 )
 
                 # Accumulate cost information for this iteration

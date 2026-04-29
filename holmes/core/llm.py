@@ -533,6 +533,7 @@ class DefaultLLM(LLM):
         temperature: Optional[float] = None,
         drop_params: Optional[bool] = None,
         stream: Optional[bool] = None,
+        metadata: Optional[Dict[str, Any]] = None,
     ) -> Union[ModelResponse, CustomStreamWrapper]:
         tools_args = {}
         allowed_openai_params = None
@@ -602,6 +603,7 @@ class DefaultLLM(LLM):
             drop_params=drop_params,
             allowed_openai_params=allowed_openai_params,
             stream=stream,
+            extra_body={"metadata": metadata} if metadata else None,
             timeout=LLM_REQUEST_TIMEOUT,
             **azure_ad_kwargs,
             **tools_args,

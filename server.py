@@ -512,6 +512,7 @@ def chat(chat_request: ChatRequest, http_request: Request):
                     frontend_tool_results=chat_request.frontend_tool_results,
                     response_format=chat_request.response_format,
                     request_context=request_context,
+                    completion_metadata=chat_request.metadata,
                     trace_span=trace_span,
                 ),
                 [f.model_dump() for f in follow_up_actions],
@@ -539,6 +540,7 @@ def chat(chat_request: ChatRequest, http_request: Request):
                     trace_span=trace_span,
                     response_format=chat_request.response_format,
                     request_context=request_context,
+                    metadata=chat_request.metadata,
                 )
 
                 # Record investigation metrics

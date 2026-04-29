@@ -253,6 +253,10 @@ class ChatRequest(ChatRequestBaseModel):
         default=None,
         description="Override prompt components (e.g., {'todowrite_instructions': false}). Env var ENABLED_PROMPTS takes precedence.",
     )
+    metadata: Optional[Dict[str, Any]] = Field(
+        default=None,
+        description="Optional metadata dict forwarded to LiteLLM completion calls for logging and metrics.",
+    )
 
 
 class FollowUpAction(BaseModel):
