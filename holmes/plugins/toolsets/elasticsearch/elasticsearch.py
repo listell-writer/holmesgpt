@@ -1,6 +1,6 @@
 import json
 from abc import ABC
-from typing import Any, ClassVar, Dict, Optional, Tuple, Type
+from typing import Any, ClassVar, Dict, List, Optional, Tuple, Type
 
 import requests  # type: ignore[import-untyped]
 from pydantic import ConfigDict, Field, model_validator
@@ -417,6 +417,87 @@ class ElasticsearchCat(BaseElasticsearchTool):
         )
 
 
+# Per-field size cap for _source values returned by elasticsearch_search. Documents
+# bigger than the global tool result limit (typically a few MB once tokenized) cause
+# the entire response to be dropped, so the LLM loses every other field as well.
+# Truncating individual oversized fields preserves the rest of the document and tells
+# the LLM how to drill into the omitted field via source filtering.
+ES_MAX_FIELD_BYTES = 64 * 1024  # 64 KB per field
+
+
+def _truncate_oversized_fields(
+    value: Any,
+    max_bytes: int,
+    path: str = "",
+    truncated: Optional[List[Dict[str, Any]]] = None,
+) -> Any:
+    """Recursively replace oversized string/bytes leaves with a notice.
+
+    The notice keeps the field name and reports the original size so the LLM can
+    decide whether to re-fetch it via `source.includes` (or skip it via
+    `source.excludes`). Non-leaf containers are walked so a small-but-deeply-nested
+    big string is still caught.
+    """
+    if isinstance(value, dict):
+        return {
+            k: _truncate_oversized_fields(
+                v, max_bytes, f"{path}.{k}" if path else k, truncated
+            )
+            for k, v in value.items()
+        }
+    if isinstance(value, list):
+        return [
+            _truncate_oversized_fields(
+                item, max_bytes, f"{path}[{i}]", truncated
+            )
+            for i, item in enumerate(value)
+        ]
+    if isinstance(value, str) and len(value.encode("utf-8", errors="ignore")) > max_bytes:
+        original_size = len(value.encode("utf-8", errors="ignore"))
+        if truncated is not None:
+            truncated.append({"path": path, "size_bytes": original_size})
+        return (
+            f"[TRUNCATED: field '{path}' was {original_size} bytes "
+            f"(> {max_bytes} byte cap). To retrieve this field, re-run the search "
+            f"with size=1, a query that targets this document, and "
+            f'_source={{"includes": ["{path}"]}} — or exclude it entirely via '
+            f'_source={{"excludes": ["{path}"]}}.]'
+        )
+    return value
+
+
+def _truncate_search_response(
+    response: Dict[str, Any], max_bytes: int = ES_MAX_FIELD_BYTES
+) -> Tuple[Dict[str, Any], List[Dict[str, Any]]]:
+    """Truncate oversized string fields inside each hit's _source.
+
+    Returns the (possibly mutated) response and a list describing every field
+    that was truncated, suitable for surfacing in the tool result.
+    """
+    truncated: List[Dict[str, Any]] = []
+    hits_container = response.get("hits") if isinstance(response, dict) else None
+    if not isinstance(hits_container, dict):
+        return response, truncated
+
+    inner_hits = hits_container.get("hits")
+    if not isinstance(inner_hits, list):
+        return response, truncated
+
+    for hit in inner_hits:
+        if not isinstance(hit, dict):
+            continue
+        hit_id = hit.get("_id", "?")
+        if "_source" in hit:
+            hit["_source"] = _truncate_oversized_fields(
+                hit["_source"], max_bytes, path=f"hits[{hit_id}]._source", truncated=truncated
+            )
+        if "fields" in hit:
+            hit["fields"] = _truncate_oversized_fields(
+                hit["fields"], max_bytes, path=f"hits[{hit_id}].fields", truncated=truncated
+            )
+    return response, truncated
+
+
 class ElasticsearchSearch(BaseElasticsearchTool):
     """Execute Elasticsearch Query DSL searches."""
 
@@ -529,7 +610,20 @@ class ElasticsearchSearch(BaseElasticsearchTool):
         if params.get("profile"):
             body["profile"] = True
 
-        return self._make_request("POST", path, params, body=body)
+        result = self._make_request("POST", path, params, body=body)
+
+        # Truncate oversized fields per-document so a single huge field cannot
+        # blow up the context window and force the entire response to be dropped.
+        if (
+            result.status == StructuredToolResultStatus.SUCCESS
+            and isinstance(result.data, dict)
+        ):
+            response, truncated = _truncate_search_response(result.data)
+            if truncated:
+                response.setdefault("_holmes", {})["truncated_fields"] = truncated
+            result.data = response
+
+        return result
 
     def get_parameterized_one_liner(self, params: Dict) -> str:
         index = params.get("index", "")
