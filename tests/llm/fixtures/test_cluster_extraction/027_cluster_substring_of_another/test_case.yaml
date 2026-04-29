@@ -1,0 +1,14 @@
+description: |
+  Exact match wins over substring. The connected list has "prod" plus
+  two clusters that contain "prod" as a substring. The user types
+  "prod" - the answer is the exact match, not a substring sibling.
+available_clusters:
+  - prod
+  - prod-extra
+  - prod-extra-2
+conversation_history:
+  - role: user
+    content: "Check prod for failing pods."
+expected_cluster: prod
+tags:
+  - hard

@@ -1,0 +1,23 @@
+description: |
+  Anti-bias case. The conversation references a cluster (`prod-us-old`)
+  that is no longer connected; only `prod-us-new` and `staging` are
+  available. The user says "check that cluster again" - meaning the
+  old one. The model must not collapse `prod-us-old` into `prod-us-new`
+  just because the names are similar.
+available_clusters:
+  - prod-us-new
+  - staging
+forbidden_clusters:
+  - prod-us-new
+  - staging
+conversation_history:
+  - role: user
+    content: "Last week we had issues with prod-us-old."
+  - role: assistant
+    content: "I see - that cluster has historically had networking issues."
+  - role: user
+    content: "Check that cluster again now please."
+expected_cluster: null
+tags:
+  - anti-bias
+  - hard

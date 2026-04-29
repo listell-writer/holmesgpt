@@ -1,0 +1,16 @@
+description: |
+  Alert delivered as prose with the cluster name embedded inside a
+  sentence rather than in a structured field. Tests reading-comprehension
+  rather than label parsing.
+available_clusters:
+  - prod-eu
+  - prod-us
+  - staging
+conversation_history:
+  - role: user
+    content: |
+      We just got an alert: "the api-server pod in our prod-eu region is
+      OOMKilling repeatedly across all replicas. Please investigate."
+expected_cluster: prod-eu
+tags:
+  - medium

@@ -1,0 +1,19 @@
+description: |
+  Pronoun resolution. The user mentions a cluster early in the
+  conversation, then later refers back to it with a vague pronoun
+  ("that one", "the same one"). The model must resolve the pronoun
+  to the cluster mentioned earlier rather than asking again.
+available_clusters:
+  - prod
+  - staging
+  - dev
+conversation_history:
+  - role: user
+    content: "Yesterday we had issues on prod. Can you look at it again now?"
+  - role: assistant
+    content: "Sure - I'll check prod cluster. Anything specific to look at?"
+  - role: user
+    content: "Check disk usage on that cluster."
+expected_cluster: prod
+tags:
+  - medium

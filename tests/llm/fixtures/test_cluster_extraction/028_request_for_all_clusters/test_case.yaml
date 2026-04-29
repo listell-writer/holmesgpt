@@ -1,0 +1,20 @@
+description: |
+  The user asks about all clusters at once. The current schema only
+  supports a single cluster answer; the model must not silently pick
+  one. The right answer is RequestClusterSelection so the user can
+  scope the question.
+available_clusters:
+  - prod-us
+  - prod-eu
+  - prod-asia
+forbidden_clusters:
+  - prod-us
+  - prod-eu
+  - prod-asia
+conversation_history:
+  - role: user
+    content: "Check all our prod clusters for any failing pods."
+expected_cluster: null
+tags:
+  - anti-bias
+  - medium

@@ -184,9 +184,21 @@ def _get_models() -> List[str]:
 
 
 def _normalize_answer(text: str) -> str:
-    """Extract the first 'word' from the model answer, stripping common punctuation/quotes."""
+    """Extract the model's answer.
+
+    Models sometimes answer verbosely instead of one-word, especially when
+    the right answer is "RequestClusterSelection" - the model produces a
+    sentence like "The user mentioned X which is not in the list...".
+    Production code (relay) treats any unrecognized string as None and
+    falls back, so verbose refusals are effectively the same as
+    RequestClusterSelection. We mirror that here: if the magic token
+    appears anywhere, return it. Otherwise return the first cleaned
+    token so a one-word cluster-name answer scores correctly.
+    """
     if not text:
         return ""
+    if "requestclusterselection" in text.lower():
+        return "RequestClusterSelection"
     cleaned = text.strip().strip("`'\"")
     tokens = cleaned.split()
     first = tokens[0] if tokens else ""
@@ -214,6 +226,11 @@ def test_cluster_extraction(
 
     # Note: do not pass temperature - newer Claude models (Opus 4.7+) reject it.
     # max_tokens=64 alone keeps the answer short and structured.
+    #
+    # No `tools` argument is passed: this eval mirrors relay's
+    # extract_message_cluster, which is a pure prompt -> single-token-ish
+    # answer. The model is expected to return one cluster name (or
+    # "RequestClusterSelection") in plain text, not a tool call.
     response = litellm.completion(
         model=model,
         messages=[{"role": "user", "content": prompt}],

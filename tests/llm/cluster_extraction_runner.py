@@ -110,6 +110,10 @@ def _run_one(
         # Note: do not pass `temperature` - newer Claude models (Opus 4.7+) reject
         # it with a ValidationException. maxTokens alone is enough to force a
         # short, structured answer for this eval.
+        #
+        # No `toolConfig` is passed: this eval mirrors relay's
+        # extract_message_cluster, which is a pure prompt -> text-answer call.
+        # Tool calling is not in scope here.
         response = client.converse(
             modelId=_bedrock_model_id(model),
             messages=[{"role": "user", "content": [{"text": prompt}]}],

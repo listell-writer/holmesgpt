@@ -1,0 +1,32 @@
+description: |
+  Long conversation (8+ turns) where the cluster name appears only in
+  the very first turn. Later in the thread the user says "the same
+  cluster" / "look there again" with no cluster name. Tests that the
+  model can recover the cluster from far-back context, which is a
+  common Slack thread pattern.
+available_clusters:
+  - prod
+  - staging
+  - dev
+conversation_history:
+  - role: user
+    content: "Earlier we discussed CPU issues on prod. Can you start there?"
+  - role: assistant
+    content: "Looking at prod cluster... CPU is around 70% on the api-server pods."
+  - role: user
+    content: "What about memory?"
+  - role: assistant
+    content: "Memory usage is around 60% on the same nodes."
+  - role: user
+    content: "Disk?"
+  - role: assistant
+    content: "Disk usage is at 40% on average."
+  - role: user
+    content: "Network?"
+  - role: assistant
+    content: "Network looks normal - no unusual error rates or latency."
+  - role: user
+    content: "Now look at error logs on the same cluster."
+expected_cluster: prod
+tags:
+  - hard

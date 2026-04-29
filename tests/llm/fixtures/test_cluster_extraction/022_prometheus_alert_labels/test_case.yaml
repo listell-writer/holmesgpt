@@ -1,0 +1,22 @@
+description: |
+  Native Prometheus / Alertmanager-style alert with the cluster encoded
+  in `labels:`. The Robusta regex format is what hits the deterministic
+  parser in production, but plain Alertmanager payloads come through too.
+available_clusters:
+  - prod-eu
+  - prod-us
+  - staging
+conversation_history:
+  - role: user
+    content: |
+      [FIRING:1] HighCPUUsage
+      Labels:
+        alertname = HighCPUUsage
+        cluster = prod-eu
+        severity = warning
+        instance = ip-10-0-1-42
+      Annotations:
+        summary = CPU above 90% for 5m
+expected_cluster: prod-eu
+tags:
+  - medium

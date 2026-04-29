@@ -1,0 +1,13 @@
+description: |
+  Intra-message redirection. The user mentions one cluster, immediately
+  cancels, and names a different cluster - all within a single turn.
+  Tests that the model picks the latest reference even within one message.
+available_clusters:
+  - prod
+  - staging
+conversation_history:
+  - role: user
+    content: "check prod actually never mind, look at staging instead"
+expected_cluster: staging
+tags:
+  - medium

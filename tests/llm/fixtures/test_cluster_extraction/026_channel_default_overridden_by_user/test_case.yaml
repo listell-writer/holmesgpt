@@ -1,0 +1,18 @@
+description: |
+  The Slack channel is mapped to one cluster by the per-account
+  custom_extraction_prompt, but the user explicitly mentions a different
+  cluster in this message. The user's explicit mention should win - the
+  channel mapping is only a fallback when the user gives no signal.
+available_clusters:
+  - prod-us
+  - prod-eu
+channel_id: "C9999999"
+custom_extraction_prompt: |
+
+  Channel mapping: messages in C9999999 are about prod-us by default.
+conversation_history:
+  - role: user
+    content: "Actually for this one, can you check prod-eu instead?"
+expected_cluster: prod-eu
+tags:
+  - medium
