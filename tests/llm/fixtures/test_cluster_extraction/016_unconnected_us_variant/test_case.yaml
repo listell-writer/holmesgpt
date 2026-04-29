@@ -1,0 +1,21 @@
+description: |
+  Anti-bias case. The user explicitly asks about `prod-us`, but only
+  `prod-eu`, `prod-asia`, and `staging-us` are connected. The model must
+  not silently round to "prod-eu" (a sibling production cluster) or
+  "staging-us" (a US cluster of a different env) - both would be wrong.
+  Correct behavior is RequestClusterSelection.
+available_clusters:
+  - prod-eu
+  - prod-asia
+  - staging-us
+forbidden_clusters:
+  - prod-eu
+  - prod-asia
+  - staging-us
+conversation_history:
+  - role: user
+    content: "Can you check what's happening on the prod-us cluster?"
+expected_cluster: null
+tags:
+  - anti-bias
+  - hard

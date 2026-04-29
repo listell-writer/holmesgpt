@@ -1,0 +1,21 @@
+description: |
+  Anti-bias case. User says "check the prod cluster" but the connected
+  list contains three "prod-" clusters (us-1, us-2, eu-1) and no plain
+  "prod". The user's word matches all three as substrings, but is not
+  unambiguous. The model should not arbitrarily pick one - it should
+  ask for clarification.
+available_clusters:
+  - prod-us-1
+  - prod-us-2
+  - prod-eu-1
+forbidden_clusters:
+  - prod-us-1
+  - prod-us-2
+  - prod-eu-1
+conversation_history:
+  - role: user
+    content: "Check the prod cluster for any failing pods."
+expected_cluster: null
+tags:
+  - anti-bias
+  - hard

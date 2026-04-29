@@ -45,6 +45,7 @@ from tests.llm.test_cluster_extraction import (  # noqa: E402
     _get_models,
     _load_cases,
     _normalize_answer,
+    evaluate_answer,
 )
 
 
@@ -144,10 +145,9 @@ def _run_one(
 
     if error is not None:
         passed = False
-    elif expected is None:
-        passed = answer == "RequestClusterSelection"
+        fail_reason = "error"
     else:
-        passed = answer.lower() == expected.lower()
+        passed, fail_reason = evaluate_answer(case, variant, answer)
 
     return {
         "case_id": case.id,
@@ -156,9 +156,11 @@ def _run_one(
         "model": model,
         "variant": variant,
         "expected": expected,
+        "forbidden_clusters": list(case.forbidden_clusters),
         "raw_answer": raw,
         "normalized_answer": answer,
         "passed": passed,
+        "fail_reason": fail_reason,
         "latency_ms": latency_ms,
         "prompt_tokens": prompt_tokens,
         "completion_tokens": completion_tokens,
@@ -227,20 +229,23 @@ def _write_markdown(
     lines.append("## Summary by model × variant")
     lines.append("")
     lines.append(
-        "| Model | Variant | Pass rate | Latency | Total cost | Errors |"
+        "| Model | Variant | Pass rate | Bias fails | Misses | Errors | Latency | Total cost |"
     )
-    lines.append("|---|---|---|---|---|---|")
+    lines.append("|---|---|---|---|---|---|---|---|")
     for model in models:
         for variant in PROMPT_VARIANTS:
             bucket = by_pair.get((model, variant), [])
             total = len(bucket)
             passed = sum(1 for r in bucket if r["passed"])
+            bias = sum(1 for r in bucket if r.get("fail_reason") == "bias")
+            misses = sum(1 for r in bucket if r.get("fail_reason") == "miss")
             errors = sum(1 for r in bucket if r["error"])
             latencies = [r["latency_ms"] for r in bucket if r["error"] is None]
             costs = [r["cost_usd"] for r in bucket]
             lines.append(
                 f"| `{model}` | `{variant}` | {_fmt_pct(passed, total)} | "
-                f"{_fmt_latency(latencies)} | {_fmt_cost(costs)} | {errors} |"
+                f"{bias} | {misses} | {errors} | "
+                f"{_fmt_latency(latencies)} | {_fmt_cost(costs)} |"
             )
     lines.append("")
 
@@ -274,6 +279,8 @@ def _write_markdown(
                     cell = "⚠️"
                 elif match["passed"]:
                     cell = "✅"
+                elif match.get("fail_reason") == "bias":
+                    cell = f"🚨 `{match['normalized_answer'] or '∅'}`"
                 else:
                     cell = f"❌ `{match['normalized_answer'] or '∅'}`"
                 row += f" {cell} |"
@@ -288,13 +295,22 @@ def _write_markdown(
     else:
         for r in failed:
             case = case_by_id[r["case_id"]]
+            tag = {
+                "bias": "🚨 BIAS",
+                "miss": "❌ MISS",
+                "error": "⚠️ ERROR",
+            }.get(r.get("fail_reason", ""), "❌")
             lines.append(
-                f"### `{r['case_id']}` — `{r['model']}` — `{r['variant']}`"
+                f"### {tag} `{r['case_id']}` — `{r['model']}` — `{r['variant']}`"
             )
             lines.append("")
             lines.append(f"**Description:** {case.description.strip()}")
             lines.append("")
             lines.append(f"- **Expected:** `{r['expected']}`")
+            if r.get("forbidden_clusters"):
+                lines.append(
+                    f"- **Forbidden:** `{', '.join(r['forbidden_clusters'])}`"
+                )
             lines.append(
                 f"- **Got (normalized):** `{r['normalized_answer'] or '∅'}`"
             )

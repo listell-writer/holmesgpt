@@ -109,6 +109,12 @@ class ClusterExtractionCase:
     conversation_history: List[dict]
     expected_cluster: Optional[str]  # None => RequestClusterSelection
     expected_cluster_with_list: Optional[str] = None  # override for with_cluster_list variant
+    # Cluster names that the model must NOT pick. Typically the connected
+    # clusters in cases where the user is asking about a different cluster
+    # that is not in the list - we want to detect "bias" failures where the
+    # model rounds to the closest connected cluster instead of admitting it
+    # doesn't know.
+    forbidden_clusters: List[str] = field(default_factory=list)
     channel_id: Optional[str] = None
     custom_extraction_prompt: str = ""
     tags: List[str] = field(default_factory=list)
@@ -117,6 +123,28 @@ class ClusterExtractionCase:
         if variant == "with_cluster_list" and self.expected_cluster_with_list is not None:
             return self.expected_cluster_with_list
         return self.expected_cluster
+
+
+def evaluate_answer(
+    case: "ClusterExtractionCase", variant: str, normalized_answer: str
+) -> tuple[bool, str]:
+    """Score a single answer against a case.
+
+    Returns (passed, fail_reason). fail_reason is one of:
+      - "" when passed
+      - "bias" - model picked a forbidden cluster (silently rounded)
+      - "miss" - model picked something else but the expected answer was different
+    """
+    forbidden_lower = {c.lower() for c in case.forbidden_clusters}
+    if normalized_answer.lower() in forbidden_lower:
+        return False, "bias"
+
+    expected = case.expected_for(variant)
+    if expected is None:
+        ok = normalized_answer == "RequestClusterSelection"
+    else:
+        ok = normalized_answer.lower() == expected.lower()
+    return ok, "" if ok else "miss"
 
 
 def _load_cases() -> List[ClusterExtractionCase]:
@@ -139,6 +167,7 @@ def _load_cases() -> List[ClusterExtractionCase]:
                 conversation_history=data.get("conversation_history", []),
                 expected_cluster=data.get("expected_cluster"),
                 expected_cluster_with_list=data.get("expected_cluster_with_list"),
+                forbidden_clusters=data.get("forbidden_clusters", []) or [],
                 channel_id=data.get("channel_id"),
                 custom_extraction_prompt=data.get("custom_extraction_prompt", "") or "",
                 tags=data.get("tags", []) or [],
@@ -198,14 +227,12 @@ def test_cluster_extraction(
     request.node.user_properties.append(("normalized_answer", answer))
     request.node.user_properties.append(("prompt_variant", variant))
 
+    passed, fail_reason = evaluate_answer(case, variant, answer)
+    request.node.user_properties.append(("fail_reason", fail_reason))
     expected = case.expected_for(variant)
-    if expected is None:
-        assert answer == "RequestClusterSelection", (
-            f"[{case.id}][{model}][{variant}] expected RequestClusterSelection, "
-            f"got {answer!r}\nFull output: {raw!r}"
-        )
-    else:
-        assert answer.lower() == expected.lower(), (
-            f"[{case.id}][{model}][{variant}] expected {expected!r}, "
-            f"got {answer!r}\nFull output: {raw!r}"
-        )
+    expected_str = "RequestClusterSelection" if expected is None else expected
+    assert passed, (
+        f"[{case.id}][{model}][{variant}] {fail_reason or 'fail'}: "
+        f"expected {expected_str!r}, got {answer!r} "
+        f"(forbidden: {case.forbidden_clusters})\nFull output: {raw!r}"
+    )

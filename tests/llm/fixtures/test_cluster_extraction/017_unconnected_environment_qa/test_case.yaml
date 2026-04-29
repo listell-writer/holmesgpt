@@ -1,0 +1,20 @@
+description: |
+  Anti-bias case. User asks about a "QA cluster" but only prod, staging,
+  and dev are connected. The model is most likely to be tempted to map
+  "QA" to "staging" or "dev" - either is wrong. Correct answer is
+  RequestClusterSelection.
+available_clusters:
+  - prod
+  - staging
+  - dev
+forbidden_clusters:
+  - prod
+  - staging
+  - dev
+conversation_history:
+  - role: user
+    content: "The QA cluster has been having issues since this morning."
+expected_cluster: null
+tags:
+  - anti-bias
+  - hard

@@ -1,0 +1,20 @@
+description: |
+  Anti-bias case. User asks about a specific version (`prod-v2`) that is
+  not connected, while `prod-v1` and `prod-v3` are. The model should not
+  silently pick a different version - that would investigate the wrong
+  cluster.
+available_clusters:
+  - prod-v1
+  - prod-v3
+  - staging
+forbidden_clusters:
+  - prod-v1
+  - prod-v3
+  - staging
+conversation_history:
+  - role: user
+    content: "Investigate the prod-v2 cluster - users are reporting 500s there."
+expected_cluster: null
+tags:
+  - anti-bias
+  - hard

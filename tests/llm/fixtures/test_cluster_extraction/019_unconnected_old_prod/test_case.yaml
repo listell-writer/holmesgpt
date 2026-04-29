@@ -1,0 +1,18 @@
+description: |
+  Anti-bias case. User asks about `old-prod` (perhaps an offboarded or
+  about-to-be-decommissioned cluster). Only `prod` and `staging` are
+  connected. The model must not collapse "old-prod" into "prod" - they
+  refer to different clusters in the user's mental model.
+available_clusters:
+  - prod
+  - staging
+forbidden_clusters:
+  - prod
+  - staging
+conversation_history:
+  - role: user
+    content: "old-prod is acting up again, can you take a look?"
+expected_cluster: null
+tags:
+  - anti-bias
+  - hard
