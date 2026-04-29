@@ -329,6 +329,6 @@ class ConfluenceHtmlFilterToolset(_ConfluenceVariantBase):
 # Re-export so the registration site in toolsets/__init__.py can import from
 # the package root (`from holmes.plugins.toolsets.confluence import …`).
 __all__ = [
-    "ConfluenceMarkdownToolset",
     "ConfluenceHtmlFilterToolset",
+    "ConfluenceMarkdownToolset",
 ]
