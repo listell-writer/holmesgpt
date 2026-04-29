@@ -35,6 +35,15 @@ class TestHelpers:
         assert not _looks_like_html("just numbers 1 2 3")
         assert not _looks_like_html("")
 
+    def test_looks_like_html_detects_confluence_macro_tags(self):
+        # Confluence storage XHTML is full of <ac:*>/<ri:*> macro tags.
+        # The detector must trigger on those even when a body has no plain
+        # HTML tags, otherwise variants leave macro-only bodies untouched.
+        assert _looks_like_html(
+            "<ac:structured-macro ac:name='code'></ac:structured-macro>"
+        )
+        assert _looks_like_html("<ri:user ri:account-id='abc'/>")
+
     def test_html_to_markdown_basic(self):
         md = _html_to_markdown("<p>Code: <strong>XYZ</strong></p>")
         assert "**XYZ**" in md
@@ -254,6 +263,27 @@ class TestHtmlFilterVariantPostProcessing:
             )
         assert "css_selector" not in seen_params
         assert seen_params["url"] == "https://example.atlassian.net/x"
+
+    def test_invalid_css_selector_returns_recoverable_error(self):
+        ts = _stub_setup(ConfluenceHtmlFilterToolset)
+        tool = ts.tools[0]
+        # Patch HttpRequest._invoke to fail loudly if reached — a malformed
+        # selector must short-circuit before any HTTP work.
+        with patch.object(
+            HttpRequest,
+            "_invoke",
+            side_effect=AssertionError("HTTP request must not be made on bad selector"),
+        ):
+            result = tool._invoke(
+                {
+                    "url": "https://example.atlassian.net/x",
+                    "css_selector": "::::nope",
+                },
+                context=None,
+            )
+        assert result.status == StructuredToolResultStatus.ERROR
+        assert "::::nope" in result.error
+        assert "css_selector" in result.error.lower() or "selector" in result.error.lower()
 
     def test_omitting_css_selector_returns_full_body(self):
         ts = _stub_setup(ConfluenceHtmlFilterToolset)

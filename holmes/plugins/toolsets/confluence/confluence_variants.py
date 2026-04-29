@@ -54,11 +54,12 @@ logger = logging.getLogger(__name__)
 
 # Cheap heuristic for "this string looks like HTML": at least one tag.
 # Used to decide whether to run a string through markdownify / BeautifulSoup.
-# Matches `<tag` or `</tag` followed by space, slash, or `>`. Confluence storage
-# format ALWAYS uses tags (the value field is XHTML), so false negatives are
-# rare; false positives on prose containing `<word>` are harmless because the
-# converters are a no-op on non-HTML.
-_HTML_TAG_RE = re.compile(r"<\s*/?[a-zA-Z][a-zA-Z0-9]*[\s/>]")
+# Matches `<tag` or `</tag` followed by space, slash, or `>`, including
+# Confluence storage-format namespaced macro tags such as `<ac:structured-macro>`
+# and `<ri:user>` (so a body that's almost entirely macro markup still gets
+# post-processed). False positives on prose containing `<word>` are harmless
+# because the converters are a no-op on non-HTML.
+_HTML_TAG_RE = re.compile(r"<\s*/?(?:[a-zA-Z][\w-]*:)?[a-zA-Z][\w-]*[\s/>]")
 
 
 def _looks_like_html(value: str) -> bool:
@@ -157,6 +158,24 @@ class _HtmlFilteringHttpRequest(HttpRequest):
         # `requests.request`; otherwise it would get serialized into headers.
         if "css_selector" in params:
             params = {k: v for k, v in params.items() if k != "css_selector"}
+
+        # Validate the selector up front so a malformed value is reported as
+        # a recoverable tool error (with the offending selector and parser
+        # message) instead of letting BeautifulSoup raise inside the JSON
+        # walker. Empty / missing selector skips filtering entirely.
+        if selector:
+            try:
+                BeautifulSoup("", "html.parser").select(selector)
+            except Exception as exc:
+                return StructuredToolResult(
+                    status=StructuredToolResultStatus.ERROR,
+                    error=(
+                        f"Invalid css_selector {selector!r}: {exc}. "
+                        "Fix the selector and retry — selectors use "
+                        "BeautifulSoup `.select()` syntax."
+                    ),
+                    params=params,
+                )
 
         result = super()._invoke(params, context)
         if selector and result.status == StructuredToolResultStatus.SUCCESS:
