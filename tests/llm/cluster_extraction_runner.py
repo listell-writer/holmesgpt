@@ -34,7 +34,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
-import litellm
+import boto3
 
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 
@@ -46,6 +46,46 @@ from tests.llm.test_cluster_extraction import (  # noqa: E402
     _load_cases,
     _normalize_answer,
 )
+
+
+# Approximate Bedrock on-demand pricing per 1M tokens (USD).
+# Used only for the rolled-up cost column in the markdown report - replace with
+# AWS Cost Explorer numbers if you need precise figures.
+_BEDROCK_PRICING_PER_M_TOKENS = {
+    "claude-opus-4-7": (15.00, 75.00),
+    "claude-opus-4-6": (15.00, 75.00),
+    "claude-opus-4-5": (15.00, 75.00),
+    "claude-sonnet-4-6": (3.00, 15.00),
+    "claude-sonnet-4-5": (3.00, 15.00),
+    "claude-sonnet-4": (3.00, 15.00),
+    "claude-haiku-4-5": (1.00, 5.00),
+}
+
+
+def _resolve_pricing(model_id: str) -> Optional[Tuple[float, float]]:
+    lowered = model_id.lower()
+    for key, price in _BEDROCK_PRICING_PER_M_TOKENS.items():
+        if key in lowered:
+            return price
+    return None
+
+
+def _bedrock_model_id(model: str) -> str:
+    """Strip the leading 'bedrock/' if present so we can pass to boto3 Converse."""
+    return model[len("bedrock/") :] if model.startswith("bedrock/") else model
+
+
+_bedrock_client = None
+
+
+def _get_bedrock_client():
+    global _bedrock_client
+    if _bedrock_client is None:
+        region = os.environ.get("AWS_REGION_NAME") or os.environ.get(
+            "AWS_REGION", "us-east-1"
+        )
+        _bedrock_client = boto3.client("bedrock-runtime", region_name=region)
+    return _bedrock_client
 
 
 def _expected_for(case: ClusterExtractionCase, variant: str) -> Optional[str]:
@@ -65,24 +105,30 @@ def _run_one(
 
     started = time.perf_counter()
     try:
-        response = litellm.completion(
-            model=model,
-            messages=[{"role": "user", "content": prompt}],
-            temperature=0,
-            max_tokens=64,
+        client = _get_bedrock_client()
+        # Note: do not pass `temperature` - newer Claude models (Opus 4.7+) reject
+        # it with a ValidationException. maxTokens alone is enough to force a
+        # short, structured answer for this eval.
+        response = client.converse(
+            modelId=_bedrock_model_id(model),
+            messages=[{"role": "user", "content": [{"text": prompt}]}],
+            inferenceConfig={"maxTokens": 64},
         )
-        latency_ms = int((time.perf_counter() - started) * 1000)
-        raw = response["choices"][0]["message"]["content"] or ""
-        usage = getattr(response, "usage", None) or response.get("usage", {})
-        prompt_tokens = getattr(usage, "prompt_tokens", None) or usage.get(
-            "prompt_tokens"
+        latency_ms = response.get("metrics", {}).get("latencyMs") or int(
+            (time.perf_counter() - started) * 1000
         )
-        completion_tokens = getattr(usage, "completion_tokens", None) or usage.get(
-            "completion_tokens"
-        )
-        try:
-            cost_usd = float(litellm.completion_cost(completion_response=response))
-        except Exception:
+        raw = ""
+        for block in response["output"]["message"].get("content", []):
+            if "text" in block:
+                raw += block["text"]
+        usage = response.get("usage", {}) or {}
+        prompt_tokens = usage.get("inputTokens")
+        completion_tokens = usage.get("outputTokens")
+        pricing = _resolve_pricing(model)
+        if pricing and prompt_tokens is not None and completion_tokens is not None:
+            in_rate, out_rate = pricing
+            cost_usd = (prompt_tokens * in_rate + completion_tokens * out_rate) / 1e6
+        else:
             cost_usd = None
         error = None
     except Exception as e:

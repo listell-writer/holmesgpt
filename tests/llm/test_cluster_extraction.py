@@ -41,9 +41,12 @@ import yaml
 FIXTURES_DIR = Path(__file__).parent / "fixtures" / "test_cluster_extraction"
 
 DEFAULT_MODELS = [
-    "claude-opus-4-7",
-    "claude-sonnet-4-6",
-    "claude-haiku-4-5",
+    # Bedrock EU cross-region inference profile IDs (matches relay's eu-south-2 setup).
+    # Pass as `bedrock/<id>` to litellm; the standalone runner strips that prefix
+    # before calling the boto3 Converse API.
+    "bedrock/eu.anthropic.claude-opus-4-7",
+    "bedrock/eu.anthropic.claude-sonnet-4-6",
+    "bedrock/eu.anthropic.claude-haiku-4-5-20251001-v1:0",
 ]
 
 PROMPT_VARIANTS = ["current", "with_cluster_list"]
@@ -180,10 +183,11 @@ def test_cluster_extraction(
         include_cluster_list=(variant == "with_cluster_list"),
     )
 
+    # Note: do not pass temperature - newer Claude models (Opus 4.7+) reject it.
+    # max_tokens=64 alone keeps the answer short and structured.
     response = litellm.completion(
         model=model,
         messages=[{"role": "user", "content": prompt}],
-        temperature=0,
         max_tokens=64,
     )
     raw = response["choices"][0]["message"]["content"] or ""
