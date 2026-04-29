@@ -22,7 +22,7 @@ gateway / health-check machinery by subclassing it. Each variant overrides
 
 import logging
 import re
-from typing import Any, ClassVar, Dict, List, Optional, Type
+from typing import Any, Callable, ClassVar, List, Optional, Type
 
 from bs4 import BeautifulSoup
 from markdownify import markdownify
@@ -31,6 +31,7 @@ from holmes.core.tools import (
     CallablePrerequisite,
     StructuredToolResult,
     StructuredToolResultStatus,
+    Toolset,
     ToolInvokeContext,
     ToolParameter,
     ToolsetTag,
@@ -93,7 +94,7 @@ def _filter_html_by_css(html: str, selector: str) -> str:
     return "\n".join(str(m) for m in matches)
 
 
-def _transform_html_strings(value: Any, transform) -> Any:
+def _transform_html_strings(value: Any, transform: Callable[[str], str]) -> Any:
     """Walk an arbitrary JSON value and apply ``transform`` to every HTML-ish string."""
     if value is None:
         return None
@@ -209,8 +210,6 @@ class _ConfluenceVariantBase(ConfluenceToolset):
         # Skip ConfluenceToolset.__init__ — we want to call the grandparent
         # Toolset.__init__ directly so the variant gets its own name without
         # duplicating ConfluenceToolset's setup work.
-        from holmes.core.tools import Toolset
-
         Toolset.__init__(
             self,
             name=self._variant_name,
