@@ -30,8 +30,10 @@ import sys
 import time
 import traceback
 from collections import defaultdict
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timezone
 from pathlib import Path
+from threading import Lock
 from typing import Any, Dict, List, Optional, Tuple
 
 import boto3
@@ -94,7 +96,10 @@ def _expected_for(case: ClusterExtractionCase, variant: str) -> Optional[str]:
 
 
 def _run_one(
-    case: ClusterExtractionCase, model: str, variant: str
+    case: ClusterExtractionCase,
+    model: str,
+    variant: str,
+    run_index: int = 0,
 ) -> Dict[str, Any]:
     prompt = _build_prompt(
         conversation_history=case.conversation_history,
@@ -159,6 +164,7 @@ def _run_one(
         "case_tags": case.tags,
         "model": model,
         "variant": variant,
+        "run_index": run_index,
         "expected": expected,
         "forbidden_clusters": list(case.forbidden_clusters),
         "raw_answer": raw,
@@ -255,6 +261,11 @@ def _write_markdown(
 
     lines.append("## Per-case results")
     lines.append("")
+    lines.append(
+        "_Each cell shows `passes/runs` across all repeats. Bias failures (model picked "
+        "a forbidden cluster) are flagged 🚨._"
+    )
+    lines.append("")
     header = "| Case |"
     sep = "|---|"
     for model in models:
@@ -267,62 +278,96 @@ def _write_markdown(
         row = f"| `{case_id}` |"
         for model in models:
             for variant in PROMPT_VARIANTS:
-                match = next(
-                    (
-                        r
-                        for r in rows
-                        if r["case_id"] == case_id
-                        and r["model"] == model
-                        and r["variant"] == variant
-                    ),
-                    None,
-                )
-                if match is None:
+                matches = [
+                    r
+                    for r in rows
+                    if r["case_id"] == case_id
+                    and r["model"] == model
+                    and r["variant"] == variant
+                ]
+                if not matches:
                     cell = "—"
-                elif match["error"]:
-                    cell = "⚠️"
-                elif match["passed"]:
-                    cell = "✅"
-                elif match.get("fail_reason") == "bias":
-                    cell = f"🚨 `{match['normalized_answer'] or '∅'}`"
                 else:
-                    cell = f"❌ `{match['normalized_answer'] or '∅'}`"
+                    n = len(matches)
+                    n_pass = sum(1 for r in matches if r["passed"])
+                    n_bias = sum(1 for r in matches if r.get("fail_reason") == "bias")
+                    n_err = sum(1 for r in matches if r["error"])
+                    if n_pass == n:
+                        cell = f"✅ {n_pass}/{n}"
+                    elif n_bias > 0:
+                        cell = f"🚨 {n_pass}/{n}"
+                    elif n_err > 0 and n_pass == 0:
+                        cell = f"⚠️ {n_pass}/{n}"
+                    else:
+                        cell = f"❌ {n_pass}/{n}"
                 row += f" {cell} |"
         lines.append(row)
     lines.append("")
 
     lines.append("## Failures and errors")
     lines.append("")
-    failed = [r for r in rows if not r["passed"]]
-    if not failed:
+    # Group failures by (case, model, variant). For each group, summarize how
+    # many of the N runs failed and the modal answer. Cleaner than one entry
+    # per repeat when --runs > 1.
+    by_triple: Dict[Tuple[str, str, str], List[Dict[str, Any]]] = defaultdict(list)
+    for r in rows:
+        by_triple[(r["case_id"], r["model"], r["variant"])].append(r)
+
+    failure_groups = []
+    for triple, group in by_triple.items():
+        n = len(group)
+        n_pass = sum(1 for r in group if r["passed"])
+        if n_pass == n:
+            continue  # all passed; not a failure group
+        failure_groups.append((triple, group, n, n_pass))
+
+    if not failure_groups:
         lines.append("_None._")
     else:
-        for r in failed:
-            case = case_by_id[r["case_id"]]
-            tag = {
-                "bias": "🚨 BIAS",
-                "miss": "❌ MISS",
-                "error": "⚠️ ERROR",
-            }.get(r.get("fail_reason", ""), "❌")
+        for (case_id, model, variant), group, n, n_pass in failure_groups:
+            case = case_by_id[case_id]
+            n_bias = sum(1 for r in group if r.get("fail_reason") == "bias")
+            n_err = sum(1 for r in group if r["error"])
+            if n_bias > 0:
+                tag = "🚨 BIAS"
+            elif n_err > 0 and n_pass == 0:
+                tag = "⚠️ ERROR"
+            else:
+                tag = "❌ MISS"
             lines.append(
-                f"### {tag} `{r['case_id']}` — `{r['model']}` — `{r['variant']}`"
+                f"### {tag} `{case_id}` — `{model}` — `{variant}` "
+                f"({n - n_pass}/{n} failed)"
             )
             lines.append("")
             lines.append(f"**Description:** {case.description.strip()}")
             lines.append("")
-            lines.append(f"- **Expected:** `{r['expected']}`")
-            if r.get("forbidden_clusters"):
+            lines.append(f"- **Expected:** `{group[0]['expected']}`")
+            if group[0].get("forbidden_clusters"):
                 lines.append(
-                    f"- **Forbidden:** `{', '.join(r['forbidden_clusters'])}`"
+                    f"- **Forbidden:** `{', '.join(group[0]['forbidden_clusters'])}`"
                 )
-            lines.append(
-                f"- **Got (normalized):** `{r['normalized_answer'] or '∅'}`"
+            # Distinct normalized answers and their counts.
+            answer_counts: Dict[str, int] = defaultdict(int)
+            for r in group:
+                if not r["passed"]:
+                    answer_counts[r["normalized_answer"] or "∅"] += 1
+            ans_summary = ", ".join(
+                f"`{a}` ×{c}" for a, c in sorted(
+                    answer_counts.items(), key=lambda kv: -kv[1]
+                )
             )
-            if r["error"]:
-                lines.append(f"- **Error:** `{r['error']}`")
-            else:
-                quoted = (r["raw_answer"] or "").replace("\n", " \\n ")[:200]
-                lines.append(f"- **Raw answer:** `{quoted}`")
+            lines.append(f"- **Got (normalized, fail runs):** {ans_summary}")
+            errors = [r["error"] for r in group if r.get("error")]
+            if errors:
+                lines.append(f"- **Errors:** {len(errors)}; first: `{errors[0]}`")
+            # Show the first non-empty raw answer so the reviewer can see flavor.
+            sample_raw = next(
+                (r["raw_answer"] for r in group if not r["passed"] and r["raw_answer"]),
+                "",
+            )
+            if sample_raw:
+                quoted = sample_raw.replace("\n", " \\n ")[:200]
+                lines.append(f"- **Sample raw answer:** `{quoted}`")
             lines.append("")
 
     out_path.write_text("\n".join(lines), encoding="utf-8")
@@ -360,6 +405,20 @@ def main() -> int:
         action="store_true",
         help="Smoke mode: first case only, first model only, current variant only.",
     )
+    parser.add_argument(
+        "--runs",
+        type=int,
+        default=1,
+        help="Number of times to run each (case, model, variant) combination. "
+        "Use >1 to get noise bars on accuracy and latency. Default: 1.",
+    )
+    parser.add_argument(
+        "--parallel",
+        type=int,
+        default=1,
+        help="Number of model calls to issue concurrently. Default 1 (sequential). "
+        "Bedrock has per-model RPM/TPM limits - 4-8 is usually safe.",
+    )
     args = parser.parse_args()
 
     cases = _load_cases()
@@ -382,52 +441,99 @@ def main() -> int:
     jsonl_path = out_stem.with_suffix(".jsonl")
     md_path = out_stem.with_suffix(".md")
 
-    total = len(cases) * len(models) * len(variants)
+    runs = max(1, args.runs)
+    parallel = max(1, args.parallel)
+    combos = len(cases) * len(models) * len(variants)
+    total = combos * runs
     print(
-        f"Running {total} combinations: {len(cases)} cases × {len(models)} models "
-        f"× {len(variants)} variants",
+        f"Running {total} calls: {len(cases)} cases × {len(models)} models "
+        f"× {len(variants)} variants × {runs} runs (parallel={parallel})",
         flush=True,
     )
 
-    rows: List[Dict[str, Any]] = []
-    with jsonl_path.open("w", encoding="utf-8") as fh:
-        i = 0
+    # Build the task list. Outer index is run, so all combos are sampled once
+    # before any combo is sampled twice - this spreads any time-correlated
+    # noise (rate limiting, transient throttles) across runs.
+    tasks: List[Tuple[int, ClusterExtractionCase, str, str]] = []
+    for run_idx in range(runs):
         for case in cases:
             for model in models:
                 for variant in variants:
-                    i += 1
-                    label = f"[{i:>3}/{total}] {case.id} | {model} | {variant}"
-                    print(label, end="", flush=True)
-                    try:
-                        row = _run_one(case, model, variant)
-                    except Exception as e:
-                        row = {
-                            "case_id": case.id,
-                            "case_description": case.description.strip(),
-                            "case_tags": case.tags,
-                            "model": model,
-                            "variant": variant,
-                            "expected": _expected_for(case, variant),
-                            "raw_answer": "",
-                            "normalized_answer": "",
-                            "passed": False,
-                            "latency_ms": None,
-                            "prompt_tokens": None,
-                            "completion_tokens": None,
-                            "cost_usd": None,
-                            "error": f"runner-exception: {type(e).__name__}: {e}",
-                        }
-                        traceback.print_exc()
-                    fh.write(json.dumps(row) + "\n")
-                    fh.flush()
-                    rows.append(row)
-                    status = "✅" if row["passed"] else ("⚠️ " if row["error"] else "❌")
-                    extra = (
-                        f"  -> {status}  ({row['latency_ms']}ms"
-                        + (f", err={row['error']}" if row["error"] else "")
-                        + ")"
-                    )
-                    print(extra, flush=True)
+                    tasks.append((run_idx, case, model, variant))
+
+    rows: List[Dict[str, Any]] = []
+    fh_lock = Lock()
+    counter = {"i": 0}
+
+    def _do_one(task):
+        run_idx, case, model, variant = task
+        try:
+            row = _run_one(case, model, variant, run_index=run_idx)
+        except Exception as e:
+            row = {
+                "case_id": case.id,
+                "case_description": case.description.strip(),
+                "case_tags": case.tags,
+                "model": model,
+                "variant": variant,
+                "run_index": run_idx,
+                "expected": _expected_for(case, variant),
+                "forbidden_clusters": list(case.forbidden_clusters),
+                "raw_answer": "",
+                "normalized_answer": "",
+                "passed": False,
+                "fail_reason": "error",
+                "latency_ms": None,
+                "prompt_tokens": None,
+                "completion_tokens": None,
+                "cost_usd": None,
+                "error": f"runner-exception: {type(e).__name__}: {e}",
+            }
+            traceback.print_exc()
+        return row
+
+    with jsonl_path.open("w", encoding="utf-8") as fh:
+        if parallel <= 1:
+            for task in tasks:
+                row = _do_one(task)
+                counter["i"] += 1
+                fh.write(json.dumps(row) + "\n")
+                fh.flush()
+                rows.append(row)
+                status = (
+                    "✅" if row["passed"]
+                    else ("🚨" if row.get("fail_reason") == "bias"
+                    else ("⚠️ " if row["error"] else "❌"))
+                )
+                run_idx = row["run_index"]
+                print(
+                    f"[{counter['i']:>4}/{total}] r{run_idx + 1} {row['case_id']:34} | "
+                    f"{row['model'].split('/')[-1][:30]:30} | {row['variant']:18} -> "
+                    f"{status} ({row['latency_ms']}ms)",
+                    flush=True,
+                )
+        else:
+            with ThreadPoolExecutor(max_workers=parallel) as pool:
+                futures = [pool.submit(_do_one, t) for t in tasks]
+                for fut in as_completed(futures):
+                    row = fut.result()
+                    with fh_lock:
+                        counter["i"] += 1
+                        fh.write(json.dumps(row) + "\n")
+                        fh.flush()
+                        rows.append(row)
+                        status = (
+                            "✅" if row["passed"]
+                            else ("🚨" if row.get("fail_reason") == "bias"
+                            else ("⚠️ " if row["error"] else "❌"))
+                        )
+                        run_idx = row["run_index"]
+                        print(
+                            f"[{counter['i']:>4}/{total}] r{run_idx + 1} {row['case_id']:34} | "
+                            f"{row['model'].split('/')[-1][:30]:30} | {row['variant']:18} -> "
+                            f"{status} ({row['latency_ms']}ms)",
+                            flush=True,
+                        )
 
     _write_markdown(rows, cases, models, md_path)
 
