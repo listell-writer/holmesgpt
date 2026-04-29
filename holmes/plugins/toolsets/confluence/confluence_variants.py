@@ -95,6 +95,8 @@ def _filter_html_by_css(html: str, selector: str) -> str:
 
 def _transform_html_strings(value: Any, transform) -> Any:
     """Walk an arbitrary JSON value and apply ``transform`` to every HTML-ish string."""
+    if value is None:
+        return None
     if isinstance(value, str):
         return transform(value) if _looks_like_html(value) else value
     if isinstance(value, dict):
@@ -178,6 +180,16 @@ class _ConfluenceVariantBase(ConfluenceToolset):
       * ``_extra_llm_instructions`` — appended after the base Confluence prompt
         so the LLM knows about variant-specific behavior (markdown output,
         css_selector parameter, etc.)
+
+    Implementation note — the constructor calls ``Toolset.__init__`` directly
+    instead of ``super().__init__()``. ``ConfluenceToolset.__init__`` hard-codes
+    ``name="confluence"`` and would also re-run the parent's setup, so we skip
+    one level up the MRO and pass our own variant-specific name/description.
+    All of ``ConfluenceToolset``'s *runtime* behavior (config classes,
+    ``prerequisites_callable``, gateway resolution, health checks) is still
+    inherited; only the constructor wiring is short-circuited. If
+    ``ConfluenceToolset.__init__`` ever grows variant-relevant logic, this
+    class must be updated to mirror it.
     """
 
     _variant_name: ClassVar[str] = ""

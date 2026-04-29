@@ -21,8 +21,10 @@
 # instance — see CLAUDE.md "Cloud Service Eval Reentrancy".
 #
 # Requirements:
-#   CONFLUENCE_SA_USER, CONFLUENCE_SA_API_KEY, CONFLUENCE_SA_BASE_URL,
-#   CONFLUENCE_BASE_URL (the user-facing URL used by the toolset configs)
+#   CONFLUENCE_BASE_URL  — user-facing URL (e.g. https://yourcompany.atlassian.net)
+#   CONFLUENCE_SA_USER, CONFLUENCE_SA_API_KEY — service-account basic auth
+#                                               creds, used both by `before_test`
+#                                               and by the toolset configs.
 
 user_prompt: |
   In the Confluence space 'HLMS259' there is a page titled 'Internal Service
@@ -52,6 +54,22 @@ before_test: |
   TMPFILE=$(mktemp /tmp/holmes259_page_XXXXXX.json)
   trap "rm -f $TMPFILE" EXIT
 
+  # Resolve the Atlassian Cloud ID and route REST calls through the
+  # api.atlassian.com gateway with bearer auth. Direct calls to
+  # ${CONFLUENCE_BASE_URL}/wiki/rest/api/* return 401/403 for the
+  # service-account token (it's a scoped token), but the same token works
+  # against https://api.atlassian.com/ex/confluence/{cloud_id}. The
+  # production toolset does this auto-fallback for runtime requests; we do
+  # it here so `before_test` uses the same path.
+  CLOUD_ID=$(curl -L -s "${CONFLUENCE_BASE_URL}/_edge/tenant_info" \
+    | python3 -c "import sys,json;print(json.load(sys.stdin).get('cloudId',''))")
+  if [ -z "$CLOUD_ID" ]; then
+    echo "Failed to resolve Atlassian Cloud ID from ${CONFLUENCE_BASE_URL}/_edge/tenant_info"
+    exit 1
+  fi
+  API="https://api.atlassian.com/ex/confluence/${CLOUD_ID}/rest/api"
+  AUTH=( -H "Authorization: Bearer ${CONFLUENCE_SA_API_KEY}" )
+
   echo "Generating page body..."
   PAGE_BODY_JSON=$(python3 ./generate_page.py)
 
@@ -70,8 +88,8 @@ before_test: |
 
   echo "Creating Confluence space ${SPACE_KEY}..."
   RESPONSE=$(curl -L -s -w "\n%{http_code}" -X POST \
-    "${CONFLUENCE_SA_BASE_URL}/wiki/rest/api/space" \
-    -H "Authorization: Bearer ${CONFLUENCE_SA_API_KEY}" \
+    "${API}/space" \
+    "${AUTH[@]}" \
     -H "Content-Type: application/json" \
     -d "{
       \"key\": \"${SPACE_KEY}\",
@@ -92,8 +110,7 @@ before_test: |
   elif echo "$BODY" | grep -q "already exists"; then
     echo "Space already exists, verifying it is accessible..."
     SPACE_CHECK=$(curl -L -s -w "\n%{http_code}" \
-      "${CONFLUENCE_SA_BASE_URL}/wiki/rest/api/space/${SPACE_KEY}" \
-      -H "Authorization: Bearer ${CONFLUENCE_SA_API_KEY}")
+      "${API}/space/${SPACE_KEY}" "${AUTH[@]}")
     SPACE_CHECK_HTTP=$(echo "$SPACE_CHECK" | tail -n1)
     if [ "$SPACE_CHECK_HTTP" -ne 200 ]; then
       echo "Space key '${SPACE_KEY}' is reserved but not accessible (HTTP ${SPACE_CHECK_HTTP}). It may be in the Confluence trash — purge it manually or wait for the trash retention period to expire."
@@ -108,8 +125,8 @@ before_test: |
 
   echo "Creating or refreshing page..."
   PAGE_RESPONSE=$(curl -L -s -w "\n%{http_code}" -X POST \
-    "${CONFLUENCE_SA_BASE_URL}/wiki/rest/api/content" \
-    -H "Authorization: Bearer ${CONFLUENCE_SA_API_KEY}" \
+    "${API}/content" \
+    "${AUTH[@]}" \
     -H "Content-Type: application/json" \
     -d @"$TMPFILE")
 
@@ -121,10 +138,10 @@ before_test: |
   else
     echo "Page creation returned HTTP ${PAGE_HTTP_CODE}, searching for existing page..."
     SEARCH_RESP=$(curl -L -s -w "\n%{http_code}" -G \
-      "${CONFLUENCE_SA_BASE_URL}/wiki/rest/api/content" \
+      "${API}/content" \
       --data-urlencode "title=${PAGE_TITLE}" \
       --data-urlencode "spaceKey=${SPACE_KEY}" \
-      -H "Authorization: Bearer ${CONFLUENCE_SA_API_KEY}")
+      "${AUTH[@]}")
     SEARCH_HTTP=$(echo "$SEARCH_RESP" | tail -n1)
     SEARCH_BODY=$(echo "$SEARCH_RESP" | sed '$d')
     if [ "$SEARCH_HTTP" -ne 200 ]; then
@@ -142,8 +159,8 @@ before_test: |
 
   echo "Verifying verification code is present in page content..."
   VERIFY=$(curl -L -s \
-    "${CONFLUENCE_SA_BASE_URL}/wiki/rest/api/content/${PAGE_ID}?expand=body.storage" \
-    -H "Authorization: Bearer ${CONFLUENCE_SA_API_KEY}")
+    "${API}/content/${PAGE_ID}?expand=body.storage" \
+    "${AUTH[@]}")
 
   if echo "$VERIFY" | grep -q "${VERIFICATION_CODE}"; then
     echo "Page content verified - verification code found"
