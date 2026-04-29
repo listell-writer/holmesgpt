@@ -78,7 +78,8 @@ def update_holmes_status_in_db(
         is_robusta_ai_enabled=config.should_try_robusta_ai,
         supports_realtime_conversations=bool(ENABLE_CONVERSATION_WORKER)
         and realtime_enabled,
-        requires_realtime_broadcast=bool(CONVERSATION_WORKER_USE_REALTIME_BROADCAST)
+        requires_realtime_broadcast=bool(ENABLE_CONVERSATION_WORKER)
+        and bool(CONVERSATION_WORKER_USE_REALTIME_BROADCAST)
         and realtime_enabled,
         namespace=_detect_runner_namespace(),
     )
