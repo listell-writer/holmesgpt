@@ -403,6 +403,23 @@ def chat(chat_request: ChatRequest, http_request: Request):
             f"streaming={chat_request.stream}"
         )
 
+        # Per-request Braintrust experiment context. The CLI path bootstraps an
+        # experiment up-front; the server doesn't, so without this nothing lands
+        # in Braintrust. When the caller sets X-Braintrust-Experiment, init that
+        # experiment for this request thread; subsequent spans land inside it.
+        # Gated by HOLMES_ALLOW_PER_REQUEST_EXPERIMENT to keep the feature opt-in:
+        # the header is silently ignored unless the operator turned this on.
+        if os.environ.get("HOLMES_ALLOW_PER_REQUEST_EXPERIMENT", "").lower() in ("1", "true", "yes"):
+            bt_experiment_name = http_request.headers.get("X-Braintrust-Experiment")
+            if bt_experiment_name and hasattr(server_tracer, "start_experiment"):
+                try:
+                    server_tracer.start_experiment(experiment_name=bt_experiment_name)
+                except Exception:
+                    logging.warning(
+                        "Failed to start Braintrust experiment '%s'; continuing without it.",
+                        bt_experiment_name, exc_info=True,
+                    )
+
         skills = config.get_skill_catalog()
 
         prompt_component_overrides = None
