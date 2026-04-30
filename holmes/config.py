@@ -98,6 +98,11 @@ class Config(RobustaBaseConfig):
 
     custom_skill_paths: List[Union[str, FilePath]] = []
 
+    # When True, the main agent gets access to a `dispatch_agent` tool that can
+    # spawn focused child agents sharing the same LLM and toolset but with
+    # isolated context windows. See holmes/core/subagent.py.
+    subagents_enabled: bool = False
+
     # custom_toolsets is passed from config file, and be used to override built-in toolsets, provides 'stable' customized toolset.
     # The status of custom toolsets can be cached.
     custom_toolsets: Optional[List[FilePath]] = None
@@ -462,6 +467,7 @@ class Config(RobustaBaseConfig):
         tracer=None,
         tool_results_dir: Optional[Path] = None,
         on_event: EventCallback = None,
+        subagents_enabled: Optional[bool] = None,
     ) -> "ToolCallingLLM":
         """
         Create a ToolCallingLLM with explicit behavioral controls.
@@ -510,11 +516,15 @@ class Config(RobustaBaseConfig):
             reuse_executor=reuse_executor,
             on_event=on_event,
         )
+        effective_subagents = (
+            subagents_enabled if subagents_enabled is not None else self.subagents_enabled
+        )
         return ToolCallingLLM(
             tool_executor,
             self.max_steps,
             llm,
             tool_results_dir=tool_results_dir,
+            subagents_enabled=effective_subagents,
         )
 
     def validate_jira_config(self):

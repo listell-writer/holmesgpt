@@ -196,7 +196,17 @@ class ToolCallingLLM:
         llm: LLM,
         tool_results_dir: Optional[Path],
         tracer=None,
+        subagents_enabled: bool = False,
     ):
+        # When subagents_enabled, register the dispatch_agent tool on a per-instance
+        # cloned executor so the LLM can spawn child agents that share this
+        # instance's llm and tool_executor.
+        self.subagents_enabled = subagents_enabled
+        if subagents_enabled:
+            from holmes.core.subagent import DispatchAgentTool
+
+            tool_executor = tool_executor.clone_with_extra_tools([DispatchAgentTool()])
+
         self.tool_executor = tool_executor
         self.max_steps = max_steps
         self.tracer = tracer
@@ -217,6 +227,7 @@ class ToolCallingLLM:
             llm=self.llm,
             tool_results_dir=self.tool_results_dir,
             tracer=self.tracer,
+            subagents_enabled=self.subagents_enabled,
         )
         # Preserve transient state so resumed turns keep access to
         # skill-unlocked (restricted) tools.
@@ -689,6 +700,7 @@ class ToolCallingLLM:
                 tool_call_id=tool_call_id,
                 session_approved_prefixes=session_approved_prefixes or [],
                 request_context=request_context,
+                parent_agent=self,
             )
             tool_response = tool.invoke(tool_params, context=invoke_context)
 

@@ -1,0 +1,172 @@
+"""Subagent (dispatch_agent / Task) tool.
+
+This module implements a Claude Code-style subagent system: the main agent can
+spawn focused child agents that share the same model and the same toolset, but
+operate with an isolated context window. Each child runs an independent
+agentic loop and returns only its final answer to the parent.
+
+The whole feature is gated behind a single boolean flag: ``subagents_enabled``.
+When False, the tool is not registered and the LLM never sees it. When True,
+the parent ToolCallingLLM exposes ``dispatch_agent`` to the model and child
+agents are constructed with ``subagents_enabled=False`` so they cannot
+recursively spawn further subagents.
+"""
+
+import logging
+from typing import Any, Dict, Optional
+
+from holmes.core.tools import (
+    StructuredToolResult,
+    StructuredToolResultStatus,
+    Tool,
+    ToolInvokeContext,
+    ToolParameter,
+    Toolset,
+    ToolsetTag,
+)
+
+DISPATCH_AGENT_TOOL_NAME = "dispatch_agent"
+
+# Default cap on subagent agentic-loop iterations. Subagents are intended to be
+# narrowly scoped, so we cap them well below the parent's typical max_steps.
+DEFAULT_SUBAGENT_MAX_STEPS = 50
+
+SUBAGENT_SYSTEM_PROMPT = (
+    "You are a focused subagent spawned by a parent investigation agent. "
+    "You have access to the same tools as the parent agent and use the same model, "
+    "but you operate with a fresh, isolated context window — you do NOT see the "
+    "parent's conversation history.\n\n"
+    "Carry out the task described in the user message. Use the available tools to "
+    "gather any data you need. When you are done, produce a single, concise, factual "
+    "final answer that the parent agent can consume directly. Do not include "
+    "intermediate reasoning, raw tool output, or speculative side-discussions in "
+    "your final answer — return only what the parent asked for."
+)
+
+
+class DispatchAgentTool(Tool):
+    name: str = DISPATCH_AGENT_TOOL_NAME
+    description: str = (
+        "Launch a focused subagent that has access to the same tools and uses the "
+        "same model as you, but operates with a fresh, isolated context window. "
+        "Use this when a subtask would otherwise pollute your main context with "
+        "many intermediate tool results (e.g. wide searches, exploratory lookups, "
+        "or deep dives into a single resource). The subagent does NOT see your "
+        "conversation history, so the prompt must be self-contained. The subagent "
+        "returns only its final summarized answer."
+    )
+    parameters: Dict[str, ToolParameter] = {
+        "task_description": ToolParameter(
+            type="string",
+            required=True,
+            description="A short (3-5 word) label describing the subtask, used for logging.",
+        ),
+        "prompt": ToolParameter(
+            type="string",
+            required=True,
+            description=(
+                "The full task prompt for the subagent. Must be self-contained "
+                "because the subagent does NOT see your conversation history. "
+                "Include all relevant context, constraints, and what you want back."
+            ),
+        ),
+    }
+
+    def _invoke(self, params: dict, context: ToolInvokeContext) -> StructuredToolResult:
+        # Late import to avoid a circular dependency: tool_calling_llm imports
+        # tools.py, which is loaded before this module.
+        from holmes.core.tool_calling_llm import ToolCallingLLM
+
+        task_description = (params.get("task_description") or "subagent task").strip()
+        prompt = (params.get("prompt") or "").strip()
+
+        if not prompt:
+            return StructuredToolResult(
+                status=StructuredToolResultStatus.ERROR,
+                error="dispatch_agent requires a non-empty 'prompt' parameter.",
+                params=params,
+            )
+
+        parent_agent = context.parent_agent
+        if parent_agent is None:
+            return StructuredToolResult(
+                status=StructuredToolResultStatus.ERROR,
+                error=(
+                    "dispatch_agent invoked without a parent agent reference. "
+                    "Subagents are not enabled in this run."
+                ),
+                params=params,
+            )
+
+        logging.info(
+            f"[subagent] dispatching '{task_description}' "
+            f"(prompt length={len(prompt)} chars)"
+        )
+
+        child_max_steps = min(
+            DEFAULT_SUBAGENT_MAX_STEPS, getattr(parent_agent, "max_steps", DEFAULT_SUBAGENT_MAX_STEPS)
+        )
+
+        # Children are spawned with subagents_enabled=False so they cannot
+        # recursively dispatch further subagents. This matches the Claude Code
+        # convention: only the top-level agent has the Task tool.
+        child = ToolCallingLLM(
+            tool_executor=parent_agent.tool_executor,
+            max_steps=child_max_steps,
+            llm=parent_agent.llm,
+            tool_results_dir=getattr(parent_agent, "tool_results_dir", None),
+            tracer=getattr(parent_agent, "tracer", None),
+            subagents_enabled=False,
+        )
+
+        messages = [
+            {"role": "system", "content": SUBAGENT_SYSTEM_PROMPT},
+            {"role": "user", "content": prompt},
+        ]
+
+        try:
+            result = child.call(
+                messages=messages,
+                request_context=context.request_context,
+            )
+        except Exception as e:
+            logging.exception(f"[subagent] '{task_description}' failed")
+            return StructuredToolResult(
+                status=StructuredToolResultStatus.ERROR,
+                error=f"Subagent failed: {e}",
+                params=params,
+            )
+
+        answer = (result.result or "").strip()
+        if not answer:
+            return StructuredToolResult(
+                status=StructuredToolResultStatus.NO_DATA,
+                error="Subagent finished without producing a final answer.",
+                params=params,
+            )
+
+        return StructuredToolResult(
+            status=StructuredToolResultStatus.SUCCESS,
+            data=answer,
+            params=params,
+        )
+
+    def get_parameterized_one_liner(self, params: Dict[str, Any]) -> str:
+        task = params.get("task_description") or "subtask"
+        return f"Dispatch subagent: {task}"
+
+
+class DispatchAgentToolset(Toolset):
+    """Toolset providing the dispatch_agent tool for spawning focused subagents."""
+
+    def __init__(self) -> None:
+        super().__init__(
+            name="subagent",
+            description=(
+                "Spawn focused subagents that share the main agent's model and tools "
+                "but have isolated context windows."
+            ),
+            enabled=True,
+            tools=[DispatchAgentTool()],
+            tags=[ToolsetTag.CORE],
+        )

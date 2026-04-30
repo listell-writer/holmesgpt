@@ -265,6 +265,10 @@ class ToolInvokeContext(BaseModel):
         str
     ] = []  # Bash prefixes approved during this session
     request_context: Optional[Dict[str, Any]] = None
+    # Reference to the parent ToolCallingLLM. Used by the dispatch_agent (subagent)
+    # tool to spawn child agents that share the same llm and tool_executor.
+    # Typed as Any to avoid a circular import with tool_calling_llm.
+    parent_agent: Optional[Any] = None
 
     def model_dump(self, **kwargs):
         """Override to exclude sensitive context from serialization"""
@@ -273,6 +277,8 @@ class ToolInvokeContext(BaseModel):
             data["request_context"] = {
                 k: "***REDACTED***" for k in data["request_context"].keys()
             }
+        # parent_agent is a runtime object reference; never serialize it.
+        data.pop("parent_agent", None)
         return data
 
     def __str__(self):

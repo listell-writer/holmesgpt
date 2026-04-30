@@ -254,6 +254,15 @@ def ask(
         "--fast-mode",
         help="Skip TodoWrite planning phase for faster responses",
     ),
+    subagents: bool = typer.Option(
+        False,
+        "--subagents/--no-subagents",
+        help=(
+            "Enable the dispatch_agent (subagent) tool. When enabled, the agent "
+            "can spawn focused child agents that share the same model and tools "
+            "but have isolated context windows."
+        ),
+    ),
 ):
     """
     Ask any question and answer using available tools
@@ -357,6 +366,7 @@ def ask(
             model=model,
             tool_results_dir=tool_results_dir,
             on_event=on_event,
+            subagents_enabled=subagents,
         )
 
         if init_renderer is not None:

@@ -1193,6 +1193,10 @@ jobs:
           AWS_REGION_NAME: ${{ vars.AWS_REGION_NAME }}
           MODEL: ${{ steps.eval-params.outputs.model }}
           ITERATIONS: ${{ steps.eval-params.outputs.iterations }}
+          # Run every eval twice (once with the dispatch_agent subagent tool
+          # enabled, once without) so the regression suite also acts as a
+          # matrix eval across the subagent architecture flag.
+          SUBAGENTS: "true,false"
           CLASSIFIER_MODEL: ${{ vars.CLASSIFIER_MODEL || 'gpt-4.1' }}
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
