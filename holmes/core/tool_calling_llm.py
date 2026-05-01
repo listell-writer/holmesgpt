@@ -172,7 +172,14 @@ ApprovalCallback = Callable[[PendingToolApproval], tuple[bool, Optional[str]]]
 
 class LLMResult(RequestStats):
     tool_calls: Optional[List[ToolCallResult]] = None
-    num_llm_calls: Optional[int] = None  # Number of LLM API calls (turns)
+    # Turns the *parent* (this) agent itself burned. Does NOT include turns
+    # the subagents spawned by this agent burned.
+    num_llm_calls: Optional[int] = None
+    # Turns burned by every subagent dispatched from this agent (summed).
+    # Always 0 when subagents_enabled=False or no dispatch_agent calls were
+    # made. The "total" turn count for a run is num_llm_calls +
+    # num_subagent_llm_calls.
+    num_subagent_llm_calls: int = 0
     result: Optional[str] = None
     unprocessed_result: Optional[str] = None
     instructions: List[str] = Field(default_factory=list)
@@ -510,6 +517,7 @@ class ToolCallingLLM:
         all_tool_calls: list[dict] = []
         tool_decisions: Optional[List[ToolApprovalDecision]] = None
         total_num_llm_calls = 0
+        total_subagent_llm_calls = 0
         accumulated_stats = RequestStats()
 
         while True:
@@ -573,6 +581,11 @@ class ToolCallingLLM:
             # call_stream returns the absolute iteration count (including offset),
             # so we assign rather than accumulate to avoid double-counting.
             total_num_llm_calls = terminal_data.get("num_llm_calls", 0)
+            # Subagent turns are emitted per-stream (not absolute); accumulate
+            # across approval-loop iterations.
+            total_subagent_llm_calls += terminal_data.get(
+                "num_subagent_llm_calls", 0
+            )
             accumulated_stats += RequestStats(**terminal_data.get("costs", {}))
 
             if terminal_event == StreamEvents.APPROVAL_REQUIRED:
@@ -587,6 +600,7 @@ class ToolCallingLLM:
                         result="Investigation paused: the AI requested frontend-defined tools that cannot be executed in sync mode.",
                         tool_calls=all_tool_calls,  # type: ignore
                         num_llm_calls=total_num_llm_calls,
+                        num_subagent_llm_calls=total_subagent_llm_calls,
                         messages=terminal_data.get("messages"),
                         metadata=terminal_data.get("metadata"),
                         **accumulated_stats.model_dump(),
@@ -608,6 +622,7 @@ class ToolCallingLLM:
                 result=terminal_data["content"],
                 tool_calls=list(deduped.values()),
                 num_llm_calls=total_num_llm_calls,
+                num_subagent_llm_calls=total_subagent_llm_calls,
                 messages=terminal_data["messages"],
                 metadata=terminal_data.get("metadata"),
                 **accumulated_stats.model_dump(),
@@ -1014,6 +1029,10 @@ class ToolCallingLLM:
         max_steps = self.max_steps
         metadata: Dict[Any, Any] = {}
         stats = RequestStats()
+        # Turns burned by subagents dispatched during this stream run. Rolled
+        # up from StructuredToolResult.subagent_num_llm_calls when tool results
+        # come back from dispatch_agent.
+        subagent_turns = 0
         if iteration_offset < 0:
             raise ValueError("iteration_offset must be non-negative")
         i = iteration_offset
@@ -1175,6 +1194,7 @@ class ToolCallingLLM:
                         "metadata": metadata,
                         "tool_calls": all_tool_calls,
                         "num_llm_calls": i,
+                        "num_subagent_llm_calls": subagent_turns,
                         "prompt": json.dumps(messages, indent=2),
                         "costs": stats.model_dump(),
                     },
@@ -1228,6 +1248,25 @@ class ToolCallingLLM:
                         raise LLMInterruptedError()
 
                     tool_call_result: ToolCallResult = future.result()
+
+                    # If a tool dispatched a subagent, roll the child's
+                    # token/cost usage into our own per-iteration stats and
+                    # accumulate its turn count separately.
+                    sub_stats = getattr(
+                        tool_call_result.result, "subagent_stats", None
+                    )
+                    if sub_stats:
+                        try:
+                            stats += RequestStats(**sub_stats)
+                        except Exception:
+                            logging.exception(
+                                "Failed to roll subagent stats into parent stats"
+                            )
+                    sub_turns = getattr(
+                        tool_call_result.result, "subagent_num_llm_calls", None
+                    )
+                    if sub_turns:
+                        subagent_turns += int(sub_turns)
 
                     tool_result_dict = tool_call_result.to_client_dict()
 
@@ -1339,6 +1378,7 @@ class ToolCallingLLM:
                                 fc.model_dump() for fc in pending_frontend_calls
                             ],
                             "num_llm_calls": i,
+                            "num_subagent_llm_calls": subagent_turns,
                             "costs": stats.model_dump(),
                         },
                     )

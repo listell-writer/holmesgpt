@@ -241,6 +241,44 @@ def test_dispatch_tool_refuses_recursion_from_subagent(mock_llm, mock_tool_execu
 
 
 @patch(LIMIT_PATCH, side_effect=_passthrough_limiter)
+def test_dispatch_attaches_child_stats_and_turns(
+    _mock_limit, mock_llm, mock_tool_executor
+):
+    """The dispatch tool must attach the child's RequestStats and turn count
+    onto the StructuredToolResult so the parent can roll them up."""
+    parent = ToolCallingLLM(
+        tool_executor=mock_tool_executor,
+        max_steps=10,
+        llm=mock_llm,
+        tool_results_dir=None,
+        subagents_enabled=True,
+    )
+    # Make the child run two iterations: tool call, then final answer.
+    # Use a real-looking response with usage so total_tokens > 0.
+    final = _make_llm_response(content="found it: 7 restarts")
+    mock_llm.completion.side_effect = [final]
+
+    tool = DispatchAgentTool()
+    ctx = ToolInvokeContext(
+        llm=mock_llm,
+        max_token_count=10000,
+        tool_call_id="tc_1",
+        tool_name=DISPATCH_AGENT_TOOL_NAME,
+        parent_agent=parent,
+    )
+    result = tool._invoke(
+        {"task_description": "x", "prompt": "do it"}, ctx
+    )
+
+    assert result.status == StructuredToolResultStatus.SUCCESS
+    # Child stats should be attached to the tool result for parent rollup.
+    assert result.subagent_stats is not None
+    assert result.subagent_stats["total_tokens"] > 0
+    # The child made exactly one LLM call (final answer with no tools).
+    assert result.subagent_num_llm_calls == 1
+
+
+@patch(LIMIT_PATCH, side_effect=_passthrough_limiter)
 def test_dispatch_spawns_child_with_same_llm_and_executor(
     _mock_limit, mock_llm, mock_tool_executor
 ):

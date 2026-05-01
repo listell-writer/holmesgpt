@@ -1139,17 +1139,32 @@ def generate_model_by_tag_table(results: Dict[str, Any]) -> str:
 
 
 def generate_cost_comparison_table(results: Dict[str, Any]) -> str:
-    """Generate model cost comparison table."""
+    """Generate model cost / token / turn comparison table.
+
+    Costs and tokens are summed across the parent agent and any subagents it
+    dispatched (the parent's accumulated_stats already rolls them up). Turns
+    are split into parent vs total because a subagent run can finish a task
+    in fewer parent turns at the price of more subagent turns — a tradeoff
+    worth seeing per-model in the matrix eval.
+    """
     model_costs: DefaultDict[str, List[float]] = defaultdict(list)
+    model_total_tokens: DefaultDict[str, List[int]] = defaultdict(list)
+    model_parent_turns: DefaultDict[str, List[int]] = defaultdict(list)
+    model_subagent_turns: DefaultDict[str, List[int]] = defaultdict(list)
+    model_total_turns: DefaultDict[str, List[int]] = defaultdict(list)
 
     for test in results.get("tests", []):
         # Skip deselected tests
         if test.get("outcome") == "deselected":
             continue
 
-        # Extract model and cost from user_properties
+        # Extract model + per-test metrics from user_properties
         model = None
         cost = None
+        total_tokens = None
+        parent_turns = None
+        subagent_turns = None
+        total_turns = None
 
         user_props = test.get("user_properties", [])
         for prop in user_props:
@@ -1158,6 +1173,14 @@ def generate_cost_comparison_table(results: Dict[str, Any]) -> str:
                     model = prop["model"]
                 if "cost" in prop:
                     cost = prop["cost"]
+                if "total_tokens" in prop:
+                    total_tokens = prop["total_tokens"]
+                if "num_llm_calls" in prop:
+                    parent_turns = prop["num_llm_calls"]
+                if "num_subagent_llm_calls" in prop:
+                    subagent_turns = prop["num_subagent_llm_calls"]
+                if "total_turns" in prop:
+                    total_turns = prop["total_turns"]
 
         # Fallback: try to extract model from nodeid if needed
         if not model:
@@ -1165,36 +1188,80 @@ def generate_cost_comparison_table(results: Dict[str, Any]) -> str:
             if "-" in nodeid:
                 model = nodeid.split("-")[-1].rstrip("]")
 
-        if model and cost is not None and cost > 0:
-            model_costs[model].append(cost)
-
-    if not model_costs:
-        return ""
-
-    # Build markdown table
-    lines = []
-    lines.append("## Model Cost Comparison")
-    lines.append("")
-    lines.append("| Model | Tests | Avg Cost | Min Cost | Max Cost | Total Cost |")
-    lines.append("|-------|-------|----------|----------|----------|------------|")
-
-    for model in sorted(model_costs.keys(), key=get_model_sort_key):
-        costs = model_costs[model]
-        if not costs:
+        if not model:
             continue
 
-        avg_cost = sum(costs) / len(costs)
-        min_cost = min(costs)
-        max_cost = max(costs)
-        total_cost = sum(costs)
-        num_tests = len(costs)
+        if cost is not None and cost > 0:
+            model_costs[model].append(cost)
+        if total_tokens is not None and total_tokens > 0:
+            model_total_tokens[model].append(int(total_tokens))
+        if parent_turns is not None:
+            model_parent_turns[model].append(int(parent_turns))
+        if subagent_turns is not None:
+            model_subagent_turns[model].append(int(subagent_turns))
+        if total_turns is not None:
+            model_total_turns[model].append(int(total_turns))
 
-        # Get clean display name
+    if not model_costs and not model_total_turns:
+        return ""
+
+    # Build markdown table — costs and tokens are summed across parent+subagents.
+    lines = []
+    lines.append("## Model Cost / Tokens / Turns Comparison")
+    lines.append("")
+    lines.append(
+        "_Cost and token totals are summed across the parent agent and any "
+        "subagents it dispatched. **Parent turns** is the top-level agent's "
+        "LLM-call count; **Total turns** also adds turns the dispatched "
+        "subagents burned._"
+    )
+    lines.append("")
+    lines.append(
+        "| Model | Tests | Avg Cost | Min Cost | Max Cost | Total Cost | Avg Tokens | Avg Parent Turns | Avg Subagent Turns | Avg Total Turns |"
+    )
+    lines.append(
+        "|-------|-------|----------|----------|----------|------------|-----------:|-----------------:|-------------------:|----------------:|"
+    )
+
+    all_models = (
+        set(model_costs.keys())
+        | set(model_total_turns.keys())
+        | set(model_parent_turns.keys())
+    )
+
+    def _avg(values: List[float]) -> str:
+        return f"{(sum(values) / len(values)):.1f}" if values else "—"
+
+    def _avg_int(values: List[int]) -> str:
+        return f"{int(round(sum(values) / len(values))):,}" if values else "—"
+
+    for model in sorted(all_models, key=get_model_sort_key):
+        costs = model_costs.get(model, [])
+        tokens = model_total_tokens.get(model, [])
+        p_turns = model_parent_turns.get(model, [])
+        s_turns = model_subagent_turns.get(model, [])
+        t_turns = model_total_turns.get(model, [])
+
+        num_tests = len(costs) or len(t_turns) or len(p_turns)
+        if not num_tests:
+            continue
+
+        if costs:
+            avg_cost = sum(costs) / len(costs)
+            min_cost = min(costs)
+            max_cost = max(costs)
+            total_cost = sum(costs)
+            cost_cells = (
+                f"${avg_cost:.2f} | ${min_cost:.2f} | ${max_cost:.2f} | ${total_cost:.2f}"
+            )
+        else:
+            cost_cells = "— | — | — | —"
+
         display_model = get_model_display_name(model)
 
         lines.append(
-            f"| {display_model} | {num_tests} | ${avg_cost:.2f} | ${min_cost:.2f} | "
-            f"${max_cost:.2f} | ${total_cost:.2f} |"
+            f"| {display_model} | {num_tests} | {cost_cells} | "
+            f"{_avg_int(tokens)} | {_avg(p_turns)} | {_avg(s_turns)} | {_avg(t_turns)} |"
         )
 
     return "\n".join(lines)

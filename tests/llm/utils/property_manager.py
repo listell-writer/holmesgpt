@@ -238,7 +238,9 @@ def update_test_results(
     # Tokens are useful even when cost is 0 (e.g., local or free-tier runs)
     # Record token counts when present regardless of total_cost
     if hasattr(result, "total_cost") or hasattr(result, "total_tokens"):
-        # Always record cost if present (even if 0)
+        # Always record cost if present (even if 0). Note: parent's accumulated_stats
+        # already includes any cost/tokens burned by subagents, so this single
+        # number reflects the entire run.
         if hasattr(result, "total_cost"):
             request.node.user_properties.append(("cost", result.total_cost))
         # Always record tokens if present
@@ -270,6 +272,18 @@ def update_test_results(
             request.node.user_properties.append(
                 ("num_compactions", result.num_compactions)
             )
+
+    # Track turns. Parent turns is what the top-level agent itself burned;
+    # subagent turns is the sum across every dispatch_agent child; total turns
+    # is the sum (this is what users typically care about for cost vs latency
+    # tradeoffs in the matrix eval comparison).
+    parent_turns = getattr(result, "num_llm_calls", None) or 0
+    subagent_turns = getattr(result, "num_subagent_llm_calls", 0) or 0
+    request.node.user_properties.append(("num_llm_calls", parent_turns))
+    request.node.user_properties.append(("num_subagent_llm_calls", subagent_turns))
+    request.node.user_properties.append(
+        ("total_turns", parent_turns + subagent_turns)
+    )
 
     return scores
 

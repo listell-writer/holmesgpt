@@ -31,6 +31,29 @@ DISPATCH_AGENT_TOOL_NAME = "dispatch_agent"
 # narrowly scoped, so we cap them well below the parent's typical max_steps.
 DEFAULT_SUBAGENT_MAX_STEPS = 50
 
+_REQUEST_STATS_FIELDS = (
+    "total_cost",
+    "total_tokens",
+    "prompt_tokens",
+    "completion_tokens",
+    "cached_tokens",
+    "reasoning_tokens",
+    "max_completion_tokens_per_call",
+    "max_prompt_tokens_per_call",
+    "num_compactions",
+)
+
+
+def _extract_request_stats(result: Any) -> Dict[str, Any]:
+    """Pull just the RequestStats fields out of an LLMResult into a plain dict.
+
+    LLMResult inherits from RequestStats, so all of these attributes exist.
+    Returning a dict (not a RequestStats instance) avoids importing RequestStats
+    in tools.py — keeps the StructuredToolResult model layering clean.
+    """
+    return {field: getattr(result, field, None) for field in _REQUEST_STATS_FIELDS}
+
+
 SUBAGENT_SYSTEM_PROMPT = (
     "You are a focused subagent spawned by a parent investigation agent. "
     "You have access to the same tools as the parent agent and use the same model, "
@@ -163,12 +186,16 @@ class DispatchAgentTool(Tool):
                 status=StructuredToolResultStatus.NO_DATA,
                 error="Subagent finished without producing a final answer.",
                 params=params,
+                subagent_stats=_extract_request_stats(result),
+                subagent_num_llm_calls=result.num_llm_calls,
             )
 
         return StructuredToolResult(
             status=StructuredToolResultStatus.SUCCESS,
             data=answer,
             params=params,
+            subagent_stats=_extract_request_stats(result),
+            subagent_num_llm_calls=result.num_llm_calls,
         )
 
     def get_parameterized_one_liner(self, params: Dict[str, Any]) -> str:
