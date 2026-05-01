@@ -942,12 +942,16 @@ class ToolCallingLLM:
         tool = self.tool_executor.get_tool_by_name(tool_name)
         if not tool:
             return False
+        # Mirror the context shape that _directly_invoke_tool_call builds so
+        # requires_approval() sees identical inputs on both the real and
+        # re-check paths (notably parent_agent, used by subagent tooling).
         context = ToolInvokeContext(
             llm=self.llm,
             max_token_count=self.llm.get_max_token_count_for_single_tool(),
             tool_name=tool_name,
             tool_call_id="",
             session_approved_prefixes=session_approved_prefixes or [],
+            parent_agent=self,
         )
         approval = tool.requires_approval(params, context)
         return not approval or not approval.needs_approval

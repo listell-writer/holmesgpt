@@ -1152,6 +1152,11 @@ def generate_cost_comparison_table(results: Dict[str, Any]) -> str:
     model_parent_turns: DefaultDict[str, List[int]] = defaultdict(list)
     model_subagent_turns: DefaultDict[str, List[int]] = defaultdict(list)
     model_total_turns: DefaultDict[str, List[int]] = defaultdict(list)
+    # Count every test row that resolved to a model, regardless of which
+    # metrics it produced. This ensures token-only or turn-only runs (e.g.
+    # zero-cost local-model runs, or older results without cost data) still
+    # show up and are counted accurately in the Tests column.
+    model_test_counts: DefaultDict[str, int] = defaultdict(int)
 
     for test in results.get("tests", []):
         # Skip deselected tests
@@ -1190,6 +1195,7 @@ def generate_cost_comparison_table(results: Dict[str, Any]) -> str:
 
         if not model:
             continue
+        model_test_counts[model] += 1
 
         if cost is not None and cost > 0:
             model_costs[model].append(cost)
@@ -1202,7 +1208,7 @@ def generate_cost_comparison_table(results: Dict[str, Any]) -> str:
         if total_turns is not None:
             model_total_turns[model].append(int(total_turns))
 
-    if not model_costs and not model_total_turns:
+    if not model_test_counts:
         return ""
 
     # Build markdown table — costs and tokens are summed across parent+subagents.
@@ -1223,10 +1229,15 @@ def generate_cost_comparison_table(results: Dict[str, Any]) -> str:
         "|-------|-------|----------|----------|----------|------------|-----------:|-----------------:|-------------------:|----------------:|"
     )
 
+    # Union over every metric map — and the test-count map — so a model
+    # that only produced tokens (and no cost) still appears.
     all_models = (
-        set(model_costs.keys())
-        | set(model_total_turns.keys())
+        set(model_test_counts.keys())
+        | set(model_costs.keys())
+        | set(model_total_tokens.keys())
         | set(model_parent_turns.keys())
+        | set(model_subagent_turns.keys())
+        | set(model_total_turns.keys())
     )
 
     def _avg(values: List[float]) -> str:
@@ -1242,7 +1253,7 @@ def generate_cost_comparison_table(results: Dict[str, Any]) -> str:
         s_turns = model_subagent_turns.get(model, [])
         t_turns = model_total_turns.get(model, [])
 
-        num_tests = len(costs) or len(t_turns) or len(p_turns)
+        num_tests = model_test_counts[model]
         if not num_tests:
             continue
 

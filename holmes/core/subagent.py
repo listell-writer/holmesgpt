@@ -100,8 +100,28 @@ class DispatchAgentTool(Tool):
         # tools.py, which is loaded before this module.
         from holmes.core.tool_calling_llm import ToolCallingLLM
 
-        task_description = (params.get("task_description") or "subagent task").strip()
-        prompt = (params.get("prompt") or "").strip()
+        # The JSON Schema declares both fields as strings, but the schema
+        # coercer only converts FROM string to other types — not the reverse —
+        # so a misbehaving model could still hand us a number/array here.
+        # Reject explicitly rather than crashing in .strip().
+        raw_task_description = params.get("task_description", "subagent task")
+        raw_prompt = params.get("prompt", "")
+
+        if raw_task_description is not None and not isinstance(raw_task_description, str):
+            return StructuredToolResult(
+                status=StructuredToolResultStatus.ERROR,
+                error="dispatch_agent 'task_description' must be a string.",
+                params=params,
+            )
+        if not isinstance(raw_prompt, str):
+            return StructuredToolResult(
+                status=StructuredToolResultStatus.ERROR,
+                error="dispatch_agent 'prompt' must be a string.",
+                params=params,
+            )
+
+        task_description = (raw_task_description or "subagent task").strip() or "subagent task"
+        prompt = raw_prompt.strip()
 
         if not prompt:
             return StructuredToolResult(
