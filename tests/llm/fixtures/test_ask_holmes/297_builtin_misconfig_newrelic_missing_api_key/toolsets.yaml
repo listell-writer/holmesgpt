@@ -1,0 +1,11 @@
+toolsets:
+  newrelic:
+    enabled: true
+    config:
+      account_id: '12345'
+  kubernetes/core:
+    enabled: false
+  kubernetes/logs:
+    enabled: false
+  helm/core:
+    enabled: false

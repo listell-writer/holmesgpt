@@ -1,0 +1,12 @@
+toolsets:
+  grafana/loki:
+    enabled: true
+    config:
+      api_url: http://127.0.0.1:54321
+      timeout_seconds: 0
+  kubernetes/core:
+    enabled: false
+  kubernetes/logs:
+    enabled: false
+  helm/core:
+    enabled: false

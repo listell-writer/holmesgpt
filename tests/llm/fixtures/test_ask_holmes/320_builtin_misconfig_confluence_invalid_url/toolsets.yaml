@@ -1,0 +1,13 @@
+toolsets:
+  confluence:
+    enabled: true
+    config:
+      api_url: https://invalid-confluence-host-eval.invalid/wiki
+      api_key: fake
+      user: test@example.com
+  kubernetes/core:
+    enabled: false
+  kubernetes/logs:
+    enabled: false
+  helm/core:
+    enabled: false

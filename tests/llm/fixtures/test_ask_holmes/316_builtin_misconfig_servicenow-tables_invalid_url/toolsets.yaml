@@ -1,0 +1,12 @@
+toolsets:
+  servicenow/tables:
+    enabled: true
+    config:
+      api_url: https://invalid-servicenow-host-eval.invalid/api
+      api_key: fake-key
+  kubernetes/core:
+    enabled: false
+  kubernetes/logs:
+    enabled: false
+  helm/core:
+    enabled: false

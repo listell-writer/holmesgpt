@@ -1,0 +1,11 @@
+toolsets:
+  database/sql:
+    enabled: true
+    config:
+      connection_url: redis://localhost:6379/0
+  kubernetes/core:
+    enabled: false
+  kubernetes/logs:
+    enabled: false
+  helm/core:
+    enabled: false

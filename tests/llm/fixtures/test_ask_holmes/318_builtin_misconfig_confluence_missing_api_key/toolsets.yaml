@@ -1,0 +1,12 @@
+toolsets:
+  confluence:
+    enabled: true
+    config:
+      api_url: https://example.atlassian.net/wiki
+      user: test@example.com
+  kubernetes/core:
+    enabled: false
+  kubernetes/logs:
+    enabled: false
+  helm/core:
+    enabled: false

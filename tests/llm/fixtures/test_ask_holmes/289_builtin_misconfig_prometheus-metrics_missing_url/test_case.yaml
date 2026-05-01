@@ -1,0 +1,15 @@
+user_prompt:
+  - "Show me the average request latency from Prometheus over the last 30 minutes."
+
+expected_output:
+  - "Must clearly tell the user that the Prometheus toolset is unavailable, failed to load, or is misconfigured (the user should NOT be told the request was satisfied)"
+  - "Must reference the underlying error indicating: missing/required prometheus_url"
+  - "Must guide the user on how to fix the Prometheus toolset configuration (e.g. set the missing/required field, fix the typo, or update the YAML)"
+
+# This eval intentionally configures the toolset to fail. allow_toolset_failures
+# lets the test framework continue past the prereq error so the LLM actually runs.
+allow_toolset_failures: true
+
+tags:
+  - transparency
+  - hard

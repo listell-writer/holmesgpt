@@ -1,0 +1,11 @@
+toolsets:
+  elasticsearch/data:
+    enabled: true
+    config:
+      api_url: http://127.0.0.1:54321
+  kubernetes/core:
+    enabled: false
+  kubernetes/logs:
+    enabled: false
+  helm/core:
+    enabled: false

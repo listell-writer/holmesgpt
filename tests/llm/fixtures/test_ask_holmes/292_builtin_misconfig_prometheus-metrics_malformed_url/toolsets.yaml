@@ -1,0 +1,11 @@
+toolsets:
+  prometheus/metrics:
+    enabled: true
+    config:
+      prometheus_url: not-a-real-url
+  kubernetes/core:
+    enabled: false
+  kubernetes/logs:
+    enabled: false
+  helm/core:
+    enabled: false

@@ -1,0 +1,12 @@
+toolsets:
+  mongodb-cluster:
+    enabled: true
+    config:
+      connection_url: http://localhost:27017
+    type: mongodb
+  kubernetes/core:
+    enabled: false
+  kubernetes/logs:
+    enabled: false
+  helm/core:
+    enabled: false

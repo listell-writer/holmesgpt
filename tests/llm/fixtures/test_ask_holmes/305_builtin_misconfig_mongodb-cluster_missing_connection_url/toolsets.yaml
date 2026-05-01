@@ -1,0 +1,11 @@
+toolsets:
+  mongodb-cluster:
+    enabled: true
+    config: {}
+    type: mongodb
+  kubernetes/core:
+    enabled: false
+  kubernetes/logs:
+    enabled: false
+  helm/core:
+    enabled: false

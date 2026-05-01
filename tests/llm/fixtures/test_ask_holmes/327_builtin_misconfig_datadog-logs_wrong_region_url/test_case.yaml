@@ -1,0 +1,15 @@
+user_prompt:
+  - "Search Datadog logs for ERROR level events from the api-service in the last hour."
+
+expected_output:
+  - "Must clearly tell the user that the Datadog Logs toolset is unavailable, failed to load, or is misconfigured (the user should NOT be told the request was satisfied)"
+  - "Must reference the underlying error indicating: DNS / name resolution / connection / unreachable / health check failed"
+  - "Must guide the user to verify the Datadog Logs toolset configuration (e.g. confirm the URL/host is reachable, the credentials are correct, or the value matches expectations)"
+
+# This eval intentionally configures the toolset to fail. allow_toolset_failures
+# lets the test framework continue past the prereq error so the LLM actually runs.
+allow_toolset_failures: true
+
+tags:
+  - transparency
+  - hard

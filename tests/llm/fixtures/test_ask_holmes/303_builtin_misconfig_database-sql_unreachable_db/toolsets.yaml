@@ -1,0 +1,11 @@
+toolsets:
+  database/sql:
+    enabled: true
+    config:
+      connection_url: postgresql+pg8000://user:pass@127.0.0.1:54321/db
+  kubernetes/core:
+    enabled: false
+  kubernetes/logs:
+    enabled: false
+  helm/core:
+    enabled: false

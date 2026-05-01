@@ -1,0 +1,13 @@
+toolsets:
+  datadog/logs:
+    enabled: true
+    config:
+      api_key: fake-api-key
+      app_key: fake-app-key
+      api_url: not-a-url
+  kubernetes/core:
+    enabled: false
+  kubernetes/logs:
+    enabled: false
+  helm/core:
+    enabled: false

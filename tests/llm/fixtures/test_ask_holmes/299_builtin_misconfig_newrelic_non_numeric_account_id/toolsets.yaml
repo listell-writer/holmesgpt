@@ -1,0 +1,12 @@
+toolsets:
+  newrelic:
+    enabled: true
+    config:
+      api_key: fake-key
+      account_id: my-account
+  kubernetes/core:
+    enabled: false
+  kubernetes/logs:
+    enabled: false
+  helm/core:
+    enabled: false

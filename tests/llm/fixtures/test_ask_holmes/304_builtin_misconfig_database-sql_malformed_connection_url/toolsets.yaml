@@ -1,0 +1,11 @@
+toolsets:
+  database/sql:
+    enabled: true
+    config:
+      connection_url: not-a-connection-string
+  kubernetes/core:
+    enabled: false
+  kubernetes/logs:
+    enabled: false
+  helm/core:
+    enabled: false

@@ -1,0 +1,12 @@
+toolsets:
+  coralogix:
+    enabled: true
+    config:
+      domain: eu2.coralogix.com
+      api_key: <YOUR_CORALOGIX_API_KEY>
+  kubernetes/core:
+    enabled: false
+  kubernetes/logs:
+    enabled: false
+  helm/core:
+    enabled: false

@@ -1,0 +1,10 @@
+toolsets:
+  elasticsearch/data:
+    enabled: true
+    config: {}
+  kubernetes/core:
+    enabled: false
+  kubernetes/logs:
+    enabled: false
+  helm/core:
+    enabled: false

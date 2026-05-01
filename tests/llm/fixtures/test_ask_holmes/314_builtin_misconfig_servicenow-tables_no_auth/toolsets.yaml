@@ -1,0 +1,11 @@
+toolsets:
+  servicenow/tables:
+    enabled: true
+    config:
+      api_url: https://example.service-now.com/api
+  kubernetes/core:
+    enabled: false
+  kubernetes/logs:
+    enabled: false
+  helm/core:
+    enabled: false

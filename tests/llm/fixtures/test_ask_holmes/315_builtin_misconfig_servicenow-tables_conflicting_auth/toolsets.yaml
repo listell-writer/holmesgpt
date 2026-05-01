@@ -1,0 +1,14 @@
+toolsets:
+  servicenow/tables:
+    enabled: true
+    config:
+      api_url: https://example.service-now.com/api
+      api_key: fake
+      username: u
+      password: p
+  kubernetes/core:
+    enabled: false
+  kubernetes/logs:
+    enabled: false
+  helm/core:
+    enabled: false

@@ -1,0 +1,12 @@
+toolsets:
+  coralogix:
+    enabled: true
+    config:
+      domain: definitely-not-coralogix.invalid
+      api_key: fake-key
+  kubernetes/core:
+    enabled: false
+  kubernetes/logs:
+    enabled: false
+  helm/core:
+    enabled: false

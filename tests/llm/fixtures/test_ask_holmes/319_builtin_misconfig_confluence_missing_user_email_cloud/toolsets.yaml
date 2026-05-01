@@ -1,0 +1,12 @@
+toolsets:
+  confluence:
+    enabled: true
+    config:
+      api_url: https://example.atlassian.net/wiki
+      api_key: fake
+  kubernetes/core:
+    enabled: false
+  kubernetes/logs:
+    enabled: false
+  helm/core:
+    enabled: false
