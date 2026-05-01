@@ -274,12 +274,17 @@ def update_test_results(
             )
 
     # Track turns. Parent turns is what the top-level agent itself burned;
-    # subagent turns is the sum across every dispatch_agent child; total turns
-    # is the sum (this is what users typically care about for cost vs latency
-    # tradeoffs in the matrix eval comparison).
+    # subagent invocations is how many times dispatch_agent was called;
+    # subagent turns is the sum of LLM calls across every dispatched child;
+    # total turns is parent + subagent (this is what users typically care
+    # about for cost vs latency tradeoffs in the matrix eval comparison).
     parent_turns = getattr(result, "num_llm_calls", None) or 0
+    subagent_invocations = getattr(result, "num_subagent_invocations", 0) or 0
     subagent_turns = getattr(result, "num_subagent_llm_calls", 0) or 0
     request.node.user_properties.append(("num_llm_calls", parent_turns))
+    request.node.user_properties.append(
+        ("num_subagent_invocations", subagent_invocations)
+    )
     request.node.user_properties.append(("num_subagent_llm_calls", subagent_turns))
     request.node.user_properties.append(
         ("total_turns", parent_turns + subagent_turns)

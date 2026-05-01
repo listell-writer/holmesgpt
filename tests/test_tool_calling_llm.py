@@ -1130,13 +1130,13 @@ EXPECTED_TOKEN_COUNT_METADATA_KEYS = {"costs", "usage", "tokens", "max_tokens", 
 
 EXPECTED_ANSWER_END_KEYS = {
     "content", "messages", "metadata", "tool_calls", "num_llm_calls",
-    "num_subagent_llm_calls", "prompt", "costs",
+    "num_subagent_invocations", "num_subagent_llm_calls", "prompt", "costs",
 }
 
 EXPECTED_APPROVAL_REQUIRED_KEYS = {
     "content", "messages", "pending_approvals",
     "pending_frontend_tool_calls", "num_llm_calls",
-    "num_subagent_llm_calls", "costs",
+    "num_subagent_invocations", "num_subagent_llm_calls", "costs",
 }
 
 

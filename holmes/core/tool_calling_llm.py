@@ -175,6 +175,11 @@ class LLMResult(RequestStats):
     # Turns the *parent* (this) agent itself burned. Does NOT include turns
     # the subagents spawned by this agent burned.
     num_llm_calls: Optional[int] = None
+    # Number of times the parent dispatched a subagent via dispatch_agent.
+    # Different from num_subagent_llm_calls — that's the *total turns* the
+    # subagents burned. e.g. 3 dispatches each burning 5 turns =
+    # num_subagent_invocations=3, num_subagent_llm_calls=15.
+    num_subagent_invocations: int = 0
     # Turns burned by every subagent dispatched from this agent (summed).
     # Always 0 when subagents_enabled=False or no dispatch_agent calls were
     # made. The "total" turn count for a run is num_llm_calls +
@@ -517,6 +522,7 @@ class ToolCallingLLM:
         all_tool_calls: list[dict] = []
         tool_decisions: Optional[List[ToolApprovalDecision]] = None
         total_num_llm_calls = 0
+        total_subagent_invocations = 0
         total_subagent_llm_calls = 0
         accumulated_stats = RequestStats()
 
@@ -581,8 +587,11 @@ class ToolCallingLLM:
             # call_stream returns the absolute iteration count (including offset),
             # so we assign rather than accumulate to avoid double-counting.
             total_num_llm_calls = terminal_data.get("num_llm_calls", 0)
-            # Subagent turns are emitted per-stream (not absolute); accumulate
-            # across approval-loop iterations.
+            # Subagent turns/invocations are emitted per-stream (not absolute);
+            # accumulate across approval-loop iterations.
+            total_subagent_invocations += terminal_data.get(
+                "num_subagent_invocations", 0
+            )
             total_subagent_llm_calls += terminal_data.get(
                 "num_subagent_llm_calls", 0
             )
@@ -600,6 +609,7 @@ class ToolCallingLLM:
                         result="Investigation paused: the AI requested frontend-defined tools that cannot be executed in sync mode.",
                         tool_calls=all_tool_calls,  # type: ignore
                         num_llm_calls=total_num_llm_calls,
+                        num_subagent_invocations=total_subagent_invocations,
                         num_subagent_llm_calls=total_subagent_llm_calls,
                         messages=terminal_data.get("messages"),
                         metadata=terminal_data.get("metadata"),
@@ -622,6 +632,7 @@ class ToolCallingLLM:
                 result=terminal_data["content"],
                 tool_calls=list(deduped.values()),
                 num_llm_calls=total_num_llm_calls,
+                num_subagent_invocations=total_subagent_invocations,
                 num_subagent_llm_calls=total_subagent_llm_calls,
                 messages=terminal_data["messages"],
                 metadata=terminal_data.get("metadata"),
@@ -1037,6 +1048,10 @@ class ToolCallingLLM:
         # up from StructuredToolResult.subagent_num_llm_calls when tool results
         # come back from dispatch_agent.
         subagent_turns = 0
+        # How many times the parent dispatched a subagent. Each
+        # StructuredToolResult coming back with subagent_num_llm_calls set
+        # represents one dispatch_agent invocation.
+        subagent_invocations = 0
         if iteration_offset < 0:
             raise ValueError("iteration_offset must be non-negative")
         i = iteration_offset
@@ -1198,6 +1213,7 @@ class ToolCallingLLM:
                         "metadata": metadata,
                         "tool_calls": all_tool_calls,
                         "num_llm_calls": i,
+                        "num_subagent_invocations": subagent_invocations,
                         "num_subagent_llm_calls": subagent_turns,
                         "prompt": json.dumps(messages, indent=2),
                         "costs": stats.model_dump(),
@@ -1269,8 +1285,13 @@ class ToolCallingLLM:
                     sub_turns = getattr(
                         tool_call_result.result, "subagent_num_llm_calls", None
                     )
-                    if sub_turns:
-                        subagent_turns += int(sub_turns)
+                    if sub_turns is not None:
+                        # Presence of this field means dispatch_agent ran (even
+                        # if the child happened to take 0 turns), so count it
+                        # as one invocation.
+                        subagent_invocations += 1
+                        if sub_turns:
+                            subagent_turns += int(sub_turns)
 
                     tool_result_dict = tool_call_result.to_client_dict()
 
@@ -1382,6 +1403,7 @@ class ToolCallingLLM:
                                 fc.model_dump() for fc in pending_frontend_calls
                             ],
                             "num_llm_calls": i,
+                            "num_subagent_invocations": subagent_invocations,
                             "num_subagent_llm_calls": subagent_turns,
                             "costs": stats.model_dump(),
                         },
