@@ -139,7 +139,8 @@ def mock_tool_executor():
         clone.clone_with_extra_tools = _clone_with_extra_tools
         return clone
 
-    te.clone_with_extra_tools = _clone_with_extra_tools
+    # Wrap in MagicMock so tests can assert call/no-call on this attribute.
+    te.clone_with_extra_tools = MagicMock(side_effect=_clone_with_extra_tools)
     return te
 
 
@@ -161,13 +162,9 @@ def test_subagents_disabled_does_not_register_tool(mock_llm, mock_tool_executor)
         tool_results_dir=None,
         subagents_enabled=False,
     )
-    # When disabled, the executor should not have been cloned to add the tool.
-    mock_tool_executor.clone_with_extra_tools.assert_not_called() if hasattr(
-        mock_tool_executor.clone_with_extra_tools, "assert_not_called"
-    ) else None
-    tool_names = [
-        t["function"]["name"] for t in ai._get_tools()
-    ]
+    # When disabled, the executor must not have been cloned to add the tool.
+    mock_tool_executor.clone_with_extra_tools.assert_not_called()
+    tool_names = [t["function"]["name"] for t in ai._get_tools()]
     assert DISPATCH_AGENT_TOOL_NAME not in tool_names
     assert ai.subagents_enabled is False
 
@@ -218,6 +215,29 @@ def test_dispatch_tool_rejects_missing_parent(mock_llm):
     result = tool._invoke({"task_description": "x", "prompt": "do a thing"}, ctx)
     assert result.status == StructuredToolResultStatus.ERROR
     assert "without a parent" in (result.error or "")
+
+
+def test_dispatch_tool_refuses_recursion_from_subagent(mock_llm, mock_tool_executor):
+    """If dispatch_agent ever leaks into a child's tool list, the runtime guard
+    must refuse — the child's subagents_enabled is False."""
+    child_like = ToolCallingLLM(
+        tool_executor=mock_tool_executor,
+        max_steps=5,
+        llm=mock_llm,
+        tool_results_dir=None,
+        subagents_enabled=False,
+    )
+    tool = DispatchAgentTool()
+    ctx = ToolInvokeContext(
+        llm=mock_llm,
+        max_token_count=10000,
+        tool_call_id="tc_1",
+        tool_name=DISPATCH_AGENT_TOOL_NAME,
+        parent_agent=child_like,
+    )
+    result = tool._invoke({"task_description": "x", "prompt": "do a thing"}, ctx)
+    assert result.status == StructuredToolResultStatus.ERROR
+    assert "subagent" in (result.error or "").lower()
 
 
 @patch(LIMIT_PATCH, side_effect=_passthrough_limiter)
@@ -306,3 +326,8 @@ def test_child_agent_cannot_recurse(_mock_limit, mock_llm, mock_tool_executor):
     child = spawned_children[0]
     assert child.subagents_enabled is False
     assert child.llm is mock_llm
+    # Capability check (not just config check): the child's tool list as the
+    # LLM sees it must NOT contain dispatch_agent, otherwise an LLM that
+    # ignored the system prompt could still invoke it.
+    child_tool_names = [t["function"]["name"] for t in child._get_tools()]
+    assert DISPATCH_AGENT_TOOL_NAME not in child_tool_names

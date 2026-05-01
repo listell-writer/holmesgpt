@@ -240,6 +240,7 @@ def test_holmes_check(
                         tracer=tracer,
                         eval_span=eval_span,
                         request=request,
+                        subagents_enabled=subagents_enabled,
                     )
 
     except Exception as e:

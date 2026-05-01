@@ -198,9 +198,10 @@ class ToolCallingLLM:
         tracer=None,
         subagents_enabled: bool = False,
     ):
-        # When subagents_enabled, register the dispatch_agent tool on a per-instance
-        # cloned executor so the LLM can spawn child agents that share this
-        # instance's llm and tool_executor.
+        # Keep a handle to the original (un-cloned) executor so that children
+        # spawned via dispatch_agent inherit a tool list that does NOT include
+        # the dispatch tool itself — this prevents recursive subagent spawning.
+        self._base_tool_executor = tool_executor
         self.subagents_enabled = subagents_enabled
         if subagents_enabled:
             from holmes.core.subagent import DispatchAgentTool

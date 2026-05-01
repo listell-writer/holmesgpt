@@ -254,13 +254,14 @@ def ask(
         "--fast-mode",
         help="Skip TodoWrite planning phase for faster responses",
     ),
-    subagents: bool = typer.Option(
-        False,
+    subagents: Optional[bool] = typer.Option(
+        None,
         "--subagents/--no-subagents",
         help=(
             "Enable the dispatch_agent (subagent) tool. When enabled, the agent "
             "can spawn focused child agents that share the same model and tools "
-            "but have isolated context windows."
+            "but have isolated context windows. If unset, the value of "
+            "subagents_enabled in the config file is used."
         ),
     ),
 ):

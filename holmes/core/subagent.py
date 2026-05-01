@@ -98,6 +98,20 @@ class DispatchAgentTool(Tool):
                 params=params,
             )
 
+        # Defense in depth: refuse to dispatch if the calling agent itself does
+        # not have subagents enabled. This catches cases where dispatch_agent
+        # somehow leaks into a child's tool list (e.g. via a shared executor)
+        # and prevents recursive subagent spawning.
+        if not getattr(parent_agent, "subagents_enabled", False):
+            return StructuredToolResult(
+                status=StructuredToolResultStatus.ERROR,
+                error=(
+                    "dispatch_agent cannot be invoked from a subagent. Only the "
+                    "top-level agent is allowed to spawn subagents."
+                ),
+                params=params,
+            )
+
         logging.info(
             f"[subagent] dispatching '{task_description}' "
             f"(prompt length={len(prompt)} chars)"
@@ -110,8 +124,14 @@ class DispatchAgentTool(Tool):
         # Children are spawned with subagents_enabled=False so they cannot
         # recursively dispatch further subagents. This matches the Claude Code
         # convention: only the top-level agent has the Task tool.
+        # We pass the parent's *base* executor (the original, un-cloned one
+        # that does not contain DispatchAgentTool) so the child's LLM cannot
+        # see dispatch_agent in its tool list at all.
+        child_executor = getattr(
+            parent_agent, "_base_tool_executor", parent_agent.tool_executor
+        )
         child = ToolCallingLLM(
-            tool_executor=parent_agent.tool_executor,
+            tool_executor=child_executor,
             max_steps=child_max_steps,
             llm=parent_agent.llm,
             tool_results_dir=getattr(parent_agent, "tool_results_dir", None),
