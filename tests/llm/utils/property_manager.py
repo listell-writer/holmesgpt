@@ -14,6 +14,7 @@ def set_initial_properties(
     test_case: HolmesTestCase,
     model: str,
     env_config: Optional["EnvConfig"] = None,
+    subagents_enabled: Optional[bool] = None,
 ) -> None:
     """Set initial properties at the beginning of a test so they're available even if test fails early.
 
@@ -22,6 +23,10 @@ def set_initial_properties(
         test_case: The test case being executed
         model: The model being used for this test run
         env_config: Optional environment configuration being used for this test run
+        subagents_enabled: Optional subagent matrix variant. When provided AND
+            the SUBAGENTS env var requested more than one variant, a suffix
+            ``[subagent_on]`` / ``[subagent_off]`` is appended to the reported
+            test ID so the GitHub report shows both variants distinctly.
     """
     expected = test_case.expected_output
     if not isinstance(expected, list):
@@ -57,8 +62,20 @@ def set_initial_properties(
 
     # Add model and test identification properties
     request.node.user_properties.append(("model", model))
+
+    # Build the test case ID shown in reports. When the subagent matrix is
+    # exercising multiple variants, suffix the ID so they can be told apart in
+    # GitHub eval reports (which aggregate by clean_test_case_id).
+    reported_id = test_case.id
+    if subagents_enabled is not None:
+        from tests.llm.utils.test_case_utils import get_subagent_modes
+
+        if len(get_subagent_modes()) > 1:
+            variant = "subagent_on" if subagents_enabled else "subagent_off"
+            reported_id = f"{test_case.id}[{variant}]"
+
     # Add clean test case ID (without model suffix that pytest adds during parameterization)
-    request.node.user_properties.append(("clean_test_case_id", test_case.id))
+    request.node.user_properties.append(("clean_test_case_id", reported_id))
     # Add tags for tag-based performance analysis
     request.node.user_properties.append(("tags", test_case.tags or []))
 

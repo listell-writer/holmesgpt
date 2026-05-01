@@ -77,7 +77,9 @@ def test_ask_holmes(
     shared_test_infrastructure,  # type: ignore
 ):
     # Set initial properties early so they're available even if test fails
-    set_initial_properties(request, test_case, model, env_config)
+    set_initial_properties(
+        request, test_case, model, env_config, subagents_enabled=subagents_enabled
+    )
     request.node.user_properties.append(("subagents_enabled", subagents_enabled))
 
     tracer = TracingFactory.create_tracer("braintrust")

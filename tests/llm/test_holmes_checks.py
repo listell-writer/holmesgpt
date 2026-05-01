@@ -176,7 +176,9 @@ def test_holmes_check(
     """Test holmes check command with various check configurations."""
 
     # Set initial properties
-    set_initial_properties(request, test_case, model)
+    set_initial_properties(
+        request, test_case, model, subagents_enabled=subagents_enabled
+    )
     request.node.user_properties.append(("subagents_enabled", subagents_enabled))
 
     # Check if test should be skipped
