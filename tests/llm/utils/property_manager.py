@@ -3,6 +3,7 @@ from typing import TYPE_CHECKING, Any, Dict, List, Optional, Union
 from tests.llm.utils.test_case_utils import (  # type: ignore[attr-defined]
     Evaluation,
     HolmesTestCase,
+    get_subagent_modes,
 )
 
 if TYPE_CHECKING:
@@ -67,12 +68,9 @@ def set_initial_properties(
     # exercising multiple variants, suffix the ID so they can be told apart in
     # GitHub eval reports (which aggregate by clean_test_case_id).
     reported_id = test_case.id
-    if subagents_enabled is not None:
-        from tests.llm.utils.test_case_utils import get_subagent_modes
-
-        if len(get_subagent_modes()) > 1:
-            variant = "subagent_on" if subagents_enabled else "subagent_off"
-            reported_id = f"{test_case.id}[{variant}]"
+    if subagents_enabled is not None and len(get_subagent_modes()) > 1:
+        variant = "subagent_on" if subagents_enabled else "subagent_off"
+        reported_id = f"{test_case.id}[{variant}]"
 
     # Add clean test case ID (without model suffix that pytest adds during parameterization)
     request.node.user_properties.append(("clean_test_case_id", reported_id))
