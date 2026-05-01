@@ -309,8 +309,8 @@ def generate_markdown_report(
             markdown += f", {ask_holmes_mock_failures} mock failures"
         markdown += "\n"
     # Generate detailed table
-    markdown += "\n\n| Status | Test case | Time | Turns | Tools | Cost | Total tokens | Input | Max input | Output | Max output | Cached | Non-cached | Reasoning | Compactions |\n"
-    markdown += "| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |\n"
+    markdown += "\n\n| Status | Test case | Suggest | Memories | Time | Turns | Tools | Cost | Total tokens | Input | Max input | Output | Max output | Cached | Non-cached | Reasoning | Compactions |\n"
+    markdown += "| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |\n"
 
     # Track totals for summary row
     total_time = 0.0
@@ -420,7 +420,19 @@ def generate_markdown_report(
         max_prompt_str = _fmt_tokens(max_prompt)
         compactions_str = str(num_compactions) if num_compactions > 0 else "—"
 
-        markdown += f"| {status.markdown_symbol} | {test_case_name} | {time_str} | {turns_str} | {tools_str} | {cost_str} | {total_tokens_str} | {input_str} | {max_prompt_str} | {output_str} | {max_completion_str} | {cached_tokens_str} | {non_cached_tokens_str} | {reasoning_str} | {compactions_str} |\n"
+        # Tool-suggestions matrix dimension: which variant produced this row
+        # and whether the LLM emitted any memories. When the variant is "off"
+        # the LLM never had access to the SUGGEST_RUNBOOKS tool, so the
+        # memory count is shown as "n/a" rather than 0 to make that obvious.
+        tool_suggestions_variant = result.get("tool_suggestions", "off")
+        tool_suggestions_str = tool_suggestions_variant
+        memories_count = result.get("memories_count", 0) or 0
+        if result.get("tool_suggestions_enabled"):
+            memories_str = f"{memories_count}" if memories_count else "0"
+        else:
+            memories_str = "n/a"
+
+        markdown += f"| {status.markdown_symbol} | {test_case_name} | {tool_suggestions_str} | {memories_str} | {time_str} | {turns_str} | {tools_str} | {cost_str} | {total_tokens_str} | {input_str} | {max_prompt_str} | {output_str} | {max_completion_str} | {cached_tokens_str} | {non_cached_tokens_str} | {reasoning_str} | {compactions_str} |\n"
 
     # Add summary row
     avg_time_str = f"{total_time / time_count:.1f}s" if time_count > 0 else "—"
@@ -436,7 +448,24 @@ def generate_markdown_report(
     max_completion_max_str = _fmt_tokens(max_completion_per_call_max)
     max_prompt_max_str = _fmt_tokens(max_prompt_per_call_max)
     total_compactions_str = str(total_compactions) if total_compactions > 0 else "—"
-    markdown += f"| | **Total** | **{avg_time_str}** avg | **{avg_turns_str}** avg | **{avg_tools_str}** avg | **{total_cost_str}** | **{total_tokens_total_str}** | **{total_prompt_str}** | **{max_prompt_max_str}** | **{total_completion_str}** | **{max_completion_max_str}** | **{total_cached_tokens_str}** | **{total_non_cached_tokens_str}** | **{total_reasoning_str}** | **{total_compactions_str}** |\n"
+    # Aggregate memories across the suggest=on rows so the totals row mirrors
+    # the per-row column: count of rows where the matrix injected the tool,
+    # and the total number of suggestions those rows produced.
+    rows_with_suggest_on = sum(
+        1 for r in sorted_results if r.get("tool_suggestions_enabled")
+    )
+    total_memories_sum = sum(
+        (r.get("memories_count") or 0)
+        for r in sorted_results
+        if r.get("tool_suggestions_enabled")
+    )
+    suggest_total_str = (
+        f"{rows_with_suggest_on}/{len(sorted_results)} on" if rows_with_suggest_on else "—"
+    )
+    memories_total_str = (
+        f"**{total_memories_sum}**" if rows_with_suggest_on else "—"
+    )
+    markdown += f"| | **Total** | {suggest_total_str} | {memories_total_str} | **{avg_time_str}** avg | **{avg_turns_str}** avg | **{avg_tools_str}** avg | **{total_cost_str}** | **{total_tokens_total_str}** | **{total_prompt_str}** | **{max_prompt_max_str}** | **{total_completion_str}** | **{max_completion_max_str}** | **{total_cached_tokens_str}** | **{total_non_cached_tokens_str}** | **{total_reasoning_str}** | **{total_compactions_str}** |\n"
 
     # Add footer explaining benchmark comparison status
     if not benchmark and historical_details and historical_details.status:

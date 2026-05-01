@@ -28,6 +28,7 @@ from tests.llm.utils.property_manager import (
     handle_test_error,
     set_initial_properties,
     set_trace_properties,
+    update_property,
     update_test_results,
 )
 from tests.llm.utils.retry_handler import retry_on_throttle
@@ -36,6 +37,13 @@ from tests.llm.utils.test_case_utils import (
     check_and_skip_test,
     create_eval_llm,
     get_models,
+)
+from tests.llm.utils.tool_suggestions_config import (
+    ToolSuggestionsConfig,
+    append_suggest_runbooks_system_prompt,
+    extract_suggested_memories,
+    get_tool_suggestions_configs,
+    maybe_inject_suggest_runbooks_tool,
 )
 
 TEST_CASES_FOLDER = Path(
@@ -52,7 +60,17 @@ def _get_env_config_ids():
     return [ec.name for ec in get_env_configs()]
 
 
+def _get_tool_suggestions_ids():
+    """Generate ids for tool_suggestions parameterization (e.g. ``suggest=on``)."""
+    return [f"suggest={c.name}" for c in get_tool_suggestions_configs()]
+
+
 @pytest.mark.llm
+@pytest.mark.parametrize(
+    "tool_suggestions",
+    get_tool_suggestions_configs(),
+    ids=_get_tool_suggestions_ids(),
+)
 @pytest.mark.parametrize("env_config", get_env_configs(), ids=_get_env_config_ids())
 @pytest.mark.parametrize("model", get_models())
 @pytest.mark.parametrize("test_case", get_ask_holmes_test_cases())
@@ -60,23 +78,34 @@ def test_ask_holmes(
     env_config: EnvConfig,
     model: str,
     test_case: AskHolmesTestCase,
+    tool_suggestions: ToolSuggestionsConfig,
     caplog,
     request,
     additional_system_prompt,
     shared_test_infrastructure,  # type: ignore
 ):
     # Set initial properties early so they're available even if test fails
-    set_initial_properties(request, test_case, model, env_config)
+    set_initial_properties(
+        request, test_case, model, env_config, tool_suggestions=tool_suggestions
+    )
 
     tracer = TracingFactory.create_tracer("braintrust")
-    metadata = {"model": model, "env_config": env_config.name}
+    metadata = {
+        "model": model,
+        "env_config": env_config.name,
+        "tool_suggestions": tool_suggestions.name,
+    }
     tracer.start_experiment(additional_metadata=metadata)
 
     result: Optional[LLMResult] = None
 
     try:
         with tracer.start_trace(
-            name=f"{test_case.id}[{model}][{env_config.name}]", span_type=SpanType.EVAL
+            name=(
+                f"{test_case.id}[{model}][{env_config.name}]"
+                f"[suggest={tool_suggestions.name}]"
+            ),
+            span_type=SpanType.EVAL,
         ) as eval_span:
             set_trace_properties(request, eval_span)
             check_and_skip_test(test_case, request, shared_test_infrastructure)
@@ -108,7 +137,10 @@ def test_ask_holmes(
                     model,  # positional arg
                     tracer,  # positional arg
                     eval_span,  # positional arg
-                    additional_system_prompt=additional_system_prompt,
+                    additional_system_prompt=append_suggest_runbooks_system_prompt(
+                        additional_system_prompt, tool_suggestions
+                    ),
+                    tool_suggestions=tool_suggestions,
                     request=request,
                     retry_enabled=retry_enabled,
                     test_id=test_case.id,
@@ -127,6 +159,10 @@ def test_ask_holmes(
         raise
 
     output = result.result
+
+    suggested_memories = extract_suggested_memories(result.tool_calls)
+    update_property(request, "suggested_memories", suggested_memories)
+    update_property(request, "memories_count", len(suggested_memories))
 
     scores = update_test_results(
         request=request,
@@ -148,6 +184,8 @@ def test_ask_holmes(
             model=model,
             result=result,
             scores=scores,
+            tool_suggestions=tool_suggestions,
+            suggested_memories=suggested_memories,
         )
 
     # Get expected for assertion message
@@ -175,6 +213,7 @@ def ask_holmes(
     tracer,
     eval_span,
     additional_system_prompt,
+    tool_suggestions: Optional[ToolSuggestionsConfig] = None,
     request=None,
 ) -> LLMResult:
     with eval_span.start_span(
@@ -202,6 +241,9 @@ def ask_holmes(
             llm=create_eval_llm(model=model, tracer=tracer),
             tool_results_dir=tool_results_dir,
         )
+
+        if tool_suggestions is not None:
+            ai, _injected = maybe_inject_suggest_runbooks_tool(ai, tool_suggestions)
 
         test_type = (
             test_case.test_type
