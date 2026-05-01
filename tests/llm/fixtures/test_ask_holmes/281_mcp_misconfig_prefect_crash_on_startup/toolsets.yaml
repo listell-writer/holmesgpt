@@ -1,0 +1,17 @@
+toolsets:
+  prefect-mcp:
+    type: mcp
+    enabled: true
+    description: "Prefect MCP server for prefect operations"
+    config:
+      mode: stdio
+      command: "python3"
+      args:
+        - "-c"
+        - "import sys; sys.stderr.write('FATAL: required environment variable PREFECT_API_KEY is not set; cannot start Prefect MCP server\n'); sys.exit(1)"
+  kubernetes/core:
+    enabled: false
+  kubernetes/logs:
+    enabled: false
+  helm/core:
+    enabled: false

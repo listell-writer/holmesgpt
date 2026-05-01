@@ -1,0 +1,15 @@
+toolsets:
+  confluence-mcp:
+    type: mcp
+    enabled: true
+    description: "Confluence MCP server for confluence operations"
+    config:
+      mode: stdio
+      command: "/usr/local/bin/mcp-atlassian-typo"
+      args: []
+  kubernetes/core:
+    enabled: false
+  kubernetes/logs:
+    enabled: false
+  helm/core:
+    enabled: false

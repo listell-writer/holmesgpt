@@ -1,0 +1,15 @@
+toolsets:
+  sentry-mcp:
+    type: mcp
+    enabled: true
+    description: "Sentry MCP server for sentry operations"
+    config:
+      mode: stdio
+      command: "/usr/local/bin/sentry-mcp-server-typo"
+      args: []
+  kubernetes/core:
+    enabled: false
+  kubernetes/logs:
+    enabled: false
+  helm/core:
+    enabled: false

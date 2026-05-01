@@ -1,0 +1,17 @@
+toolsets:
+  splunk-mcp:
+    type: mcp
+    enabled: true
+    description: "Splunk MCP server for splunk operations"
+    config:
+      mode: stdio
+      command: "python3"
+      args:
+        - "-c"
+        - "import sys; sys.stderr.write('FATAL: required environment variable SPLUNK_TOKEN is not set; cannot start Splunk MCP server\n'); sys.exit(1)"
+  kubernetes/core:
+    enabled: false
+  kubernetes/logs:
+    enabled: false
+  helm/core:
+    enabled: false

@@ -1,0 +1,14 @@
+toolsets:
+  prefect-mcp:
+    type: mcp
+    enabled: true
+    description: "Prefect MCP server for prefect operations"
+    config:
+      mode: sse
+      url: "http://127.0.0.1:54321/prefect/sse"
+  kubernetes/core:
+    enabled: false
+  kubernetes/logs:
+    enabled: false
+  helm/core:
+    enabled: false

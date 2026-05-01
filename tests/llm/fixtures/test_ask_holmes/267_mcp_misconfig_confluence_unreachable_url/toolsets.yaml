@@ -1,0 +1,14 @@
+toolsets:
+  confluence-mcp:
+    type: mcp
+    enabled: true
+    description: "Confluence MCP server for confluence operations"
+    config:
+      mode: sse
+      url: "http://127.0.0.1:54321/confluence/sse"
+  kubernetes/core:
+    enabled: false
+  kubernetes/logs:
+    enabled: false
+  helm/core:
+    enabled: false

@@ -1,0 +1,15 @@
+toolsets:
+  grafana-mcp:
+    type: mcp
+    enabled: true
+    description: "Grafana MCP server for grafana operations"
+    config:
+      mode: stdio
+      command: "/usr/local/bin/grafana-mcp-server-typo"
+      args: []
+  kubernetes/core:
+    enabled: false
+  kubernetes/logs:
+    enabled: false
+  helm/core:
+    enabled: false

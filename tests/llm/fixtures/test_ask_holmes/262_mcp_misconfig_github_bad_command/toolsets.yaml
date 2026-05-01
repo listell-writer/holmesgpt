@@ -1,0 +1,15 @@
+toolsets:
+  github-mcp:
+    type: mcp
+    enabled: true
+    description: "GitHub MCP server for github operations"
+    config:
+      mode: stdio
+      command: "/usr/local/bin/github-mcp-server-typo"
+      args: []
+  kubernetes/core:
+    enabled: false
+  kubernetes/logs:
+    enabled: false
+  helm/core:
+    enabled: false

@@ -1,0 +1,15 @@
+toolsets:
+  prefect-mcp:
+    type: mcp
+    enabled: true
+    description: "Prefect MCP server for prefect operations"
+    config:
+      mode: stdio
+      command: "/usr/local/bin/prefect-mcp-server-typo"
+      args: []
+  kubernetes/core:
+    enabled: false
+  kubernetes/logs:
+    enabled: false
+  helm/core:
+    enabled: false

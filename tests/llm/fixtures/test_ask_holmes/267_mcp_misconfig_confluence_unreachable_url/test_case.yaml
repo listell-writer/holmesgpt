@@ -1,0 +1,18 @@
+user_prompt:
+  - "Search Confluence for our deployment runbook page."
+
+expected_output:
+  - "Must clearly tell the user that the Confluence MCP toolset is unavailable, failed to load, or is misconfigured (the user should NOT be told the request was satisfied)"
+  - "Must indicate the MCP server URL is unreachable, connection failed, or connection refused (e.g. 'connection attempts failed', 'connection refused', 'unreachable', or similar)"
+  - "Must guide the user to fix the misconfigured Confluence MCP server (e.g. verify the URL is correct, check that the MCP server is running and reachable on the configured host/port)"
+
+# This eval intentionally configures the MCP toolset to fail its prerequisite
+# check. We want Holmes to see the failure in its toolset list and respond
+# accordingly. allow_toolset_failures lets the test framework continue past
+# the prereq error so the LLM actually runs.
+allow_toolset_failures: true
+
+tags:
+  - mcp
+  - transparency
+  - hard

@@ -1,0 +1,14 @@
+toolsets:
+  azure-mcp:
+    type: mcp
+    enabled: true
+    description: "Azure MCP server for azure operations"
+    config:
+      mode: sse
+      url: "http://127.0.0.1:54321/azure/sse"
+  kubernetes/core:
+    enabled: false
+  kubernetes/logs:
+    enabled: false
+  helm/core:
+    enabled: false

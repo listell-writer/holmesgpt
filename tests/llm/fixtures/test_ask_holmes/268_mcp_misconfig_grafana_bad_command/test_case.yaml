@@ -1,0 +1,18 @@
+user_prompt:
+  - "Query our production Grafana dashboard for CPU metrics over the past hour."
+
+expected_output:
+  - "Must clearly tell the user that the Grafana MCP toolset is unavailable, failed to load, or is misconfigured (the user should NOT be told the request was satisfied)"
+  - "Must reference the underlying error indicating the MCP server command/binary cannot be found (e.g. 'No such file or directory', 'not found', or similar)"
+  - "Must guide the user to fix the misconfigured MCP toolset (e.g. verify the Grafana MCP server binary path/command is correct)"
+
+# This eval intentionally configures the MCP toolset to fail its prerequisite
+# check. We want Holmes to see the failure in its toolset list and respond
+# accordingly. allow_toolset_failures lets the test framework continue past
+# the prereq error so the LLM actually runs.
+allow_toolset_failures: true
+
+tags:
+  - mcp
+  - transparency
+  - hard

@@ -1,0 +1,15 @@
+toolsets:
+  mariadb-mcp:
+    type: mcp
+    enabled: true
+    description: "MariaDB MCP server for mariadb operations"
+    config:
+      mode: stdio
+      command: "/usr/local/bin/mariadb-mcp-typo"
+      args: []
+  kubernetes/core:
+    enabled: false
+  kubernetes/logs:
+    enabled: false
+  helm/core:
+    enabled: false

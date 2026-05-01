@@ -1,0 +1,14 @@
+toolsets:
+  splunk-mcp:
+    type: mcp
+    enabled: true
+    description: "Splunk MCP server for splunk operations"
+    config:
+      mode: sse
+      url: "http://127.0.0.1:54321/splunk/sse"
+  kubernetes/core:
+    enabled: false
+  kubernetes/logs:
+    enabled: false
+  helm/core:
+    enabled: false

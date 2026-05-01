@@ -1,0 +1,14 @@
+toolsets:
+  github-mcp:
+    type: mcp
+    enabled: true
+    description: "GitHub MCP server for github operations"
+    config:
+      mode: sse
+      url: "http://127.0.0.1:54321/github/sse"
+  kubernetes/core:
+    enabled: false
+  kubernetes/logs:
+    enabled: false
+  helm/core:
+    enabled: false

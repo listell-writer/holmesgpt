@@ -1,0 +1,17 @@
+toolsets:
+  jenkins-mcp:
+    type: mcp
+    enabled: true
+    description: "Jenkins MCP server for jenkins operations"
+    config:
+      mode: stdio
+      command: "python3"
+      args:
+        - "-c"
+        - "import sys; sys.stderr.write('FATAL: required environment variable JENKINS_API_TOKEN is not set; cannot start Jenkins MCP server\n'); sys.exit(1)"
+  kubernetes/core:
+    enabled: false
+  kubernetes/logs:
+    enabled: false
+  helm/core:
+    enabled: false

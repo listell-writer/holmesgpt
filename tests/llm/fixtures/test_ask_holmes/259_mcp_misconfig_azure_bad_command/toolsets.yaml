@@ -1,0 +1,15 @@
+toolsets:
+  azure-mcp:
+    type: mcp
+    enabled: true
+    description: "Azure MCP server for azure operations"
+    config:
+      mode: stdio
+      command: "/usr/local/bin/azure-api-mcp-typo"
+      args: []
+  kubernetes/core:
+    enabled: false
+  kubernetes/logs:
+    enabled: false
+  helm/core:
+    enabled: false
