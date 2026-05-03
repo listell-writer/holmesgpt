@@ -314,8 +314,12 @@ def build_initial_ask_messages(
     # Auto-detect whether dispatch_agent is registered on this executor —
     # ToolCallingLLM adds it via clone_with_extra_tools when subagents are
     # enabled, so its presence in tools_by_name is the source of truth.
-    subagents_enabled = "dispatch_agent" in getattr(
-        tool_executor, "tools_by_name", {}
+    # Guard against test mocks (tool_executor.tools_by_name is a Mock when
+    # the executor itself is a MagicMock) — only treat real dicts as
+    # authoritative; everything else means "no dispatch_agent registered".
+    tools_by_name = getattr(tool_executor, "tools_by_name", None)
+    subagents_enabled = (
+        isinstance(tools_by_name, dict) and "dispatch_agent" in tools_by_name
     )
 
     system_prompt, user_prompt = build_prompts(
