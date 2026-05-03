@@ -308,9 +308,19 @@ def generate_markdown_report(
         if ask_holmes_mock_failures > 0:
             markdown += f", {ask_holmes_mock_failures} mock failures"
         markdown += "\n"
-    # Generate detailed table
-    markdown += "\n\n| Status | Test case | Time | Turns | Tools | Cost | Total tokens | Input | Max input | Output | Max output | Cached | Non-cached | Reasoning | Compactions |\n"
-    markdown += "| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |\n"
+    # Generate detailed table.
+    # Column order: Sub-agent invocations + Sub-agent turns + Total turns sit
+    # right next to Turns so a reader can quickly compare parent vs total work.
+    detail_header = (
+        "| Status | Test case | Time | Sub-agents | Sub-agent turns | Turns | Total turns | Tools | "
+        "Cost | Total tokens | Input | Max input | Output | Max output | Cached | Non-cached | "
+        "Reasoning | Compactions |"
+    )
+    detail_separator = (
+        "| --- | --- | --- | ---: | ---: | ---: | ---: | ---: | "
+        "--- | --- | --- | --- | --- | --- | --- | --- | --- | --- |"
+    )
+    markdown += "\n\n" + detail_header + "\n" + detail_separator + "\n"
 
     # Track totals for summary row
     total_time = 0.0
@@ -325,10 +335,44 @@ def generate_markdown_report(
     max_prompt_per_call_max = 0
     total_compactions = 0
     total_turns = 0
+    total_subagent_invocations = 0
+    total_subagent_turns = 0
+    total_total_turns = 0
     total_tools = 0
     time_count = 0
     turns_count = 0
+    subagent_invocations_count = 0
+    subagent_turns_count = 0
+    total_turns_count = 0
     tools_count = 0
+
+    # Per-(subagent variant) subtotals — only emitted when more than one
+    # variant ran in this report, so a single-variant run doesn't get a
+    # redundant subtotal row that duplicates the grand Total.
+    from collections import defaultdict
+
+    class _Subtotal:
+        __slots__ = (
+            "tests", "time_sum", "time_count", "cost_sum",
+            "tokens_sum", "input_sum", "output_sum",
+            "cached_sum", "non_cached_sum", "reasoning_sum",
+            "max_completion", "max_prompt", "compactions",
+            "turns_sum", "turns_count",
+            "subagent_invocations_sum", "subagent_invocations_count",
+            "subagent_turns_sum", "subagent_turns_count",
+            "total_turns_sum", "total_turns_count",
+            "tools_sum", "tools_count",
+        )
+
+        def __init__(self) -> None:
+            for slot in self.__slots__:
+                setattr(self, slot, 0)
+
+    subtotals: "defaultdict[str, _Subtotal]" = defaultdict(_Subtotal)
+    # Detail rows keyed by variant so we can print them grouped with their
+    # subtotal at the end of each group; we still preserve the original
+    # sort within each variant.
+    rows_by_variant: "defaultdict[str, list[str]]" = defaultdict(list)
 
     for result in sorted_results:
         test_case_name = result["test_case_name"]
@@ -350,7 +394,7 @@ def generate_markdown_report(
             total_time += exec_time
             time_count += 1
 
-        # Format turns (LLM calls)
+        # Format turns (parent LLM calls)
         num_llm_calls = result.get("num_llm_calls")
         if num_llm_calls and num_llm_calls > 0:
             turns_str = str(num_llm_calls)
@@ -358,6 +402,40 @@ def generate_markdown_report(
             turns_count += 1
         else:
             turns_str = "—"
+
+        # Format sub-agent invocations: how many times dispatch_agent was
+        # called. None means the field wasn't recorded (older results); 0
+        # means subagents were available but not used.
+        num_subagent_invocations = result.get("num_subagent_invocations")
+        if num_subagent_invocations is not None:
+            subagent_invocations_str = str(int(num_subagent_invocations))
+            total_subagent_invocations += int(num_subagent_invocations)
+            subagent_invocations_count += 1
+        else:
+            subagent_invocations_str = "—"
+
+        # Format sub-agent turns: total LLM calls those dispatched children burned.
+        num_subagent_llm_calls = result.get("num_subagent_llm_calls")
+        if num_subagent_llm_calls is not None:
+            subagent_turns_str = str(int(num_subagent_llm_calls))
+            total_subagent_turns += int(num_subagent_llm_calls)
+            subagent_turns_count += 1
+        else:
+            subagent_turns_str = "—"
+
+        # Format total turns: parent + subagent (the user-facing "this run took
+        # N LLM calls overall" number).
+        total_turns_value = result.get("total_turns")
+        if total_turns_value is None and num_llm_calls is not None:
+            total_turns_value = int(num_llm_calls) + int(
+                num_subagent_llm_calls or 0
+            )
+        if total_turns_value is not None and total_turns_value > 0:
+            total_turns_row_str = str(int(total_turns_value))
+            total_total_turns += int(total_turns_value)
+            total_turns_count += 1
+        else:
+            total_turns_row_str = "—"
 
         # Format tool calls
         tool_call_count = result.get("tool_call_count")
@@ -420,11 +498,130 @@ def generate_markdown_report(
         max_prompt_str = _fmt_tokens(max_prompt)
         compactions_str = str(num_compactions) if num_compactions > 0 else "—"
 
-        markdown += f"| {status.markdown_symbol} | {test_case_name} | {time_str} | {turns_str} | {tools_str} | {cost_str} | {total_tokens_str} | {input_str} | {max_prompt_str} | {output_str} | {max_completion_str} | {cached_tokens_str} | {non_cached_tokens_str} | {reasoning_str} | {compactions_str} |\n"
+        row = (
+            f"| {status.markdown_symbol} | {test_case_name} | {time_str} | "
+            f"{subagent_invocations_str} | {subagent_turns_str} | {turns_str} | "
+            f"{total_turns_row_str} | {tools_str} | {cost_str} | "
+            f"{total_tokens_str} | {input_str} | {max_prompt_str} | "
+            f"{output_str} | {max_completion_str} | {cached_tokens_str} | "
+            f"{non_cached_tokens_str} | {reasoning_str} | {compactions_str} |"
+        )
+
+        # Determine variant for subtotal grouping. None = no matrix axis was
+        # parametrized, in which case this row goes in the "" bucket and we
+        # won't emit a subtotal (would just duplicate the grand Total).
+        subagents_enabled = result.get("subagents_enabled")
+        if subagents_enabled is True:
+            variant = "subagent_on"
+        elif subagents_enabled is False:
+            variant = "subagent_off"
+        else:
+            variant = ""
+        rows_by_variant[variant].append(row)
+
+        # Roll into the per-variant subtotal bucket
+        st = subtotals[variant]
+        st.tests += 1
+        if exec_time and exec_time > 0:
+            st.time_sum += exec_time
+            st.time_count += 1
+        if cost and cost > 0:
+            st.cost_sum += cost
+        st.tokens_sum += total_tokens
+        st.input_sum += prompt_tokens
+        st.output_sum += completion_tokens
+        if cached_tokens is not None:
+            st.cached_sum += cached_tokens
+        if non_cached_tokens is not None:
+            st.non_cached_sum += non_cached_tokens
+        st.reasoning_sum += reasoning_tokens
+        st.max_completion = max(st.max_completion, max_completion)
+        st.max_prompt = max(st.max_prompt, max_prompt)
+        st.compactions += num_compactions
+        if num_llm_calls and num_llm_calls > 0:
+            st.turns_sum += num_llm_calls
+            st.turns_count += 1
+        if num_subagent_invocations is not None:
+            st.subagent_invocations_sum += int(num_subagent_invocations)
+            st.subagent_invocations_count += 1
+        if num_subagent_llm_calls is not None:
+            st.subagent_turns_sum += int(num_subagent_llm_calls)
+            st.subagent_turns_count += 1
+        if total_turns_value and total_turns_value > 0:
+            st.total_turns_sum += int(total_turns_value)
+            st.total_turns_count += 1
+        if tool_call_count and tool_call_count > 0:
+            st.tools_sum += tool_call_count
+            st.tools_count += 1
+
+    # Emit detail rows grouped by variant, with a subtotal line per variant
+    # (only when more than one variant produced rows — single-variant runs
+    # would have a subtotal that exactly equals the grand Total below).
+    variants_seen = [v for v in rows_by_variant if rows_by_variant[v]]
+    variant_order = {"subagent_off": 0, "subagent_on": 1, "": 99}
+    variants_seen.sort(key=lambda v: (variant_order.get(v, 50), v))
+
+    def _format_subtotal(label: str, st: "_Subtotal") -> str:
+        avg_t = f"{st.time_sum / st.time_count:.1f}s" if st.time_count else "—"
+        avg_si = (
+            f"{st.subagent_invocations_sum / st.subagent_invocations_count:.1f}"
+            if st.subagent_invocations_count
+            else "—"
+        )
+        avg_st_turns = (
+            f"{st.subagent_turns_sum / st.subagent_turns_count:.1f}"
+            if st.subagent_turns_count
+            else "—"
+        )
+        avg_turns = (
+            f"{st.turns_sum / st.turns_count:.1f}" if st.turns_count else "—"
+        )
+        avg_tt = (
+            f"{st.total_turns_sum / st.total_turns_count:.1f}"
+            if st.total_turns_count
+            else "—"
+        )
+        avg_tools = (
+            f"{st.tools_sum / st.tools_count:.1f}" if st.tools_count else "—"
+        )
+        cost_str = f"${st.cost_sum:.4f}" if st.cost_sum else "—"
+        return (
+            f"| | _{label}_ | _{avg_t} avg_ | _{avg_si} avg_ | "
+            f"_{avg_st_turns} avg_ | _{avg_turns} avg_ | _{avg_tt} avg_ | "
+            f"_{avg_tools} avg_ | _{cost_str}_ | "
+            f"_{_fmt_tokens(st.tokens_sum)}_ | _{_fmt_tokens(st.input_sum)}_ | "
+            f"_{_fmt_tokens(st.max_prompt)}_ | _{_fmt_tokens(st.output_sum)}_ | "
+            f"_{_fmt_tokens(st.max_completion)}_ | _{_fmt_tokens(st.cached_sum)}_ | "
+            f"_{_fmt_tokens(st.non_cached_sum)}_ | _{_fmt_tokens(st.reasoning_sum)}_ | "
+            f"_{st.compactions if st.compactions else '—'}_ |"
+        )
+
+    for variant in variants_seen:
+        for row in rows_by_variant[variant]:
+            markdown += row + "\n"
+        if len(variants_seen) > 1 and variant:
+            markdown += _format_subtotal(
+                f"Subtotal · {variant}", subtotals[variant]
+            ) + "\n"
 
     # Add summary row
     avg_time_str = f"{total_time / time_count:.1f}s" if time_count > 0 else "—"
     avg_turns_str = f"{total_turns / turns_count:.1f}" if turns_count > 0 else "—"
+    avg_subagent_inv_str = (
+        f"{total_subagent_invocations / subagent_invocations_count:.1f}"
+        if subagent_invocations_count > 0
+        else "—"
+    )
+    avg_subagent_turns_str = (
+        f"{total_subagent_turns / subagent_turns_count:.1f}"
+        if subagent_turns_count > 0
+        else "—"
+    )
+    avg_total_turns_str = (
+        f"{total_total_turns / total_turns_count:.1f}"
+        if total_turns_count > 0
+        else "—"
+    )
     avg_tools_str = f"{total_tools / tools_count:.1f}" if tools_count > 0 else "—"
     total_cost_str = f"${total_cost:.4f}" if total_cost > 0 else "—"
     total_tokens_total_str = _fmt_tokens(total_tokens_sum)
@@ -436,7 +633,17 @@ def generate_markdown_report(
     max_completion_max_str = _fmt_tokens(max_completion_per_call_max)
     max_prompt_max_str = _fmt_tokens(max_prompt_per_call_max)
     total_compactions_str = str(total_compactions) if total_compactions > 0 else "—"
-    markdown += f"| | **Total** | **{avg_time_str}** avg | **{avg_turns_str}** avg | **{avg_tools_str}** avg | **{total_cost_str}** | **{total_tokens_total_str}** | **{total_prompt_str}** | **{max_prompt_max_str}** | **{total_completion_str}** | **{max_completion_max_str}** | **{total_cached_tokens_str}** | **{total_non_cached_tokens_str}** | **{total_reasoning_str}** | **{total_compactions_str}** |\n"
+    markdown += (
+        f"| | **Total** | **{avg_time_str}** avg | "
+        f"**{avg_subagent_inv_str}** avg | **{avg_subagent_turns_str}** avg | "
+        f"**{avg_turns_str}** avg | **{avg_total_turns_str}** avg | "
+        f"**{avg_tools_str}** avg | **{total_cost_str}** | "
+        f"**{total_tokens_total_str}** | **{total_prompt_str}** | "
+        f"**{max_prompt_max_str}** | **{total_completion_str}** | "
+        f"**{max_completion_max_str}** | **{total_cached_tokens_str}** | "
+        f"**{total_non_cached_tokens_str}** | **{total_reasoning_str}** | "
+        f"**{total_compactions_str}** |\n"
+    )
 
     # Add footer explaining benchmark comparison status
     if not benchmark and historical_details and historical_details.status:

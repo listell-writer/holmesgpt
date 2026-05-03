@@ -846,6 +846,14 @@ def _collect_test_results_from_stats(terminalreporter):
                 "execution_time": getattr(report, "duration", None),
                 "holmes_duration": user_props.get("holmes_duration"),
                 "num_llm_calls": user_props.get("num_llm_calls"),
+                "num_subagent_invocations": user_props.get(
+                    "num_subagent_invocations"
+                ),
+                "num_subagent_llm_calls": user_props.get(
+                    "num_subagent_llm_calls"
+                ),
+                "total_turns": user_props.get("total_turns"),
+                "subagents_enabled": user_props.get("subagents_enabled"),
                 "tool_call_count": user_props.get("tool_call_count"),
                 "mock_data_failure": False,
                 "user_prompt": user_props.get("user_prompt", ""),
