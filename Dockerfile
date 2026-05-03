@@ -43,13 +43,11 @@ RUN if [ "$TARGETPLATFORM" = "linux/arm64" ]; then \
 RUN chmod 777 kube-lineage
 RUN ./kube-lineage --version
 
-# Set up ArgoCD (pre-built with Go 1.25.7 for CVE-2025-68121)
-# ArgoCD v3.3.4 ships with Go 1.25.5 which is vulnerable.
-# Rebuild with: ./scripts/build_go_binaries.sh
-# Revert to official binary when ArgoCD releases a version built with Go >= 1.25.7.
+# Set up ArgoCD CLI (official binary, built with Go 1.26.2 — CVE-2025-68121 is fixed)
+ARG ARGOCD_VERSION=v3.3.9
 ARG TARGETARCH
-COPY bin/go-cve-rebuild/${TARGETARCH}/argocd.gz /tmp/argocd.gz
-RUN gunzip /tmp/argocd.gz && mv /tmp/argocd /argocd && chmod +x /argocd
+RUN curl -sSL -o /argocd "https://github.com/argoproj/argo-cd/releases/download/${ARGOCD_VERSION}/argocd-linux-${TARGETARCH}" \
+    && chmod +x /argocd
 
 # Set up Helm
 ARG HELM_VERSION=v3.20.1
