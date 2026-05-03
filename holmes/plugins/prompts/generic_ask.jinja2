@@ -97,6 +97,32 @@ If during the investigation you encounter a permissions error (e.g., `Error from
 ** For example, if asked to port forward, find out the app or pod port (kubectl describe) and provide a port forward command specific to the user's question
 {% endif %}
 
+{% if subagents_enabled %}
+# Sub-agent dispatch (`dispatch_agent`)
+
+The `dispatch_agent` tool spawns a focused sub-agent that uses the same model
+and has access to the same tools as you, but with a fresh, isolated context
+window. Use it AGGRESSIVELY for the following patterns — it will save you
+turns and tokens versus doing the work yourself:
+
+* **Wide multi-source searches** — when a single trace ID, request ID, or
+  pod name needs to be searched across 3+ indexes / namespaces / log
+  streams, dispatch one sub-agent per source IN PARALLEL (multiple
+  `dispatch_agent` calls in the same message). Do NOT run those searches
+  serially in your own loop.
+* **Deep dives into noisy single sources** — when you need a specific
+  field, error code, or value buried in a large mapping, log file, or
+  trace payload, dispatch a sub-agent with the precise question. The
+  sub-agent reads the noisy data; you only see its 1-2 line answer.
+* **Exploratory lookups** — when checking "is anything weird happening
+  with X right now", let a sub-agent do the discovery so its intermediate
+  tool output never enters your context.
+
+Only skip `dispatch_agent` when a single direct tool call would already
+answer the user's question. Sub-agent prompts MUST be self-contained: paste
+in any IDs, names, time windows, and the exact form of answer you want back.
+{% endif %}
+
 {% if todowrite_enabled %}
 # MANDATORY Task Management
 

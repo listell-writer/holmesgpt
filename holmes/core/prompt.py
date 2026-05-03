@@ -182,6 +182,7 @@ def build_system_prompt(
     cluster_name: Optional[str],
     ask_user_enabled: bool,
     prompt_component_overrides: Dict[PromptComponent, bool],
+    subagents_enabled: bool = False,
 ) -> Optional[str]:
     """
     Build the system prompt for both CLI and server modes.
@@ -214,6 +215,7 @@ def build_system_prompt(
         "system_prompt_additions": system_prompt_additions
         if is_enabled(PromptComponent.SYSTEM_PROMPT_ADDITIONS)
         else "",
+        "subagents_enabled": subagents_enabled,
     }
 
     result = load_and_render_prompt("builtin://generic_ask.jinja2", template_context)
@@ -271,6 +273,7 @@ def build_prompts(
     include_todowrite_reminder: bool,
     images: Optional[List[Union[str, Dict[str, Any]]]],
     prompt_component_overrides: Optional[Dict[PromptComponent, bool]] = None,
+    subagents_enabled: bool = False,
 ) -> Tuple[Optional[str], UserPromptContent]:
     """Build both system and user prompts."""
     if prompt_component_overrides is None:
@@ -283,6 +286,7 @@ def build_prompts(
         cluster_name=cluster_name,
         ask_user_enabled=ask_user_enabled,
         prompt_component_overrides=prompt_component_overrides,
+        subagents_enabled=subagents_enabled,
     )
     user_content = build_user_prompt(
         user_prompt=user_prompt,
@@ -307,6 +311,13 @@ def build_initial_ask_messages(
     prompt_component_overrides: Optional[Dict[PromptComponent, bool]] = None,
 ) -> List[Dict]:
     """Build the initial messages for the CLI ask command."""
+    # Auto-detect whether dispatch_agent is registered on this executor —
+    # ToolCallingLLM adds it via clone_with_extra_tools when subagents are
+    # enabled, so its presence in tools_by_name is the source of truth.
+    subagents_enabled = "dispatch_agent" in getattr(
+        tool_executor, "tools_by_name", {}
+    )
+
     system_prompt, user_prompt = build_prompts(
         toolsets=tool_executor.toolsets,
         user_prompt=initial_user_prompt,
@@ -319,6 +330,7 @@ def build_initial_ask_messages(
         include_todowrite_reminder=True,
         images=None,
         prompt_component_overrides=prompt_component_overrides,
+        subagents_enabled=subagents_enabled,
     )
 
     messages = []
