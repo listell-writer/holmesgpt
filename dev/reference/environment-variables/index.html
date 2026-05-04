@@ -1191,6 +1191,8 @@
       
         
       
+        
+      
     
     
     
@@ -1339,6 +1341,34 @@
     
   
     Gemini
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../ai-providers/github-copilot/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    GitHub Copilot
   
 
     
@@ -6358,6 +6388,11 @@
 <h2 id="holmesgpt-configuration">HolmesGPT Configuration<a class="headerlink" href="#holmesgpt-configuration" title="Permanent link">&para;</a></h2>
 <h3 id="model_list_file_location">MODEL_LIST_FILE_LOCATION<a class="headerlink" href="#model_list_file_location" title="Permanent link">&para;</a></h3>
 <p>Path to a YAML file that defines named model configurations. When set, you can reference models by name using <code>--model=&lt;name&gt;</code> in the CLI or the <code>model</code> parameter in the HTTP API, instead of specifying the full model identifier and credentials each time.</p>
+<p>If unset, HolmesGPT looks for the model list file in this order:</p>
+<ol>
+<li><code>/etc/holmes/config/model_list.yaml</code> (server / Helm default)</li>
+<li><code>~/.holmes/model_list.yaml</code> (CLI default)</li>
+</ol>
 <p><strong>Example:</strong>
 <div class="language-bash highlight"><pre><span></span><code><span id="__span-12-1"><a id="__codelineno-12-1" name="__codelineno-12-1" href="#__codelineno-12-1"></a><span class="nb">export</span><span class="w"> </span><span class="nv">MODEL_LIST_FILE_LOCATION</span><span class="o">=</span><span class="s2">&quot;/path/to/model_list.yaml&quot;</span>
 </span></code></pre></div></p>
