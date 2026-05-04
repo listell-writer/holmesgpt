@@ -369,10 +369,12 @@ def generate_markdown_report(
                 setattr(self, slot, 0)
 
     subtotals: "defaultdict[str, _Subtotal]" = defaultdict(_Subtotal)
-    # Detail rows keyed by variant so we can print them grouped with their
-    # subtotal at the end of each group; we still preserve the original
-    # sort within each variant.
-    rows_by_variant: "defaultdict[str, list[str]]" = defaultdict(list)
+    # Detail rows are emitted in their incoming sort order (conftest already
+    # sorts alphabetically by test_case_name, which puts the same eval's
+    # subagent_off / subagent_on variants right next to each other thanks to
+    # the [variant] suffix in clean_test_case_id). All subtotal rows are
+    # emitted together at the end, just above the grand Total.
+    detail_rows: List[str] = []
 
     for result in sorted_results:
         test_case_name = result["test_case_name"]
@@ -517,7 +519,7 @@ def generate_markdown_report(
             variant = "subagent_off"
         else:
             variant = ""
-        rows_by_variant[variant].append(row)
+        detail_rows.append(row)
 
         # Roll into the per-variant subtotal bucket
         st = subtotals[variant]
@@ -554,11 +556,11 @@ def generate_markdown_report(
             st.tools_sum += tool_call_count
             st.tools_count += 1
 
-    # Emit detail rows grouped by variant, with a subtotal line per variant
-    # (only when more than one variant produced rows — single-variant runs
-    # would have a subtotal that exactly equals the grand Total below).
-    variants_seen = [v for v in rows_by_variant if rows_by_variant[v]]
-    variant_order = {"subagent_off": 0, "subagent_on": 1, "": 99}
+    # Subtotal rows: emit them only when more than one variant produced data
+    # — a single-variant run would have a subtotal that just duplicates the
+    # grand Total. Order off → on so the report reads "baseline → matrix".
+    variants_seen = [v for v in subtotals if subtotals[v].tests > 0 and v]
+    variant_order = {"subagent_off": 0, "subagent_on": 1}
     variants_seen.sort(key=lambda v: (variant_order.get(v, 50), v))
 
     def _format_subtotal(label: str, st: "_Subtotal") -> str:
@@ -596,10 +598,15 @@ def generate_markdown_report(
             f"_{st.compactions if st.compactions else '—'}_ |"
         )
 
-    for variant in variants_seen:
-        for row in rows_by_variant[variant]:
-            markdown += row + "\n"
-        if len(variants_seen) > 1 and variant:
+    # 1. All detail rows in incoming sorted order (variants for the same eval
+    #    are already adjacent because of the [variant] suffix on the test_case_name).
+    for row in detail_rows:
+        markdown += row + "\n"
+
+    # 2. All subtotal rows, clustered just above the grand Total. Skip when
+    #    there's only one variant (subtotal would duplicate the Total).
+    if len(variants_seen) > 1:
+        for variant in variants_seen:
             markdown += _format_subtotal(
                 f"Subtotal · {variant}", subtotals[variant]
             ) + "\n"
