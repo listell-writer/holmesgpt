@@ -194,3 +194,12 @@ You should receive a JSON response. If you get an authentication error, check yo
 |-----------|-------------|
 | servicenow_get_records | Query multiple records from any ServiceNow table with powerful filtering, sorting, and field selection capabilities |
 | servicenow_get_record | Retrieve a single record by its sys_id with full details from any accessible table |
+
+## Tools
+
+--8<-- "snippets/toolset_capabilities_intro.md"
+
+| Tool Name | Description |
+|-----------|-------------|
+| servicenow_get_records | Retrieve multiple records from a ServiceNow table via GET /api/now/v2/table/{tableName} with filtering, sorting, and pagination |
+| servicenow_get_record | Retrieve a single record by sys_id from a ServiceNow table via GET /api/now/v2/table/{tableName}/{sys_id} |

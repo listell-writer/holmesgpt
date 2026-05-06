@@ -77,6 +77,17 @@ This is useful when investigating issues that may span multiple clusters or when
 
 The `fetch_configuration_changes_metadata` tool includes external configuration changes by default (e.g., LaunchDarkly feature flag changes). Set `include_external=false` to exclude these and only see Kubernetes cluster changes.
 
+## Tools
+
+--8<-- "snippets/toolset_capabilities_intro.md"
+
+| Tool Name | Description |
+|-----------|-------------|
+| fetch_finding_by_id | Fetch a Robusta finding (an event such as a Prometheus alert, deployment update, or configuration change) |
+| fetch_resource_recommendation | Fetch KRR (Kubernetes Resource Recommendations) for CPU and memory right-sizing based on historical usage |
+| fetch_configuration_changes_metadata | Fetch configuration changes metadata in a given time range, including Kubernetes and external sources (e.g., LaunchDarkly) |
+| fetch_resource_issues_metadata | Fetch issues and alert metadata in a given time range, optionally filtered by namespace or resource |
+
 ## Use Cases
 
 This toolset is particularly useful for:

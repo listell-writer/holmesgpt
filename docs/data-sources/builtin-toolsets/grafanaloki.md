@@ -126,6 +126,14 @@ toolsets:
       external_url: https://grafana.example.com  # URL used in clickable links
 ```
 
+## Tools
+
+--8<-- "snippets/toolset_capabilities_intro.md"
+
+| Tool Name | Description |
+|-----------|-------------|
+| grafana_loki_query | Run a query against Grafana Loki using LogQL query language |
+
 ## Capabilities
 
 | Tool Name | Description |

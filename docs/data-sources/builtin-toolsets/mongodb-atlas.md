@@ -109,6 +109,19 @@ When investigating performance issues:
 - When analyzing slow queries, the toolset will show the actual query text for every slow query
 - For requests asking for a specific number of slow queries (e.g., "top 10 slow queries"), the toolset will not duplicate queries from different processes
 
+## Tools
+
+--8<-- "snippets/toolset_capabilities_intro.md"
+
+| Tool Name | Description |
+|-----------|-------------|
+| atlas_return_project_alerts | Returns all project alerts that apply to monitored components in the project |
+| atlas_return_project_processes | Returns details of all processes for the specified project |
+| atlas_return_project_processes_slow_queries | Returns log lines for slow queries identified by Performance Advisor and Query Profiler (last 24 hours) |
+| atlas_return_events_from_project | Returns event occurrences for the project (last 4 hours), grouped by event type |
+| atlas_return_logs_for_host_in_project | Returns log messages for the specified host in the project (last 1 hour) |
+| atlas_return_events_type_from_project | Returns all events of a specific event type for the project (last 4 hours) |
+
 ## Troubleshooting
 
 ### Common Issues

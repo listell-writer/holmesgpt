@@ -554,6 +554,19 @@ holmes ask "List the recent commits in the owner/repo repository"
 - "Find all usages of the deprecated API endpoint /v1/users in our codebase"
 - "Create an issue to add retry logic to the payment service and assign it to Copilot"
 
+## Tools
+
+This toolset proxies tools from the upstream GitHub MCP server. The full set of tools (and their descriptions) is defined by the MCP server itself — see the [GitHub MCP server documentation](https://github.com/github/github-mcp-server) for the authoritative list.
+
+Common capabilities exposed to HolmesGPT include:
+
+- Repository, file, branch, and commit access
+- Code and repository search
+- Issue management (read, create, comment, label)
+- Pull request management (review, comment, merge, diff)
+- GitHub Actions workflow runs, jobs, and logs
+- Copilot delegation (assign issues / request reviews)
+
 ## Troubleshooting
 
 ### Authentication Issues

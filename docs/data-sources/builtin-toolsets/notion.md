@@ -84,3 +84,11 @@ By default, the Notion toolset uses a 5-second timeout for webpage requests. If 
 | Tool Name | Description |
 |-----------|-------------|
 | fetch_notion_webpage | Fetch a Notion webpage. Use this to fetch Notion runbooks if they are present before starting your investigation |
+
+## Tools
+
+--8<-- "snippets/toolset_capabilities_intro.md"
+
+| Tool Name | Description |
+|-----------|-------------|
+| fetch_notion_webpage | Fetch a Notion webpage with HTTP requests and authentication |

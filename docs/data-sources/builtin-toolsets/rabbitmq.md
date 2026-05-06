@@ -65,3 +65,12 @@ toolsets:
 | get_rabbitmq_exchange_info | Get information about exchanges |
 | get_rabbitmq_memory_usage | Get memory usage statistics |
 | get_rabbitmq_disk_usage | Get disk usage statistics |
+
+## Tools
+
+--8<-- "snippets/toolset_capabilities_intro.md"
+
+| Tool Name | Description |
+|-----------|-------------|
+| list_configured_clusters | List all configured RabbitMQ clusters and their IDs |
+| get_rabbitmq_cluster_status | Fetch overall cluster status including nodes, listeners, and partitions (split-brain detection) |

@@ -59,3 +59,18 @@ By enabling this toolset, HolmesGPT will be able to provide read access to a clu
 | helm_hooks | Get the hooks for a Helm release |
 | helm_chart | Show the chart used to create a Helm release |
 | helm_notes | Show the notes provided by the Helm chart |
+
+## Tools
+
+--8<-- "snippets/toolset_capabilities_intro.md"
+
+| Tool Name | Description |
+|-----------|-------------|
+| helm_list | Get all the current Helm releases |
+| helm_values | Gather Helm values for a released Helm chart |
+| helm_status | Check the status of a Helm release |
+| helm_history | Get the revision history of a Helm release |
+| helm_manifest | Fetch the generated Kubernetes manifest for a Helm release |
+| helm_hooks | Get the hooks for a Helm release |
+| helm_chart | Show the chart used to create a Helm release |
+| helm_notes | Show the notes provided by the Helm chart |

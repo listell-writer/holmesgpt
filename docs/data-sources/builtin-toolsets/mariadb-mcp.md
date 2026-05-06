@@ -387,3 +387,15 @@ The MariaDB MCP server enables Holmes to:
 ```
 "Database queries are taking longer than usual"
 ```
+
+## Tools
+
+This toolset proxies tools from the upstream MariaDB MCP server. The full set of tools (and their descriptions) is defined by the MCP server itself — see the upstream MCP server documentation for the authoritative list.
+
+Common capabilities exposed to HolmesGPT include:
+
+- Slow query and execution plan analysis
+- Deadlock and lock-wait investigation
+- Connection, process, and resource health checks
+- Index and table statistics review
+- Read-only SQL inspection for troubleshooting

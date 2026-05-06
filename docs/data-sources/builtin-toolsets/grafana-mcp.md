@@ -550,6 +550,19 @@ holmes ask "What alert rules are currently configured and which ones are firing?
 holmes ask "Who is currently on-call for the platform team?"
 ```
 
+## Tools
+
+This toolset proxies tools from the upstream Grafana MCP server. The full set of tools (and their descriptions) is defined by the MCP server itself — see the [Grafana MCP server documentation](https://github.com/grafana/mcp-grafana) for the authoritative list.
+
+Common capabilities exposed to HolmesGPT include:
+
+- Dashboard search and panel/query inspection
+- Datasource discovery and metadata
+- Prometheus PromQL queries, metric and label exploration
+- Loki LogQL queries and log statistics
+- Alert rules, contact points, and incident management
+- OnCall schedules, Sift investigations, and Pyroscope profiles
+
 ## Additional Resources
 
 - [Grafana MCP setup guide](https://github.com/robusta-dev/holmes-mcp-integrations/tree/master/servers/grafana)

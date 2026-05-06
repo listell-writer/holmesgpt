@@ -244,3 +244,15 @@ holmes ask "Are there any new error patterns that appeared in the last 24 hours?
 
 - [Sentry Auth Tokens](https://docs.sentry.io/account/auth-tokens/)
 - [Sentry MCP Server setup guide](https://github.com/robusta-dev/holmes-mcp-integrations/tree/master/servers/sentry)
+
+## Tools
+
+This toolset proxies tools from the upstream Sentry MCP server. The full set of tools (and their descriptions) is defined by the MCP server itself — see the [Sentry MCP server documentation](https://github.com/robusta-dev/holmes-mcp-integrations/tree/master/servers/sentry) for the authoritative list.
+
+Common capabilities exposed to HolmesGPT include:
+
+- Organization and project listing
+- Issue search and retrieval
+- Event and stack trace inspection
+- Error pattern and trend analysis
+- Issue resolution and assignment

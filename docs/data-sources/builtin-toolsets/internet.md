@@ -39,3 +39,11 @@ holmes:
 | Tool Name | Description |
 |-----------|-------------|
 | fetch_webpage | Fetch a webpage. Use this to fetch runbooks if they are present before starting your investigation (if no other tool like Confluence is more appropriate) |
+
+## Tools
+
+--8<-- "snippets/toolset_capabilities_intro.md"
+
+| Tool Name | Description |
+|-----------|-------------|
+| fetch_webpage | Fetch a webpage. Use this to fetch skills/runbooks before starting an investigation |

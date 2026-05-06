@@ -162,3 +162,15 @@ holmes ask "Search Splunk for the most recent 10 error events"
 - [Splunk MCP Server on Splunkbase](https://splunkbase.splunk.com/app/7931)
 - [Splunk MCP Server Tools Reference](https://help.splunk.com/en/splunk-cloud-platform/mcp-server-for-splunk-platform/mcp-server-tools)
 
+## Tools
+
+This toolset proxies tools from the upstream Splunk MCP server. The full set of tools (and their descriptions) is defined by the MCP server itself — see the [Splunk MCP server documentation](https://help.splunk.com/en/splunk-cloud-platform/mcp-server-for-splunk-platform/mcp-server-tools) for the authoritative list.
+
+Common capabilities exposed to HolmesGPT include:
+
+- Index discovery and listing
+- SPL search execution
+- Log and event investigation
+- Security and error event analysis
+- Trend and aggregation queries
+
