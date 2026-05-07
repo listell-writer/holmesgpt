@@ -278,6 +278,11 @@ class ToolInvokeContext(BaseModel):
     # tool to spawn child agents that share the same llm and tool_executor.
     # Typed as Any to avoid a circular import with tool_calling_llm.
     parent_agent: Optional[Any] = None
+    # Active tracing span for this tool invocation. dispatch_agent uses it to
+    # nest the child agent's spans under the parent's tool span so a single
+    # Braintrust trace shows the full call tree. Typed as Any because the
+    # concrete span type depends on the tracer implementation.
+    trace_span: Optional[Any] = None
 
     def model_dump(self, **kwargs):
         """Override to exclude sensitive context from serialization"""
@@ -286,8 +291,9 @@ class ToolInvokeContext(BaseModel):
             data["request_context"] = {
                 k: "***REDACTED***" for k in data["request_context"].keys()
             }
-        # parent_agent is a runtime object reference; never serialize it.
+        # parent_agent and trace_span are runtime object references; never serialize.
         data.pop("parent_agent", None)
+        data.pop("trace_span", None)
         return data
 
     def __str__(self):

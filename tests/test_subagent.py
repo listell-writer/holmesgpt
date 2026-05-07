@@ -241,6 +241,83 @@ def test_dispatch_tool_refuses_recursion_from_subagent(mock_llm, mock_tool_execu
 
 
 @patch(LIMIT_PATCH, side_effect=_passthrough_limiter)
+def test_dispatch_nests_child_span_under_parent(
+    _mock_limit, mock_llm, mock_tool_executor
+):
+    """The dispatch tool should open a sub-span on the parent's trace_span and
+    pass it into child.call() — that's what makes Braintrust render nested
+    traces (parent → tool span → child → child tool spans)."""
+    parent = ToolCallingLLM(
+        tool_executor=mock_tool_executor,
+        max_steps=10,
+        llm=mock_llm,
+        tool_results_dir=None,
+        subagents_enabled=True,
+    )
+    mock_llm.completion.side_effect = [
+        _make_llm_response(content="found 7 restarts"),
+    ]
+
+    # A span double that records direct children so we can assert on the
+    # nesting structure. Each probe tracks its own children — that lets us
+    # distinguish the dispatch sub-span (direct child of parent_span) from
+    # the gen_ai.chat span (grandchild, opened by child.call internally).
+    class _SpanProbe:
+        def __init__(self, name="root"):
+            self.name = name
+            self.logs: list = []
+            self.children: list = []
+
+        def start_span(self, name, type=None):
+            child = _SpanProbe(name=name)
+            self.children.append(child)
+            return child
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *exc):
+            return False
+
+        def log(self, **kwargs):
+            self.logs.append(kwargs)
+
+        def set_attributes(self, **kwargs):
+            pass
+
+    parent_span = _SpanProbe(name="holmesgpt.tool.dispatch_agent")
+
+    tool = DispatchAgentTool()
+    ctx = ToolInvokeContext(
+        llm=mock_llm,
+        max_token_count=10000,
+        tool_call_id="tc_1",
+        tool_name=DISPATCH_AGENT_TOOL_NAME,
+        parent_agent=parent,
+        trace_span=parent_span,
+    )
+    result = tool._invoke(
+        {"task_description": "check restarts", "prompt": "How many restarts?"},
+        ctx,
+    )
+
+    assert result.status == StructuredToolResultStatus.SUCCESS
+    # The parent span has exactly one direct child — the dispatch sub-span.
+    # Anything else (e.g. the child's gen_ai.chat) lives one level deeper.
+    assert len(parent_span.children) == 1
+    child_span = parent_span.children[0]
+    assert child_span.name.startswith("holmesgpt.subagent.")
+    # The dispatch sub-span got both an input log and an output log.
+    log_kinds = {tuple(sorted(call.keys())) for call in child_span.logs}
+    assert any("input" in keys for keys in log_kinds)
+    assert any("output" in keys for keys in log_kinds)
+    # And the child agent's gen_ai.chat span is nested under the dispatch
+    # sub-span (proves the trace_span really got plumbed into child.call).
+    nested_names = [c.name for c in child_span.children]
+    assert any("gen_ai.chat" in n for n in nested_names)
+
+
+@patch(LIMIT_PATCH, side_effect=_passthrough_limiter)
 def test_dispatch_attaches_child_stats_and_turns(
     _mock_limit, mock_llm, mock_tool_executor
 ):

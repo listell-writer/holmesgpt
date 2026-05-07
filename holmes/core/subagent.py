@@ -15,6 +15,7 @@ recursively spawn further subagents.
 import logging
 from typing import Any, Dict, Optional
 
+from holmes.core.tracing import DummySpan, SpanType
 from holmes.core.tools import (
     StructuredToolResult,
     StructuredToolResultStatus,
@@ -212,11 +213,33 @@ class DispatchAgentTool(Tool):
             {"role": "user", "content": prompt},
         ]
 
+        # Nest the child's trace under the parent's tool span so Braintrust
+        # shows the full call tree (parent LLM call → dispatch_agent tool span
+        # → child LLM call → child's own tool spans). Fall back to DummySpan
+        # when no tracer is active.
+        parent_span = getattr(context, "trace_span", None) or DummySpan()
         try:
-            result = child.call(
-                messages=messages,
-                request_context=context.request_context,
-            )
+            with parent_span.start_span(
+                name=f"holmesgpt.subagent.{task_description[:32]}",
+                type=SpanType.TASK.value,
+            ) as child_span:
+                child_span.log(
+                    input={"task_description": task_description, "prompt": prompt},
+                    metadata={"subagent_max_steps": child_max_steps},
+                )
+                result = child.call(
+                    messages=messages,
+                    request_context=context.request_context,
+                    trace_span=child_span,
+                )
+                child_span.log(
+                    output=(result.result or "")[:4000],
+                    metadata={
+                        "num_llm_calls": result.num_llm_calls,
+                        "total_tokens": result.total_tokens,
+                        "total_cost": result.total_cost,
+                    },
+                )
         except Exception as e:
             logging.exception(f"[subagent] '{task_description}' failed")
             return StructuredToolResult(
