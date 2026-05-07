@@ -145,6 +145,7 @@ def test_streaming_chat_approval_workflow_requires_approval(
         tool_number: Optional[int] = None,
         session_approved_prefixes: Optional[List[str]] = None,
         request_context: Optional[Dict[str, Any]] = None,
+        trace_span: Any = None,
     ) -> StructuredToolResult:
         return StructuredToolResult(
             status=StructuredToolResultStatus.APPROVAL_REQUIRED,
