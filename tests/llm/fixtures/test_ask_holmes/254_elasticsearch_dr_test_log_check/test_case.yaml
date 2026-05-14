@@ -24,6 +24,12 @@ user_prompt: |
   create a new scheduled job. It failed with 500s.
   Please search the app-254-prod-logs index for relevant logs.
 
+  Important: only consider log entries whose service field matches companyopswebjob
+  exactly (case-insensitive). Do not substitute or infer from logs of other services
+  with similar names. If no logs for companyopswebjob are found, say so explicitly,
+  do not propose a root cause from unrelated services, and recommend obtaining logs
+  from companyopswebjob itself.
+
 include_tool_calls: true
 
 expected_output:
