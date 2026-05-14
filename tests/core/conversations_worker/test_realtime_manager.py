@@ -1,5 +1,6 @@
 """Unit tests for RealtimeManager's testable (non-async) surface."""
 import asyncio
+import logging
 import os
 import ssl as _ssl
 from unittest.mock import MagicMock
@@ -7,10 +8,13 @@ from unittest.mock import MagicMock
 import certifi
 import pytest
 import realtime._async.client as rt_client
+import websockets.exceptions as ws_exc
 from realtime._async.channel import ChannelStates
+from websockets.frames import Close
 
 from holmes.core.conversations_worker.realtime_manager import (
     RealtimeManager,
+    _benign_ws_close_code,
     _build_ssl_context,
     _install_ssl_patch_if_needed,
     broadcast_submit_topic,
@@ -345,3 +349,119 @@ def test_run_loop_triggers_reconnect_on_dead_listen_task():
         assert len(reconnect_calls) >= 2
 
     asyncio.run(_scenario())
+
+
+# ---- _benign_ws_close_code -------------------------------------------------
+#
+# The worker already recovers from socket-went-away via _channel_unhealthy +
+# _full_reconnect. Surfacing those close events to Sentry as errors is noise.
+# The helper identifies the codes we treat as benign so call sites can log at
+# WARNING instead of ERROR (Sentry only auto-captures ERROR+).
+
+
+def _cc_error(code: int) -> ws_exc.ConnectionClosedError:
+    """ConnectionClosedError with a received Close frame for ``code``."""
+    frame = Close(code, "")
+    # rcvd_then_sent must be set when both rcvd and sent are non-None.
+    return ws_exc.ConnectionClosedError(frame, frame, True)
+
+
+def _cc_1006() -> ws_exc.ConnectionClosedError:
+    """1006 abnormal close — synthesized locally, no Close frame received."""
+    return ws_exc.ConnectionClosedError(None, None)
+
+
+@pytest.mark.parametrize("code", [1000, 1001, 1006])
+def test_benign_ws_close_code_recognizes_benign_codes(code):
+    exc = _cc_1006() if code == 1006 else _cc_error(code)
+    assert _benign_ws_close_code(exc) == code
+
+
+def test_benign_ws_close_code_rejects_policy_violation():
+    # 1008 is policy violation — typically auth/RLS misconfig, must reach Sentry.
+    assert _benign_ws_close_code(_cc_error(1008)) is None
+
+
+def test_benign_ws_close_code_rejects_non_ws_exception():
+    assert _benign_ws_close_code(ValueError("oops")) is None
+    # A non-WS exception that happens to have a .code attribute must not match.
+    class _Fake(Exception):
+        code = 1006
+
+    assert _benign_ws_close_code(_Fake()) is None
+
+
+def test_benign_ws_close_code_walks_cause_chain():
+    inner = _cc_1006()
+    try:
+        try:
+            raise inner
+        except Exception as e:
+            raise RuntimeError("wrapper") from e
+    except RuntimeError as wrapper:
+        assert _benign_ws_close_code(wrapper) == 1006
+
+
+def test_benign_ws_close_code_walks_context_chain():
+    # Implicit chaining via __context__ (no `from`) must also be followed.
+    try:
+        try:
+            raise _cc_1006()
+        except Exception:
+            raise RuntimeError("oops")
+    except RuntimeError as wrapper:
+        assert _benign_ws_close_code(wrapper) == 1006
+
+
+def test_benign_ws_close_code_handles_none_input():
+    assert _benign_ws_close_code(None) is None
+
+
+# ---- end-to-end: log level at call sites ----------------------------------
+#
+# Verifies the wiring: a benign WS close raised by the realtime client during
+# shutdown must be logged at WARNING, not ERROR. ERROR records become Sentry
+# events via sentry_sdk's logging integration.
+
+
+def test_shutdown_logs_warning_on_abnormal_close(caplog):
+    async def _scenario():
+        m = _make_manager()
+        m._client = MagicMock()
+
+        async def _raise_1006():
+            raise _cc_1006()
+
+        m._client.close = _raise_1006
+        with caplog.at_level(logging.WARNING, logger="root"):
+            await m._shutdown_async()
+
+    asyncio.run(_scenario())
+
+    ws_records = [
+        r for r in caplog.records
+        if "realtime" in r.getMessage().lower() or "ws" in r.getMessage().lower()
+    ]
+    assert ws_records, f"expected a log record, got {[r.getMessage() for r in caplog.records]}"
+    assert all(r.levelno == logging.WARNING for r in ws_records), (
+        f"benign WS close must not log at ERROR; got levels "
+        f"{[r.levelname for r in ws_records]}"
+    )
+
+
+def test_shutdown_still_logs_exception_on_real_error(caplog):
+    async def _scenario():
+        m = _make_manager()
+        m._client = MagicMock()
+
+        async def _raise_value_error():
+            raise ValueError("something actually wrong")
+
+        m._client.close = _raise_value_error
+        with caplog.at_level(logging.WARNING, logger="root"):
+            await m._shutdown_async()
+
+    asyncio.run(_scenario())
+
+    error_records = [r for r in caplog.records if r.levelno == logging.ERROR]
+    assert error_records, "non-WS exception must still be logged at ERROR"
