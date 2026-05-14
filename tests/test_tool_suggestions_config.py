@@ -81,10 +81,20 @@ def test_extract_suggested_memories_from_params():
     payload = {
         "suggestions": [
             {
-                "title": "OOM debugging",
-                "symptoms": "pods restarting",
-                "instructions": "check memory limits first",
-                "alerts": ["KubePodCrashLooping"],
+                "title": "Querying checkout-service metrics uses non-default label",
+                "when_to_use": "Any PromQL for checkout-service in this cluster",
+                "failed_call": (
+                    'PromQL: sum(rate(http_requests_total{app="checkout"}[5m]))'
+                    " — returned empty"
+                ),
+                "working_call": (
+                    "PromQL: sum(rate(http_requests_total"
+                    '{service.team/component="checkout"}[5m]))'
+                ),
+                "why_env_specific": (
+                    "This team overrides the default app= label with their"
+                    " own taxonomy"
+                ),
                 "importance": "high",
             }
         ]
@@ -92,7 +102,8 @@ def test_extract_suggested_memories_from_params():
     tcr = _make_tool_call(SUGGEST_RUNBOOKS_TOOL_NAME, payload)
     memories = extract_suggested_memories([tcr])
     assert len(memories) == 1
-    assert memories[0]["title"] == "OOM debugging"
+    assert "checkout-service" in memories[0]["title"]
+    assert "service.team/component" in memories[0]["working_call"]
 
 
 def test_extract_suggested_memories_ignores_other_tools():
@@ -111,9 +122,10 @@ def test_extract_suggested_memories_falls_back_to_description():
         "suggestions": [
             {
                 "title": "fallback",
-                "symptoms": "s",
-                "instructions": "i",
-                "alerts": [],
+                "when_to_use": "w",
+                "failed_call": "f",
+                "working_call": "wc",
+                "why_env_specific": "y",
                 "importance": "low",
             }
         ]

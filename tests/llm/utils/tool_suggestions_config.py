@@ -25,46 +25,54 @@ SUGGEST_RUNBOOKS_TOOL_NAME = "suggest_runbooks"
 
 # Description shown to the LLM as the tool's description.
 #
-# Hermes-style framing: skills capture PROCEDURAL memory — when to use the
-# skill + the investigation procedure + pitfalls — NOT root-cause conclusions
-# from a single incident. A note like "NetworkPolicy label mismatch caused
-# timeouts" is transient (once fixed it's gone); the durable form is "when
-# investigating service-to-service timeouts in this cluster, check NetworkPolicy
-# label selectors before iptables — recurring source of timeouts here."
+# Purpose — narrow: capture ONLY tool-call access-pattern corrections.
+#
+# The LLM already knows generic debugging methodology, the standard kubectl
+# verbs, "check pod status first", etc. Suggesting that back to itself is
+# noise. The durable, model-doesn't-know-this thing is: in THIS environment,
+# the LLM tried a tool call with parameters that were wrong (empty result,
+# error, irrelevant data), and only succeeded after adjusting params in a
+# way that an LLM with no exposure to this environment would not have
+# guessed. That correction — the environment-specific call shape — is the
+# only thing worth saving so the next investigation skips the failed
+# attempt and goes straight to the working call.
+#
+# If the investigation succeeded on the first try, or if the correction was
+# a generic mistake any LLM would self-correct (e.g. a typo, forgetting a
+# flag documented in --help), there is nothing to save: emit ZERO suggestions.
 SUGGEST_RUNBOOKS_TOOL_DESCRIPTION = (
-    "Call this tool at the end of your response if the investigation revealed "
-    "a reusable QUERY / ACCESS PATTERN for diagnosing similar problems in this "
-    "environment in the future. Each suggestion becomes a separate skill the "
-    "user can choose to save.\n\n"
-    "Before suggesting, review the skills you already fetched from the catalog "
-    "during this investigation. Do NOT suggest skills that duplicate or overlap "
-    "with existing ones — only suggest genuinely new insights not already "
-    "captured.\n\n"
-    "Capture PROCEDURE — the investigation METHODOLOGY that will keep being "
-    "useful, not the specific findings from this one incident:\n"
-    "- What to query/check FIRST when these symptoms appear, and in what order\n"
-    "- What to query/check LAST or SKIP because it usually wastes time here\n"
-    "- Environment-specific access patterns (custom labels, naming conventions, "
-    "  where logs/metrics actually live in this cluster, which dashboards are "
-    "  the entry point)\n"
-    "- Tool / query gotchas (e.g. \"kubectl logs --previous needed for restart "
-    "  loops\", \"this team's apps don't expose /metrics on the obvious port\")\n"
-    "- Lessons from failed tool calls — what didn't work and what to try instead\n\n"
-    "DO capture (durable, methodology-level):\n"
-    "- \"Investigating frontend→backend timeouts in this cluster: first check "
-    "  NetworkPolicy label selectors on both sides — common cause here.\"\n"
-    "- \"For payments-namespace OOMs: pull memory limits AND the actual RSS "
-    "  from cAdvisor before assuming a leak — JVM apps in this team are "
-    "  consistently under-limited.\"\n\n"
-    "DO NOT capture (transient or generic):\n"
-    "- Root-cause conclusions from THIS incident "
-    "  (e.g. \"label mismatch caused timeouts\" — once fixed, useless).\n"
-    "- Exact resource names, namespaces, file paths, timestamps, pod IDs.\n"
-    "- Generic Kubernetes knowledge any LLM already has "
-    "  (\"check pod status with kubectl get pods\").\n"
-    "- One-time fixes that won't recur.\n\n"
-    "Prefer titles framed as \"Investigating X in <env-context>\" or "
-    "\"<env-context>: how to diagnose Y\" — NOT \"X was caused by Y\".\n\n"
+    "Call this tool ONLY if, during this investigation, you called a tool "
+    "with the wrong parameters (empty result, error, or irrelevant data), "
+    "and then succeeded by calling the same tool (or a sibling tool) with "
+    "different parameters that required environment-specific knowledge — "
+    "knowledge a fresh LLM would NOT have guessed without trying the wrong "
+    "way first.\n\n"
+    "Each suggestion captures one such correction so the NEXT investigation "
+    "skips the failed attempt and goes straight to the call shape that "
+    "works in this environment.\n\n"
+    "Do NOT call this tool — emit zero suggestions — when:\n"
+    "  - All your tool calls succeeded on the first try (nothing to learn).\n"
+    "  - The correction was a generic mistake any LLM would self-correct "
+    "(typo, missing `-n <namespace>`, forgetting `--previous` for a crashed "
+    "container — these are in the model's training data already).\n"
+    "  - You want to record the ROOT CAUSE you found (that's transient — "
+    "once fixed it's gone; we are not saving conclusions).\n"
+    "  - You want to record generic methodology like \"first check pods, "
+    "then logs\" — the model already knows this.\n"
+    "  - You want to record an alert/symptom→cause mapping.\n\n"
+    "DO call this tool when the correction was something like:\n"
+    "  - The label/selector used to identify this team's apps is non-standard "
+    "(e.g. `service.team/component=checkout` instead of `app=checkout`) — "
+    "first PromQL/log query returned empty, second with the right label "
+    "worked.\n"
+    "  - The metric/log/trace this service emits is on a non-default path, "
+    "port, index, or stream — first query hit the wrong location.\n"
+    "  - A custom annotation, CRD field, or dashboard UID is the only way "
+    "to find a piece of data in this environment.\n"
+    "  - A specific tool needs a specific filter to return relevant data here "
+    "(unfiltered call returned huge/irrelevant data; filtered call worked).\n\n"
+    "Before suggesting, review the skills already fetched from the catalog "
+    "this turn. Do NOT propose a skill that duplicates one already captured.\n\n"
     "CRITICAL: This tool is silent. The user sees suggestions as UI chips they "
     "can accept or ignore. Never say \"I'll remember\", \"noted\", \"saved\", "
     "or acknowledge this tool in any way — even if the user explicitly asks "
@@ -85,72 +93,91 @@ SUGGEST_RUNBOOKS_TOOL_PARAMETERS: Dict[str, Any] = {
     "properties": {
         "suggestions": {
             "type": "array",
+            "description": (
+                "One entry per tool-call correction discovered this turn. "
+                "Empty array if no correction occurred."
+            ),
             "items": {
                 "type": "object",
                 "properties": {
                     "title": {
                         "type": "string",
                         "description": (
-                            "Short name framed as an investigation procedure, "
-                            "NOT as a specific finding. GOOD examples: "
-                            '"Investigating payments-namespace OOMs", '
-                            '"Diagnosing frontend→backend timeouts in <cluster>". '
-                            "BAD examples (these are transient root-cause "
-                            'conclusions): "DEPLOY_ENV missing causes crash", '
-                            '"NetworkPolicy label mismatch caused timeouts".'
+                            "Short name for the access-pattern correction. "
+                            "Name it by the tool/data being queried and the "
+                            "env-specific quirk, e.g. "
+                            '"Querying checkout-service metrics — uses '
+                            '\'service.team/component\' label, not \'app\'", '
+                            '"Fetching logs for payments — index is '
+                            '\'payments-prod-*\', not \'k8s-*\'". '
+                            "NOT a root-cause title."
                         ),
                     },
-                    "symptoms": {
+                    "when_to_use": {
                         "type": "string",
                         "description": (
-                            "When-to-use trigger. What alerts, observable "
-                            "symptoms, or initial-question shapes should make "
-                            "Holmes load this skill next time? Phrase as "
-                            "recognizable patterns, not the cause of THIS "
-                            'incident (e.g. "User asks why service A can\'t '
-                            'reach service B and both pods look healthy" — '
-                            'NOT "frontend was getting NetworkPolicy-blocked").'
+                            "Which tool / data source this correction applies "
+                            "to, and the shape of the request that triggers "
+                            'it (e.g. "Any PromQL query for the checkout '
+                            'service in this cluster", "Loki queries for any '
+                            'app in the payments namespace"). Should let a '
+                            "future investigation recognize \"this skill is "
+                            "relevant\" before issuing the first wrong call."
                         ),
                     },
-                    "instructions": {
+                    "failed_call": {
                         "type": "string",
                         "description": (
-                            "PROCEDURE for Holmes next time. Write as direct "
-                            "imperative commands describing the investigation "
-                            "ORDER and ACCESS PATTERNS. Focus on:\n"
-                            "  - What to query FIRST (skip approaches that "
-                            "failed in this investigation)\n"
-                            "  - What NOT to do / what wastes time here\n"
-                            "  - Where data actually lives in this environment "
-                            "(custom labels, log destinations, dashboards)\n"
-                            "  - Tool quirks specific to this stack\n"
-                            "Do NOT include: specific resource names, "
-                            "timestamps, the root cause of this incident, or "
-                            "generic Kubernetes advice. Methodology only."
+                            "Concrete shape of the call you tried that did "
+                            "NOT work, with the exact parameter that was "
+                            'wrong (e.g. "PromQL: sum(rate(http_requests_'
+                            'total{app=\\"checkout\\"}[5m])) — returned empty '
+                            'because the label is service.team/component, '
+                            'not app"). Omit incident-specific values; keep '
+                            "the call-shape and the wrong parameter name."
                         ),
                     },
-                    "alerts": {
-                        "type": "array",
-                        "items": {"type": "string"},
+                    "working_call": {
+                        "type": "string",
                         "description": (
-                            "Specific Kubernetes alert names this knowledge "
-                            "applies to, empty array if not alert-specific"
+                            "Concrete shape of the call that DID work, with "
+                            "the env-specific parameter that made it work "
+                            "(e.g. \"PromQL: sum(rate(http_requests_total"
+                            "{service.team/component=\\\"checkout\\\"}[5m]))"
+                            " — use service.team/component label\"). This "
+                            "is the durable lesson: the call shape a future "
+                            "investigation should reach for first."
+                        ),
+                    },
+                    "why_env_specific": {
+                        "type": "string",
+                        "description": (
+                            "One sentence on why a fresh LLM would NOT have "
+                            "guessed the working call without trying the "
+                            "wrong one first (e.g. \"This team overrides "
+                            "the default app= label with their own taxonomy; "
+                            "not documented anywhere a model would know\"). "
+                            "If you can't articulate this, the correction is "
+                            "probably generic — do NOT include this suggestion."
                         ),
                     },
                     "importance": {
                         "type": "string",
                         "enum": ["low", "medium", "high"],
                         "description": (
-                            "high = will recur and saves significant debugging time, "
-                            "medium = likely useful, low = nice to have"
+                            "high = this exact wrong-call/right-call pair will "
+                            "recur often in this environment and saves real "
+                            "tokens/turns; medium = likely useful; low = nice "
+                            "to have. Default to medium unless you're sure."
                         ),
                     },
                 },
                 "required": [
                     "title",
-                    "symptoms",
-                    "instructions",
-                    "alerts",
+                    "when_to_use",
+                    "failed_call",
+                    "working_call",
+                    "why_env_specific",
                     "importance",
                 ],
             },
