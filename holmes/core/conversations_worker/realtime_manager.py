@@ -29,18 +29,10 @@ from typing import Any, Callable, Dict, Optional, TYPE_CHECKING
 import realtime._async.client as rt_client
 from realtime._async.channel import ChannelStates
 from realtime._async.client import AsyncRealtimeClient
-from websockets.asyncio.client import connect as ws_connect
-
-try:
-    # python-socks is only required when an HTTP CONNECT proxy is in use
-    # (sandboxed environments, enterprise egress). Normal deployments don't
-    # need it.
-    from python_socks.async_.asyncio import Proxy as _SocksProxy
-except ImportError:  # pragma: no cover — optional dependency
-    _SocksProxy = None  # type: ignore[assignment]
 
 from holmes.common.env_vars import (
     CONVERSATION_WORKER_AUTH_REFRESH_INTERVAL_SECONDS,
+    CONVERSATION_WORKER_REALTIME_HEALTH_TICK_SECONDS,
     CONVERSATION_WORKER_REALTIME_RECONNECT_MAX_SECONDS,
     CONVERSATION_WORKER_USE_REALTIME_BROADCAST,
 )
@@ -67,65 +59,74 @@ def broadcast_submit_topic(account_id: str, cluster_id: str) -> str:
     return f"holmes:submit:{account_id}:{cluster_id}"
 
 
-def _install_proxy_patch_if_needed() -> None:
+def _build_ssl_context() -> ssl.SSLContext:
+    """Build the SSL context used for outbound Realtime WebSocket connections.
+
+    The ``CERTIFICATE`` env var (handled by ``holmes.utils.cert_utils``) sets
+    ``REQUESTS_CA_BUNDLE`` / ``WEBSOCKET_CLIENT_CA_BUNDLE`` and patches
+    ``certifi.where()``, but the ``websockets`` stdlib client ignores all of
+    those and falls back to the OS trust store — so a custom CA never makes
+    it into the WS handshake. Honor the env vars here so the realtime
+    connection trusts the same bundle the rest of the app does.
     """
-    If an ``https_proxy`` env var is set, monkey-patch ``realtime._async.client.connect``
-    so the WebSocket connection is tunneled through the HTTP CONNECT proxy. This
-    is needed in sandboxed environments that require all egress to go through a
-    proxy (and direct DNS/TCP are blocked).
-
-    Idempotent — only patches once.
-    """
-    proxy_url = os.environ.get("https_proxy") or os.environ.get("HTTPS_PROXY")
-    if not proxy_url:
-        return
-
-    if getattr(rt_client, "_holmes_proxy_patched", False):
-        return
-
-    if _SocksProxy is None:
+    cafile = (
+        os.environ.get("REQUESTS_CA_BUNDLE")
+        or os.environ.get("WEBSOCKET_CLIENT_CA_BUNDLE")
+    )
+    if cafile:
+        if os.path.exists(cafile):
+            return ssl.create_default_context(cafile=cafile)
         logging.warning(
-            "https_proxy is set but python-socks is not installed; "
-            "Realtime WebSocket will attempt direct connection and likely fail. "
-            "Install python-socks to tunnel WS through the proxy."
+            "CA bundle %s does not exist; falling back to OS trust store",
+            cafile,
+        )
+    return ssl.create_default_context()
+
+
+def _install_ssl_patch_if_needed() -> None:
+    """
+    Monkey-patch ``realtime._async.client.connect`` to inject an SSL context
+    that trusts the custom CA bundle (``CERTIFICATE`` env var) for ``wss://``
+    targets. The websockets stdlib client otherwise uses only the OS trust
+    store, breaking deployments behind a corporate / private CA.
+
+    HTTP CONNECT proxy support (``https_proxy`` / ``HTTPS_PROXY`` env vars) is
+    handled natively by ``websockets`` ≥ 13 via ``python-socks``, so no proxy
+    monkey-patching is needed — websockets reads the env var itself when its
+    ``connect()`` is called with no explicit ``proxy`` kwarg, and our patch
+    leaves all other kwargs untouched.
+
+    Idempotent.
+    """
+    cafile = (
+        os.environ.get("REQUESTS_CA_BUNDLE")
+        or os.environ.get("WEBSOCKET_CLIENT_CA_BUNDLE")
+    )
+    if not cafile:
+        return
+    if not os.path.exists(cafile):
+        logging.warning(
+            "CA bundle %s does not exist; falling back to OS trust store",
+            cafile,
         )
         return
 
-    p = urllib.parse.urlparse(proxy_url)
-    if not p.hostname:
-        logging.warning("https_proxy has no hostname; skipping proxy patch")
+    if getattr(rt_client, "_holmes_ssl_patched", False):
         return
-    proxy_connect_url = f"http://{p.hostname}"
-    if p.username and p.password:
-        proxy_connect_url = f"http://{p.username}:{p.password}@{p.hostname}"
-    elif p.username:
-        proxy_connect_url = f"http://{p.username}@{p.hostname}"
-    if p.port is not None:
-        proxy_connect_url += f":{p.port}"
 
-    async def _proxied_connect(url: str, *args: Any, **kwargs: Any) -> Any:
+    ctx = _build_ssl_context()
+    original_connect = rt_client.connect
+
+    async def _ssl_connect(url: str, *args: Any, **kwargs: Any) -> Any:
         parsed = urllib.parse.urlparse(url)
-        if parsed.scheme not in ("ws", "wss"):
-            return await ws_connect(url, *args, **kwargs)
-
-        # skip proxy for localhost targets
-        if parsed.hostname in ("localhost", "127.0.0.1"):
-            return await ws_connect(url, *args, **kwargs)
-
-        port = parsed.port or (443 if parsed.scheme == "wss" else 80)
-        proxy = _SocksProxy.from_url(proxy_connect_url)
-        sock = await proxy.connect(dest_host=parsed.hostname, dest_port=port)
-        kwargs.setdefault("server_hostname", parsed.hostname)
         if parsed.scheme == "wss" and "ssl" not in kwargs:
-            kwargs["ssl"] = ssl.create_default_context()
-        return await ws_connect(url, *args, sock=sock, **kwargs)
+            kwargs["ssl"] = ctx
+        return await original_connect(url, *args, **kwargs)
 
-    rt_client.connect = _proxied_connect  # type: ignore[attr-defined]
-    rt_client._holmes_proxy_patched = True  # type: ignore[attr-defined]
+    rt_client.connect = _ssl_connect  # type: ignore[attr-defined]
+    rt_client._holmes_ssl_patched = True  # type: ignore[attr-defined]
     logging.info(
-        "Installed WebSocket proxy patch for realtime client (proxy=%s:%s)",
-        p.hostname,
-        p.port,
+        "Installed WebSocket SSL patch for realtime client (cafile=%s)", cafile
     )
 
 
@@ -247,17 +248,19 @@ class RealtimeManager:
                 return
 
             refresh_interval = CONVERSATION_WORKER_AUTH_REFRESH_INTERVAL_SECONDS
+            health_tick = CONVERSATION_WORKER_REALTIME_HEALTH_TICK_SECONDS
             next_refresh_at = asyncio.get_running_loop().time() + refresh_interval
             while not self._stop_event.is_set():
                 now = asyncio.get_running_loop().time()
 
-                # Detect channel closure (e.g. token expiry → server sends
-                # phx_close). The library's auto-reconnect is unreliable
-                # after a channel close, so we do a full teardown/reconnect.
-                if await self._channel_needs_reconnect():
+                # Detect channel closure or silently-dead WS. The library's
+                # auto-reconnect is unreliable on clean closes, so we do our
+                # own full teardown/reconnect on any failure signal.
+                unhealthy_reason = self._channel_unhealthy()
+                if unhealthy_reason is not None:
                     logging.warning(
-                        "Channel no longer joined (state=%s), reconnecting",
-                        self._channel.state if self._channel else "None",
+                        "Realtime channel unhealthy (%s), reconnecting",
+                        unhealthy_reason,
                     )
                     self._connected = False
                     try:
@@ -298,20 +301,24 @@ class RealtimeManager:
                     next_refresh_at = (
                         asyncio.get_running_loop().time() + refresh_interval
                     )
+                # Cap the sleep at the health tick so a silently-dead WS is
+                # detected within ~health_tick seconds rather than waiting
+                # for the next auth refresh.
+                now = asyncio.get_running_loop().time()
                 sleep_for = max(
                     0.01,
-                    next_refresh_at - asyncio.get_running_loop().time(),
+                    min(next_refresh_at - now, health_tick),
                 )
                 # wait_for with _async_stop allows stop() to wake us
                 # immediately via call_soon_threadsafe instead of blocking
-                # for the full refresh interval.
+                # for the full sleep interval.
                 try:
                     await asyncio.wait_for(
                         self._async_stop.wait(), timeout=sleep_for
                     )
                     break  # _async_stop was set → exit loop
                 except asyncio.TimeoutError:
-                    pass  # normal wake — check refresh and loop
+                    pass  # normal wake — re-check health and refresh
         except Exception:
             logging.exception("Error in realtime manager main loop", exc_info=True)
         finally:
@@ -330,18 +337,38 @@ class RealtimeManager:
                     exc_info=True,
                 )
 
-    async def _channel_needs_reconnect(self) -> bool:
-        """True when the subscription channel has left the JOINED state.
+    def _channel_unhealthy(self) -> Optional[str]:
+        """Return a short reason string when the subscription is unhealthy, else None.
 
-        Supabase closes the channel on JWT expiry ("Token has expired").
-        The library's built-in auto-reconnect is unreliable after a channel
-        close — the _listen task can crash with ``ValueError('Set of
-        Tasks/Futures is empty.')``.  We detect this early and do our own
-        full reconnect.
+        Detects the silent-death window in the realtime library: when the
+        server closes the WS cleanly (ConnectionClosedOK), `_listen` exits
+        without triggering auto-reconnect, the heartbeat coroutine swallows
+        the close, and `is_connected` keeps returning True. The channel
+        state also stays JOINED because no `phx_close` arrives.
+
+        Strongest signals (in order of reliability):
+          1. listen task done — cleanest indicator of a dead read loop
+          2. heartbeat task done — write loop crashed/exited
+          3. ws_connection cleared — auto-reconnect did fire but failed
+          4. channel state != JOINED — server-side close (token expiry, etc.)
         """
         if self._channel is None:
-            return True
-        return self._channel.state != ChannelStates.JOINED
+            return "channel_none"
+        if self._channel.state != ChannelStates.JOINED:
+            return f"channel_state={self._channel.state}"
+        if self._client is None:
+            return "client_none"
+        if not self._client.is_connected:
+            return "ws_disconnected"
+        # Library internals — guarded so a future rename degrades to the
+        # public-API checks above instead of crashing the worker.
+        listen_task = getattr(self._client, "_listen_task", None)
+        if listen_task is None or listen_task.done():
+            return "listen_task_done"
+        heartbeat_task = getattr(self._client, "_heartbeat_task", None)
+        if heartbeat_task is None or heartbeat_task.done():
+            return "heartbeat_task_done"
+        return None
 
     async def _full_reconnect(self) -> bool:
         """Tear down the current client and re-establish from scratch.
@@ -397,7 +424,12 @@ class RealtimeManager:
     # ---- connect + subscribe ----
 
     async def _connect_and_subscribe(self) -> None:
-        _install_proxy_patch_if_needed()
+        # HTTP CONNECT proxy (https_proxy / HTTPS_PROXY env vars) is handled
+        # natively by websockets ≥ 13 via python-socks — no monkey-patching
+        # needed for transport. The SSL patch is still required because the
+        # realtime library calls connect(self.url) without an ssl= kwarg, so
+        # we have to inject one to honor the custom CA bundle.
+        _install_ssl_patch_if_needed()
 
         # Supabase Realtime URL
         store_url = self.dal.url.rstrip("/")
@@ -461,7 +493,7 @@ class RealtimeManager:
         topic = pg_changes_topic(self.dal.account_id)
         self._channel = self._client.channel(
             topic,
-            {"config": {"private": False}},
+            {"config": {"private": True, "presence": {"enabled": False}}},
         )
 
         def _on_pg_change(payload: Dict[str, Any]) -> None:
@@ -538,7 +570,7 @@ class RealtimeManager:
         topic = broadcast_submit_topic(self.dal.account_id, self.dal.cluster)
         self._channel = self._client.channel(
             topic,
-            {"config": {"private": False}},
+            {"config": {"private": True, "presence": {"enabled": False}}},
         )
 
         def _on_broadcast(payload: Dict[str, Any]) -> None:
