@@ -1,3 +1,4 @@
+import json
 from typing import TYPE_CHECKING, Any, Dict, List, Optional, Union
 
 from tests.llm.utils.test_case_utils import (  # type: ignore[attr-defined]
@@ -205,8 +206,6 @@ def update_test_results(
         # when ``suggested_memories`` is provided (suggest=on variant) —
         # passing ``None`` keeps off-variant and legacy evals untouched.
         if suggested_memories is not None:
-            import json as _json
-
             memory_block = "\n\n# Suggested Memories\n\n"
             if suggested_memories:
                 memory_block += (
@@ -218,7 +217,7 @@ def update_test_results(
                     "test should FAIL even if the final answer is right.\n\n"
                 )
                 memory_block += "```json\n"
-                memory_block += _json.dumps(suggested_memories, indent=2)
+                memory_block += json.dumps(suggested_memories, indent=2)
                 memory_block += "\n```\n"
             else:
                 memory_block += (
