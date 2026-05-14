@@ -82,6 +82,15 @@ before_test: |
   fi
   sleep 2
 
+  # One-shot stale-doc cleanup. Deletes any doc whose _id is NOT in our
+  # known stable-_id set (log-1..log-12). Safe under concurrency: a parallel
+  # run's docs all match the keep-list and are preserved. Removes leftovers
+  # from older revisions of this fixture (which used auto-generated _ids).
+  curl -s -X POST "${ELASTICSEARCH_URL}/${LOGS_INDEX}/_delete_by_query?refresh=true&conflicts=proceed" \
+    -H "Content-Type: application/json" \
+    -H "Authorization: ApiKey ${ELASTICSEARCH_API_KEY}" \
+    -d '{"query":{"bool":{"must_not":[{"ids":{"values":["log-1","log-2","log-3","log-4","log-5","log-6","log-7","log-8","log-9","log-10","log-11","log-12"]}}]}}}' > /dev/null
+
   # Insert log data for Company.Ops (main platform service) and Company.Ops.Radar.WebJob
   # Both have job processing failures but NEITHER is companyopswebjob
   # Stable _ids ("log-1".."log-12") make this idempotent under concurrent

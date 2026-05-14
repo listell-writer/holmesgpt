@@ -51,6 +51,13 @@ before_test: |
   # Small delay to ensure index is fully ready
   sleep 2
 
+  # One-shot stale-doc cleanup: drop any doc whose _id isn't in our known
+  # set. Safe under concurrency (parallel run's docs match the keep-list).
+  curl -s -X POST "${ELASTICSEARCH_URL}/${HOLMES_ES_TEST_INDEX}/_delete_by_query?refresh=true&conflicts=proceed" \
+    -H "Content-Type: application/json" \
+    -H "Authorization: ApiKey ${ELASTICSEARCH_API_KEY}" \
+    -d '{"query":{"bool":{"must_not":[{"ids":{"values":["doc-1","doc-2","doc-3","doc-4","doc-5"]}}]}}}' > /dev/null
+
   # Index 5 documents using bulk API. Stable _ids make this idempotent under
   # concurrent runs (overwrites instead of duplicates).
   BULK_DATA=""

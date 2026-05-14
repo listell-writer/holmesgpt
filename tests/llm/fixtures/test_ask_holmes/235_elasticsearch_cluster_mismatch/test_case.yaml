@@ -118,6 +118,16 @@ before_test: |
   fi
   sleep 2
 
+  # One-shot stale-doc cleanup. Deletes any doc whose _id is NOT in our
+  # known stable-_id set (inv-1..inv-6). Safe under concurrency: a parallel
+  # run's docs all match the keep-list and are preserved. Removes leftovers
+  # from older revisions of this fixture (which used auto-generated _ids)
+  # and any future ad-hoc inserts.
+  curl -s -X POST "${ELASTICSEARCH_URL}/${INVENTORY_INDEX}/_delete_by_query?refresh=true&conflicts=proceed" \
+    -H "Content-Type: application/json" \
+    -H "Authorization: ApiKey ${ELASTICSEARCH_API_KEY}" \
+    -d '{"query":{"bool":{"must_not":[{"ids":{"values":["inv-1","inv-2","inv-3","inv-4","inv-5","inv-6"]}}]}}}' > /dev/null
+
   # Stable _ids ("inv-1".."inv-6") keep this idempotent under concurrent
   # runs (overwrite, not duplicate), so the count check stays at exactly 6.
   BULK_FILE=$(es_temp_file "inventory" "235")
@@ -176,6 +186,12 @@ before_test: |
     exit 1
   fi
   sleep 2
+
+  # Stale-doc cleanup (see comment on inventory above).
+  curl -s -X POST "${ELASTICSEARCH_URL}/${CHANGES_INDEX}/_delete_by_query?refresh=true&conflicts=proceed" \
+    -H "Content-Type: application/json" \
+    -H "Authorization: ApiKey ${ELASTICSEARCH_API_KEY}" \
+    -d '{"query":{"bool":{"must_not":[{"ids":{"values":["chg-1","chg-2","chg-3","chg-4"]}}]}}}' > /dev/null
 
   # Stable _ids ("chg-1".."chg-4") keep this idempotent under concurrent
   # runs (overwrite, not duplicate), so the count check stays at exactly 4.

@@ -124,10 +124,22 @@ before_test: |
   # Now add extra docs to the 5 "large" indexes (499 more each to total 500)
   echo "Adding extra documents to 5 large indexes..."
 
+  # Build the stable _id keep-list (seed-1 + large-1..large-499) once. Used
+  # below for the one-shot stale-doc cleanup that removes leftovers from
+  # older revisions of this fixture (which inserted with auto-generated _ids).
+  LARGE_KEEP_IDS=$(python3 -c "import json; print(json.dumps(['seed-1'] + [f'large-{i}' for i in range(1,500)]))")
+
   for LARGE_INDEX in $LARGE_INDEXES; do
     echo "  Adding 499 docs to $LARGE_INDEX..."
     LARGE_BULK="/tmp/es_large_184_$$.ndjson"
     > "$LARGE_BULK"
+
+    # Stale-doc cleanup: drop any doc whose _id isn't in our known set. Safe
+    # under concurrency (parallel run's docs match the keep-list).
+    curl -s -X POST "${ELASTICSEARCH_URL}/${LARGE_INDEX}/_delete_by_query?refresh=true&conflicts=proceed" \
+      -H "Content-Type: application/json" \
+      -H "Authorization: ApiKey ${ELASTICSEARCH_API_KEY}" \
+      -d "{\"query\":{\"bool\":{\"must_not\":[{\"ids\":{\"values\":${LARGE_KEEP_IDS}}}]}}}" > /dev/null
 
     # Stable _ids ("large-1".."large-499") so concurrent runs overwrite these
     # bulky docs instead of multiplying them - the test verifies each large

@@ -52,6 +52,14 @@ before_test: |
 
   sleep 2
 
+  # One-shot stale-doc cleanup: drop any doc whose _id isn't in our known
+  # set (doc-1..doc-50). Safe under concurrency.
+  KEEP_IDS=$(python3 -c "import json; print(json.dumps([f'doc-{i}' for i in range(1,51)]))")
+  curl -s -X POST "${ELASTICSEARCH_URL}/${HOLMES_ES_TEST_INDEX}/_delete_by_query?refresh=true&conflicts=proceed" \
+    -H "Content-Type: application/json" \
+    -H "Authorization: ApiKey ${ELASTICSEARCH_API_KEY}" \
+    -d "{\"query\":{\"bool\":{\"must_not\":[{\"ids\":{\"values\":${KEEP_IDS}}}]}}}" > /dev/null
+
   # Create exactly 50 documents using bulk API. Stable _ids make this
   # idempotent under concurrent runs (overwrite, not duplicate).
   echo "⏳ Indexing 50 documents..."

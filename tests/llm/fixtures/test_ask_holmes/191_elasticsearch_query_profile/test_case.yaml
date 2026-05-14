@@ -46,6 +46,13 @@ before_test: |
     exit 1
   fi
 
+  # One-shot stale-doc cleanup: drop any doc whose _id isn't in our known
+  # set. Safe under concurrency (parallel run's docs match the keep-list).
+  curl -s -X POST "${ELASTICSEARCH_URL}/${HOLMES_ES_TEST_INDEX}/_delete_by_query?refresh=true&conflicts=proceed" \
+    -H "Content-Type: application/json" \
+    -H "Authorization: ApiKey ${ELASTICSEARCH_API_KEY}" \
+    -d '{"query":{"bool":{"must_not":[{"ids":{"values":["log-1","log-2","log-3","log-4","log-5","log-6"]}}]}}}' > /dev/null
+
   # Create unique temp file
   BULK_FILE="/tmp/es_bulk_191_$$.ndjson"
 
