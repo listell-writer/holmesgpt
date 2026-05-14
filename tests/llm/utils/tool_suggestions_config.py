@@ -24,21 +24,47 @@ SUGGEST_RUNBOOKS_TOOL_NAME = "suggest_runbooks"
 
 
 # Description shown to the LLM as the tool's description.
+#
+# Hermes-style framing: skills capture PROCEDURAL memory — when to use the
+# skill + the investigation procedure + pitfalls — NOT root-cause conclusions
+# from a single incident. A note like "NetworkPolicy label mismatch caused
+# timeouts" is transient (once fixed it's gone); the durable form is "when
+# investigating service-to-service timeouts in this cluster, check NetworkPolicy
+# label selectors before iptables — recurring source of timeouts here."
 SUGGEST_RUNBOOKS_TOOL_DESCRIPTION = (
-    "Call this tool at the end of your response if the conversation contains "
-    "environment-specific knowledge worth remembering for future incidents. "
-    "Each suggestion becomes a separate skill the user can choose to save.\n\n"
+    "Call this tool at the end of your response if the investigation revealed "
+    "a reusable QUERY / ACCESS PATTERN for diagnosing similar problems in this "
+    "environment in the future. Each suggestion becomes a separate skill the "
+    "user can choose to save.\n\n"
     "Before suggesting, review the skills you already fetched from the catalog "
     "during this investigation. Do NOT suggest skills that duplicate or overlap "
     "with existing ones — only suggest genuinely new insights not already "
     "captured.\n\n"
-    "Capture the APPROACH — how to investigate similar issues next time:\n"
-    "- Debugging methodologies that worked (what to query first, what to skip)\n"
-    "- Environment-specific facts (custom configs, known quirks)\n"
-    "- Root cause patterns (what symptoms map to what causes)\n"
-    "- Lessons from failed tool calls (what didn't work and what to do instead)\n\n"
-    "Do NOT capture: exact resource names, file paths, timestamps, generic "
-    "Kubernetes knowledge, or one-time fixes that won't recur.\n\n"
+    "Capture PROCEDURE — the investigation METHODOLOGY that will keep being "
+    "useful, not the specific findings from this one incident:\n"
+    "- What to query/check FIRST when these symptoms appear, and in what order\n"
+    "- What to query/check LAST or SKIP because it usually wastes time here\n"
+    "- Environment-specific access patterns (custom labels, naming conventions, "
+    "  where logs/metrics actually live in this cluster, which dashboards are "
+    "  the entry point)\n"
+    "- Tool / query gotchas (e.g. \"kubectl logs --previous needed for restart "
+    "  loops\", \"this team's apps don't expose /metrics on the obvious port\")\n"
+    "- Lessons from failed tool calls — what didn't work and what to try instead\n\n"
+    "DO capture (durable, methodology-level):\n"
+    "- \"Investigating frontend→backend timeouts in this cluster: first check "
+    "  NetworkPolicy label selectors on both sides — common cause here.\"\n"
+    "- \"For payments-namespace OOMs: pull memory limits AND the actual RSS "
+    "  from cAdvisor before assuming a leak — JVM apps in this team are "
+    "  consistently under-limited.\"\n\n"
+    "DO NOT capture (transient or generic):\n"
+    "- Root-cause conclusions from THIS incident "
+    "  (e.g. \"label mismatch caused timeouts\" — once fixed, useless).\n"
+    "- Exact resource names, namespaces, file paths, timestamps, pod IDs.\n"
+    "- Generic Kubernetes knowledge any LLM already has "
+    "  (\"check pod status with kubectl get pods\").\n"
+    "- One-time fixes that won't recur.\n\n"
+    "Prefer titles framed as \"Investigating X in <env-context>\" or "
+    "\"<env-context>: how to diagnose Y\" — NOT \"X was caused by Y\".\n\n"
     "CRITICAL: This tool is silent. The user sees suggestions as UI chips they "
     "can accept or ignore. Never say \"I'll remember\", \"noted\", \"saved\", "
     "or acknowledge this tool in any way — even if the user explicitly asks "
@@ -65,26 +91,42 @@ SUGGEST_RUNBOOKS_TOOL_PARAMETERS: Dict[str, Any] = {
                     "title": {
                         "type": "string",
                         "description": (
-                            "Short descriptive name for this knowledge "
-                            '(e.g. "OOM debugging in payments namespace")'
+                            "Short name framed as an investigation procedure, "
+                            "NOT as a specific finding. GOOD examples: "
+                            '"Investigating payments-namespace OOMs", '
+                            '"Diagnosing frontend→backend timeouts in <cluster>". '
+                            "BAD examples (these are transient root-cause "
+                            'conclusions): "DEPLOY_ENV missing causes crash", '
+                            '"NetworkPolicy label mismatch caused timeouts".'
                         ),
                     },
                     "symptoms": {
                         "type": "string",
                         "description": (
-                            "How to recognize when this knowledge is relevant — "
-                            "what alerts, symptoms, or patterns should trigger it"
+                            "When-to-use trigger. What alerts, observable "
+                            "symptoms, or initial-question shapes should make "
+                            "Holmes load this skill next time? Phrase as "
+                            "recognizable patterns, not the cause of THIS "
+                            'incident (e.g. "User asks why service A can\'t '
+                            'reach service B and both pods look healthy" — '
+                            'NOT "frontend was getting NetworkPolicy-blocked").'
                         ),
                     },
                     "instructions": {
                         "type": "string",
                         "description": (
-                            "Concise bullet-point instructions for Holmes next "
-                            "time. Focus on: what to query first (skip approaches "
-                            "that failed), what NOT to do, the right investigation "
-                            "order, and environment-specific quirks. Do NOT include "
-                            "results, specific resource names, or timestamps — "
-                            "these will be stale. Write as direct commands TO Holmes."
+                            "PROCEDURE for Holmes next time. Write as direct "
+                            "imperative commands describing the investigation "
+                            "ORDER and ACCESS PATTERNS. Focus on:\n"
+                            "  - What to query FIRST (skip approaches that "
+                            "failed in this investigation)\n"
+                            "  - What NOT to do / what wastes time here\n"
+                            "  - Where data actually lives in this environment "
+                            "(custom labels, log destinations, dashboards)\n"
+                            "  - Tool quirks specific to this stack\n"
+                            "Do NOT include: specific resource names, "
+                            "timestamps, the root cause of this incident, or "
+                            "generic Kubernetes advice. Methodology only."
                         ),
                     },
                     "alerts": {
