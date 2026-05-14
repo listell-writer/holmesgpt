@@ -211,9 +211,19 @@ def test_ask_holmes(
 
     # Hard yes/no memory check on the suggest=on variant. Content quality is
     # scored by the LLM judge via update_test_results above (the judge sees
-    # the emitted memories and the eval's expected_output together).
+    # the emitted memories and the eval's expected_output together). The
+    # correctness score is reset to 0 BEFORE the assertion fires so the
+    # GitHub markdown report reflects the failure even though the judge
+    # already wrote a 1.
     if suggest_on and test_case.memories_generated is not None:
         actual = len(suggested_memories)
+        memory_check_failed = (
+            (test_case.memories_generated and actual < 1)
+            or (not test_case.memories_generated and actual != 0)
+        )
+        if memory_check_failed:
+            update_property(request, "actual_correctness_score", 0)
+            scores["correctness"] = 0
         if test_case.memories_generated:
             assert actual >= 1, (
                 f"Test {test_case.id} expected at least one memory on "
