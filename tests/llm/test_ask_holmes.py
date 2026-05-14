@@ -164,6 +164,9 @@ def test_ask_holmes(
     update_property(request, "suggested_memories", suggested_memories)
     update_property(request, "memories_count", len(suggested_memories))
 
+    # Pass memories into the judge only on the suggest=on variant — on the
+    # off variant the tool isn't injected so there's nothing to score.
+    suggest_on = tool_suggestions is not None and tool_suggestions.enabled
     scores = update_test_results(
         request=request,
         output=output,
@@ -175,6 +178,7 @@ def test_ask_holmes(
         test_case=test_case,
         eval_span=eval_span,
         caplog=caplog,
+        suggested_memories=suggested_memories if suggest_on else None,
     )
 
     if eval_span:
@@ -204,6 +208,27 @@ def test_ask_holmes(
             f"Test {test_case.id} exceeded token limit: "
             f"used {actual_tokens} tokens, max allowed is {test_case.max_tokens}"
         )
+
+    # Hard yes/no memory check on the suggest=on variant. Content quality is
+    # scored by the LLM judge via update_test_results above (the judge sees
+    # the emitted memories and the eval's expected_output together).
+    if suggest_on and test_case.memories_generated is not None:
+        actual = len(suggested_memories)
+        if test_case.memories_generated:
+            assert actual >= 1, (
+                f"Test {test_case.id} expected at least one memory on "
+                f"suggest=on but the LLM emitted zero. The eval is designed "
+                f"to teach an env-specific tool-call correction; if Holmes "
+                f"isn't capturing it the suggest_runbooks prompt/tool needs "
+                f"tightening."
+            )
+        else:
+            assert actual == 0, (
+                f"Test {test_case.id} expected NO memories on suggest=on but "
+                f"the LLM emitted {actual}. This usually means the "
+                f"suggest_runbooks tool/prompt is being too eager. "
+                f"Memories:\n{suggested_memories}"
+            )
 
 
 # TODO: can this call real ask_holmes so more of the logic is captured

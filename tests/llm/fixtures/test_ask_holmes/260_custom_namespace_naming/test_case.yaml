@@ -1,0 +1,102 @@
+user_prompt: "Is the inventory service in the platform team's prod environment healthy? Tell me how many replicas are ready."
+description: |
+  This eval forces an env-specific tool-call correction. The cluster uses a
+  non-standard namespace convention "team-<team>-<service>-<env>" (e.g.
+  team-platform-inventory-prod-260) instead of the usual "<service>" or
+  "<service>-<env>". A fresh LLM that defaults to `-n inventory`,
+  `-n inventory-prod`, `-n platform-inventory`, or `-n platform` will hit
+  NotFound and must enumerate namespaces (`kubectl get ns`) before
+  re-querying with the correct one. On the suggest_runbooks=on matrix
+  variant the LLM should capture the namespace-naming convention as a
+  memory; on suggest=off it should still answer correctly.
+expected_output:
+  - There are 2 ready inventory replicas
+memories_generated: true
+before_test: |
+  # Several unrelated namespaces so listing/grep doesn't trivially point
+  # at the right one. The actual one uses team-<team>-<service>-<env>-<id>.
+  for ns in team-platform-inventory-prod-260 team-platform-checkout-prod-260 team-payments-billing-prod-260; do
+    kubectl create namespace "$ns" 2>/dev/null || true
+  done
+
+  cat <<'EOF' | kubectl apply -f -
+  apiVersion: apps/v1
+  kind: Deployment
+  metadata:
+    name: inventory
+    namespace: team-platform-inventory-prod-260
+  spec:
+    replicas: 2
+    selector:
+      matchLabels:
+        app: inventory
+    template:
+      metadata:
+        labels:
+          app: inventory
+      spec:
+        containers:
+        - name: app
+          image: registry.k8s.io/pause:3.10
+  ---
+  apiVersion: apps/v1
+  kind: Deployment
+  metadata:
+    name: checkout
+    namespace: team-platform-checkout-prod-260
+  spec:
+    replicas: 1
+    selector:
+      matchLabels:
+        app: checkout
+    template:
+      metadata:
+        labels:
+          app: checkout
+      spec:
+        containers:
+        - name: app
+          image: registry.k8s.io/pause:3.10
+  ---
+  apiVersion: apps/v1
+  kind: Deployment
+  metadata:
+    name: billing
+    namespace: team-payments-billing-prod-260
+  spec:
+    replicas: 1
+    selector:
+      matchLabels:
+        app: billing
+    template:
+      metadata:
+        labels:
+          app: billing
+      spec:
+        containers:
+        - name: app
+          image: registry.k8s.io/pause:3.10
+  EOF
+
+  READY=false
+  for i in {1..60}; do
+    if [ "$(kubectl get pods -n team-platform-inventory-prod-260 -l app=inventory -o json | jq '[.items[] | select(.status.conditions[]? | select(.type=="Ready" and .status=="True"))] | length')" = "2" ]; then
+      echo "✅ All 2 inventory pods are ready"
+      READY=true
+      break
+    fi
+    sleep 1
+  done
+  if [ "$READY" = false ]; then
+    echo "❌ inventory pods failed to become ready"
+    kubectl get pods -A | grep 260
+    exit 1
+  fi
+after_test: |
+  for ns in team-platform-inventory-prod-260 team-platform-checkout-prod-260 team-payments-billing-prod-260; do
+    kubectl delete namespace "$ns" || true
+  done
+tags:
+  - kubernetes
+  - easy
+  - regression

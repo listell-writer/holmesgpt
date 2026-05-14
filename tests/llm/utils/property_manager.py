@@ -127,6 +127,7 @@ def update_test_results(
     test_case: Any = None,
     eval_span: Any = None,
     caplog: Any = None,
+    suggested_memories: Optional[List[Dict[str, Any]]] = None,
 ) -> Dict[str, Any]:
     """Update test result properties after test execution and optionally calculate scores.
 
@@ -139,6 +140,14 @@ def update_test_results(
         test_case: Optional test case for score calculation
         eval_span: Optional Braintrust span for evaluation
         caplog: Optional caplog for evaluation
+        suggested_memories: Optional list of suggest_runbooks memories captured
+            on the suggest=on matrix variant. When provided alongside
+            ``test_case.expected_memories``, the memories and the eval's
+            ``must_include`` expectations are surfaced to the LLM judge so it
+            can score whether the captured memory covers the env-specific
+            call-shape the eval is designed to teach. Pass ``None`` (the
+            default) to skip memory-aware judging — used on the suggest=off
+            variant and on evals without an ``expected_memories`` field.
 
     Returns:
         dict: The scores dictionary (either passed in or calculated)
@@ -189,6 +198,35 @@ def update_test_results(
                 for i, intermediate in enumerate(intermediate_outputs, 1):
                     evaluation_output += f"### Step {i}:\n{intermediate}\n\n"
                 evaluation_output += f"## Final Output:\n{output}"
+
+        # Surface the suggest_runbooks memories the LLM emitted (if any) to
+        # the judge, so memory content quality is scored against the eval's
+        # ``expected_output`` exactly like the final answer. Only applied
+        # when ``suggested_memories`` is provided (suggest=on variant) —
+        # passing ``None`` keeps off-variant and legacy evals untouched.
+        if suggested_memories is not None:
+            import json as _json
+
+            memory_block = "\n\n# Suggested Memories\n\n"
+            if suggested_memories:
+                memory_block += (
+                    f"The LLM emitted {len(suggested_memories)} memory "
+                    "suggestion(s) via the suggest_runbooks tool. Score "
+                    "these against the eval's expected_output: if a memory "
+                    "is required by expected_output but missing here (or "
+                    "the emitted memory captures the wrong thing), the "
+                    "test should FAIL even if the final answer is right.\n\n"
+                )
+                memory_block += "```json\n"
+                memory_block += _json.dumps(suggested_memories, indent=2)
+                memory_block += "\n```\n"
+            else:
+                memory_block += (
+                    "The LLM emitted NO memory suggestions via the "
+                    "suggest_runbooks tool this turn.\n"
+                )
+
+            evaluation_output += memory_block
 
         # Also include tool calls if requested
         if (
