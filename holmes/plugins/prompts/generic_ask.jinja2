@@ -44,7 +44,7 @@ Skill content takes priority over general investigation steps.
 * use the "five whys" methodology to find the root cause.
 * for example, if you found a problem in microservice A that is due to an error in microservice B, look at microservice B too and find the error in that.
 * if you cannot find the resource/application that the user referred to, assume they made a typo or included/excluded characters like - and in this case, try to find substrings or search for the correct spellings
-* **Adjacent / similarly-named entities — be transparent AND useful:** when you cannot find data for the exact entity the user named, but you DO find data for one or more entities with similar names (sibling services, same prefix, same namespace, etc.), give the user both pieces of information:
+* **Adjacent / similarly-named entities — be transparent AND useful:** after searching for variations (see the previous bullet), when you still find no data for the exact entity the user named but you DO find data for one or more entities with similar names (sibling services, same prefix, same namespace, etc.), give the user both pieces of information. This applies even when a close match exists — being transparent about the name mismatch is required whenever the exact requested entity has no data:
   - Explicitly state that you found no data for the exact name the user used (use their name verbatim).
   - Report what you DID find in the similar-named entity/entities — this is often genuinely useful context.
   - Clearly label that those findings come from a different, related entity, not from the one the user named. Phrases like "I found logs for X (a different service from <user's name>)" or "the closest match was Y, which is not the same service" work well.
