@@ -215,7 +215,7 @@ You'll also need:
     helm upgrade --install robusta robusta/robusta -f generated_values.yaml --set clusterName=YOUR_CLUSTER_NAME
     ```
 
-## Available Tools
+## Tools
 
 | Tool | Description |
 |------|-------------|
@@ -245,17 +245,6 @@ holmes ask "Search Confluence for documentation about the payment service archit
 ```bash
 holmes ask "Look up the incident response procedures in our Confluence wiki"
 ```
-
-## Tools
-
-This toolset proxies tools from the upstream mcp-atlassian MCP server. The full set of tools (and their descriptions) is defined by the MCP server itself — see the [mcp-atlassian MCP server documentation](https://github.com/sooperset/mcp-atlassian) for the authoritative list.
-
-Common capabilities exposed to HolmesGPT include:
-
-- Confluence search via CQL (Confluence Query Language)
-- Page retrieval (metadata and full content) by ID or title
-- Reading page comments
-- Optional page create / update operations (when not in read-only mode)
 
 ## Additional Resources
 

@@ -133,9 +133,3 @@ toolsets:
 | Tool Name | Description |
 |-----------|-------------|
 | grafana_loki_query | Run a query against Grafana Loki using LogQL query language |
-
-## Capabilities
-
-| Tool Name | Description |
-|-----------|-------------|
-| fetch_pod_logs | Fetches pod logs from Loki |

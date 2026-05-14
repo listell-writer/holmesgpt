@@ -16,12 +16,6 @@ holmes:
             enabled: true
 ```
 
-## Capabilities
-
-| Tool Name | Description |
-|-----------|-------------|
-| tcp_check | Check if a TCP socket can be opened to a host and port. Useful for testing basic network connectivity to services |
-
 ## Tools
 
 --8<-- "snippets/toolset_capabilities_intro.md"

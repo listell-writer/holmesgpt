@@ -208,7 +208,7 @@ The MCP server implements multiple security layers:
 | **RBAC enforcement** | Kubernetes RBAC restricts which resources can be accessed |
 | **Command timeout** | Commands are killed after a configurable timeout (default: 60s) |
 
-## Available Tools
+## Tools
 
 | Tool | Description |
 |------|-------------|
@@ -233,16 +233,6 @@ holmes ask "Cordon the problematic node and drain it safely"
 ```bash
 holmes ask "The checkout-api pods are crashlooping - investigate and fix"
 ```
-
-## Tools
-
-This toolset proxies tools from the upstream Kubernetes Remediation MCP server. The full set of tools (and their descriptions) is defined by the MCP server itself — see the [Kubernetes Remediation MCP server documentation](https://github.com/robusta-dev/holmes-mcp-integrations/tree/master/servers/kubernetes-remediation) for the authoritative list.
-
-Common capabilities exposed to HolmesGPT include:
-
-- Validated `kubectl` command execution (read and write operations subject to allowlist)
-- Running temporary pods from an allowlisted set of container images
-- Retrieving the active MCP server configuration for debugging
 
 ## Additional Resources
 

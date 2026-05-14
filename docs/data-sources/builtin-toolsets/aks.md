@@ -67,17 +67,6 @@ toolsets:
       timeout: 60  # Request timeout in seconds
 ```
 
-## Capabilities
-
-| Tool Name | Description |
-|-----------|-------------|
-| aks_get_cluster_info | Get detailed information about the AKS cluster |
-| aks_get_node_pools | List and describe AKS node pools |
-| aks_get_cluster_credentials | Get cluster credentials for kubectl access |
-| aks_scale_node_pool | Scale a specific node pool |
-| aks_get_cluster_logs | Fetch AKS cluster logs |
-| aks_get_addon_status | Get status of AKS addons |
-
 ## Tools
 
 --8<-- "snippets/toolset_capabilities_intro.md"

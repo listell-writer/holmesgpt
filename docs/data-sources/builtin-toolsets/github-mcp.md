@@ -443,7 +443,7 @@ Find the **App ID** on the App's settings page (under "About").
     3. Sets the token as `GITHUB_PERSONAL_ACCESS_TOKEN` for the underlying MCP server
     4. A background thread refreshes the token every 30 minutes
 
-## Available Tools
+## Tools
 
 By default, the GitHub MCP server enables 4 toolsets that provide comprehensive access to GitHub functionality:
 
@@ -553,19 +553,6 @@ holmes ask "List the recent commits in the owner/repo repository"
 - "What changes were made to the authentication module in the last week?"
 - "Find all usages of the deprecated API endpoint /v1/users in our codebase"
 - "Create an issue to add retry logic to the payment service and assign it to Copilot"
-
-## Tools
-
-This toolset proxies tools from the upstream GitHub MCP server. The full set of tools (and their descriptions) is defined by the MCP server itself — see the [GitHub MCP server documentation](https://github.com/github/github-mcp-server) for the authoritative list.
-
-Common capabilities exposed to HolmesGPT include:
-
-- Repository, file, branch, and commit access
-- Code and repository search
-- Issue management (read, create, comment, label)
-- Pull request management (review, comment, merge, diff)
-- GitHub Actions workflow runs, jobs, and logs
-- Copilot delegation (assign issues / request reviews)
 
 ## Troubleshooting
 

@@ -333,35 +333,6 @@ mcpAddons:
       # The deployment will use the existing mariadb-mcp-secret
 ```
 
-## Capabilities
-
-The MariaDB MCP server enables Holmes to:
-
-### Performance Analysis
-- Identify slow queries and their patterns
-- Analyze query execution plans
-- Check for missing or inefficient indexes
-- Monitor connection pool usage
-- Review table statistics and sizes
-
-### Deadlock Investigation
-- Detect current deadlocks
-- Identify blocking transactions
-- Analyze lock wait chains
-- Review transaction history
-
-### Database Health
-- Check current connections and processes
-- Monitor resource usage
-- Review error logs
-- Analyze table fragmentation
-
-### Query Optimization
-- Find queries not using indexes
-- Identify full table scans
-- Review query cache effectiveness
-- Analyze temporary table usage
-
 ## Example Usage
 
 ### Slow running queries
@@ -394,8 +365,31 @@ This toolset proxies tools from the upstream MariaDB MCP server. The full set of
 
 Common capabilities exposed to HolmesGPT include:
 
-- Slow query and execution plan analysis
-- Deadlock and lock-wait investigation
-- Connection, process, and resource health checks
-- Index and table statistics review
-- Read-only SQL inspection for troubleshooting
+**Performance Analysis**
+
+- Identify slow queries and their patterns
+- Analyze query execution plans
+- Check for missing or inefficient indexes
+- Monitor connection pool usage
+- Review table statistics and sizes
+
+**Deadlock Investigation**
+
+- Detect current deadlocks
+- Identify blocking transactions
+- Analyze lock wait chains
+- Review transaction history
+
+**Database Health**
+
+- Check current connections and processes
+- Monitor resource usage
+- Review error logs
+- Analyze table fragmentation
+
+**Query Optimization**
+
+- Find queries not using indexes
+- Identify full table scans
+- Review query cache effectiveness
+- Analyze temporary table usage

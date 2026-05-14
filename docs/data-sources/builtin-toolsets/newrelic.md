@@ -125,13 +125,6 @@ In the same UI, click your profile icon (bottom-left) → **Administration** →
 | newrelic_execute_nrql_query | Get Traces, APM, Spans, Logs and more by executing a NRQL query in New Relic |
 | newrelic_list_organization_accounts | List all account names and IDs accessible in the New Relic organization |
 
-## Capabilities
-
-| Tool Name | Description |
-|-----------|-------------|
-| newrelic_execute_nrql_query | Execute NRQL queries for Traces, APM, Spans, Logs and more |
-| newrelic_list_organization_accounts | List all account IDs/names available to the API key (only enabled when `enable_multi_account: true`) |
-
 ## Multi-Account Mode
 
 If your organization has multiple New Relic accounts, setting `enable_multi_account: true` lets Holmes query across all of them.

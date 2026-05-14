@@ -461,16 +461,3 @@ These fields are only valid for specific `subtype` values:
 | get_metric_metadata | Get metric metadata (type, help text, unit) using /api/v1/metadata |
 | execute_prometheus_instant_query | Execute an instant PromQL query (single point in time) |
 | execute_prometheus_range_query | Generate a graph and execute a PromQL range query |
-
-## Capabilities
-
-| Tool Name | Description |
-|-----------|-------------|
-| list_prometheus_rules | List all defined Prometheus rules with descriptions and annotations |
-| get_metric_names | Get list of metric names (fastest discovery method) - requires match filter |
-| get_label_values | Get all values for a specific label (e.g., pod names, namespaces) |
-| get_all_labels | Get list of all label names available in Prometheus |
-| get_series | Get time series matching a selector (returns full label sets) |
-| get_metric_metadata | Get metadata (type, description, unit) for metrics |
-| execute_prometheus_instant_query | Execute an instant PromQL query (single point in time) |
-| execute_prometheus_range_query | Execute a range PromQL query for time series data with graph generation |

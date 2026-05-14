@@ -141,23 +141,6 @@ This is the recommended approach if your ArgoCD is reachable through a public DN
 
     In production, always use a Kubernetes secret instead of hardcoding the token value in your Helm values.
 
-## Capabilities
-
---8<-- "snippets/toolset_capabilities_intro.md"
-
-| Tool Name | Description |
-|-----------|-------------|
-| argocd_app_list | List the applications in ArgoCD |
-| argocd_app_get | Retrieve information about an existing application, such as its status and configuration |
-| argocd_app_manifests | Retrieve manifests for an application |
-| argocd_app_resources | List resources of an application |
-| argocd_app_diff | Display the differences between the current state of an application and the desired state specified in its Git repository |
-| argocd_app_history | List the deployment history of an application in ArgoCD |
-| argocd_repo_list | List all the Git repositories that ArgoCD is currently managing |
-| argocd_proj_list | List all available projects |
-| argocd_proj_get | Retrieve information about an existing project, such as its applications and policies |
-| argocd_cluster_list | List all known clusters |
-
 ## Tools
 
 --8<-- "snippets/toolset_capabilities_intro.md"

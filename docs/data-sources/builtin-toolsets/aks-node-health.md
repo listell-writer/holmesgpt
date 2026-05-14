@@ -66,17 +66,6 @@ toolsets:
       max_unhealthy_nodes: 3  # Maximum number of unhealthy nodes to report
 ```
 
-## Capabilities
-
-| Tool Name | Description |
-|-----------|-------------|
-| aks_check_node_health | Perform comprehensive health checks on AKS nodes |
-| aks_get_node_metrics | Get detailed metrics for AKS nodes |
-| aks_diagnose_node_issues | Diagnose common node-level issues |
-| aks_check_node_readiness | Check if nodes are ready and schedulable |
-| aks_get_node_events | Get events related to specific nodes |
-| aks_check_node_resources | Check resource utilization on nodes |
-
 ## Tools
 
 --8<-- "snippets/toolset_capabilities_intro.md"

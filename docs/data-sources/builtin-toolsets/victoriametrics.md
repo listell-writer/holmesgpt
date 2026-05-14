@@ -58,7 +58,3 @@ For day-to-day metric investigations, Holmes works the same as with Prometheus. 
 | get_metric_metadata | Get metric metadata (type, help text, unit) using /api/v1/metadata |
 | execute_prometheus_instant_query | Execute an instant PromQL query (single point in time) |
 | execute_prometheus_range_query | Generate a graph and execute a PromQL range query |
-
-## Capabilities
-
-Inherits every tool from the Prometheus toolset. See the [Prometheus capabilities](prometheus.md#capabilities) reference for the full list of tools Holmes can use against a VictoriaMetrics endpoint.

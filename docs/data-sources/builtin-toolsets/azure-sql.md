@@ -215,21 +215,6 @@ Database Level (SQL permissions):
 
 In addition, Query Store should be enabled on target databases
 
-## Capabilities
-
-| Tool Name | Description |
-|-----------|-------------|
-| analyze_database_health_status | Analyze overall database health and status |
-| analyze_database_performance | Analyze database performance metrics |
-| analyze_database_connections | Analyze database connection patterns and issues |
-| analyze_database_storage | Analyze database storage usage and growth |
-| get_top_cpu_queries | Get queries with highest CPU usage |
-| get_slow_queries | Get slowest performing queries |
-| get_top_data_io_queries | Get queries with highest data I/O usage |
-| get_top_log_io_queries | Get queries with highest log I/O usage |
-| get_active_alerts | Get active alerts for the database |
-| analyze_connection_failures | Analyze connection failure patterns |
-
 ## Tools
 
 --8<-- "snippets/toolset_capabilities_intro.md"

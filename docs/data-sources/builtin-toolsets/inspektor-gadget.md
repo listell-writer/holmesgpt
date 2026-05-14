@@ -40,10 +40,6 @@ By enabling this toolset, HolmesGPT will be able to use [Inspektor Gadget](https
 
     --8<-- "snippets/helm_upgrade_command.md"
 
-## Capabilities
-
-Provides eBPF-based node-level observability via Inspektor Gadget, including process snapshots, socket inspection, execution tracing, and network packet capture.
-
 ## Tools
 
 --8<-- "snippets/toolset_capabilities_intro.md"

@@ -77,17 +77,6 @@ The API key requires the following permissions:
 - **Project Data Access Admin** - To access database logs and metrics
 - **Project Monitoring Admin** - To access monitoring data and alerts
 
-## Capabilities
-
-| Tool Name | Description |
-|-----------|-------------|
-| atlas_return_project_alerts | Get alerts for the MongoDB Atlas project |
-| atlas_return_project_processes | Get information about processes in the project |
-| atlas_return_project_slow_queries | Get slow queries from the project (last 24 hours) |
-| atlas_return_events_from_project | Get events from the project (last 24 hours) |
-| atlas_return_logs_for_host_in_project | Get logs for a specific host in the project |
-| atlas_return_event_type_from_project | Get events of a specific type from the project |
-
 ## Usage Guidelines
 
 ### Performance Analysis
