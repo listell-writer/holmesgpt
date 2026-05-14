@@ -66,11 +66,12 @@ before_test: |
   BULK_FILE="/tmp/es_trace_195_$$.ndjson"
   > "$BULK_FILE"
 
-  # Generate 10 normal successful traces (small data). Stable _ids (one per
-  # span index) keep this idempotent under concurrent runs.
+  # Generate 10 normal successful traces (small data). Stable _ids and
+  # deterministic trace_ids (derived from the loop index) keep this fully
+  # idempotent under concurrent runs.
   for i in $(seq 1 10); do
     PADDED_MIN=$(printf "%02d" $i)
-    TRACE_ID="TRACE-OK-$((10000 + RANDOM % 90000))"
+    TRACE_ID=$(printf "TRACE-OK-%05d" $((10000 + i)))
 
     # API Gateway span
     echo "{\"index\": {\"_index\": \"app-245-apm-traces\", \"_id\": \"ok-gw-${i}\"}}" >> "$BULK_FILE"
