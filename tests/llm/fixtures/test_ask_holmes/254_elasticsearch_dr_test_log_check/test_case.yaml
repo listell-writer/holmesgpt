@@ -12,8 +12,8 @@
 # failures during the DR test, but neither is the service the customer asked about.
 #
 # The ideal Holmes response makes both facts plain: "I found no logs for
-# companyopswebjob, but here is what I found in the related services X and Y —
-# you should still pull logs from companyopswebjob to confirm."
+# companyopswebjob, but here is what I found in the related services X and Y
+# (these are different services from the one you asked about)."
 #
 # Requirements:
 # - ELASTICSEARCH_URL: URL to Elasticsearch cluster
