@@ -14,6 +14,67 @@ HolmesGPT is an AI-powered troubleshooting agent that connects to observability 
 poetry install
 ```
 
+### Running Evals in the Claude Code Sandbox (k8s setup)
+
+Claude Code on the web runs in a managed Linux container where Docker works but
+KIND fails (nested systemd cannot mount the systemd cgroup hierarchy under
+cgroup v1). The supported path is **k3s-in-Docker**, set up by
+`scripts/setup-sandbox-k8s.sh`. The script is idempotent; run it once per session
+before invoking pytest.
+
+```bash
+./scripts/setup-sandbox-k8s.sh
+export KUBECONFIG=/tmp/k3s-output/kubeconfig.yaml
+
+# Use OpenRouter (the API key already exists in the sandbox env)
+# CLASSIFIER_MODEL is required when MODEL points at OpenRouter
+export MODEL="openrouter/openai/gpt-4.1-mini"
+export CLASSIFIER_MODEL="openrouter/openai/gpt-4.1"
+
+# Run a single eval end-to-end (~30-60s including pod setup)
+poetry run pytest -k "01_how_many_pods" --no-cov
+```
+
+**What the setup script handles (and why):**
+
+- Starts `dockerd` (the sandbox doesn't auto-start it).
+- Installs `kubectl`, `helm`, and a static `jq`. `helm` is needed by toolset
+  prerequisite checks — without it many `test_ask_holmes` evals fail at setup
+  with `helm: not found`.
+- Runs k3s v1.31 in a privileged Docker container with `--cgroupns=host` and
+  unconfined seccomp/apparmor. KIND is installed but **not** used — it can't
+  boot a control-plane container here.
+- Mounts the sandbox CA bundle (`/etc/ssl/certs/ca-certificates.crt`) into the
+  k3s container at the OS trust-store paths. The egress proxy MITMs HTTPS, so
+  without this containerd's image pulls fail with `x509: certificate signed by
+  unknown authority`.
+- **Replaces `/bin/runc` inside the k3s container with a wrapper that strips
+  `.process.oomScoreAdj` from each container's `config.json` before invoking
+  the real runc.** Without this, every pod sandbox creation fails with
+  `nsexec: failed to update /proc/self/oom_score_adj: Permission denied` →
+  `runc create failed: ... can't get final child's PID from pipe: EOF`. The
+  sandbox revokes `CAP_SYS_RESOURCE`, so processes cannot lower their
+  oom_score_adj, and kubelet sets `oomScoreAdj=-998` on every pause container.
+  Stripping the field lets runc inherit the parent's value.
+
+**Fastest eval to run as a smoke test:** `01_how_many_pods` — minimal manifest
+(14 busybox pods), straightforward question, completes in ~30s including k8s
+setup. Use it as the canonical "did I break anything" check.
+
+**Skipping setup on repeat runs:** Once `before_test` resources exist (e.g.,
+namespace `app-01`), `poetry run pytest -k "01_how_many_pods" --skip-setup --no-cov`
+runs the eval in ~25s.
+
+**Limitations of the sandbox cluster (don't waste time trying to fix):**
+
+- `kind`, `minikube`, and bare `k3s` outside the wrapper all fail.
+- Pods that explicitly require setting `oomScoreAdj` to a fixed value in the
+  spec may still fail; the wrapper only strips the kubelet-injected default.
+- Only a single-node cluster; no real load-balancer (`servicelb` is disabled);
+  no metrics-server, no traefik.
+- Cgroup v1 only. Anything that requires cgroup v2 (e.g., memory.swap.max
+  workloads, some eBPF tools) won't work.
+
 ### Testing
 
 ```bash
