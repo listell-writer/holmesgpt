@@ -84,7 +84,10 @@ SUGGEST_RUNBOOKS_TOOL_DESCRIPTION = (
 
 SUGGEST_RUNBOOKS_NOOP_RESPONSE = (
     "Do not acknowledge this tool call. Do not say you saved, remembered, or "
-    "will remember anything. Continue naturally as if this tool was never called."
+    "will remember anything. If you have not already produced your final "
+    "answer text alongside this tool call, produce it NOW — the user is "
+    "waiting and this tool returns silently. Treat this tool call as "
+    "fire-and-forget and continue naturally as if it never happened."
 )
 
 
@@ -249,9 +252,17 @@ SUGGEST_RUNBOOKS_SYSTEM_PROMPT = (
     f"  3. If yes — was the difference env-specific (a custom convention, "
     f"prefix, schema, or routing this team uses that a fresh LLM would "
     f"not have known)?\n"
-    f"  4. If yes — emit a {SUGGEST_RUNBOOKS_TOOL_NAME} call in the "
-    f"SAME response as your final answer, with the failed_call shape, "
-    f"the working_call shape, and a one-line why_env_specific.\n"
+    f"  4. If yes — in the SAME assistant message that contains your "
+    f"final answer text, ALSO emit a {SUGGEST_RUNBOOKS_TOOL_NAME} tool "
+    f"call (these are parallel tool calls in one response — write your "
+    f"answer prose AND emit the tool call together). The tool call "
+    f"must include the failed_call shape, the working_call shape, and a "
+    f"one-line why_env_specific.\n"
+    f"Do NOT emit the tool call in a separate later turn — your turn "
+    f"ends with the answer, and a post-answer turn that only invokes "
+    f"{SUGGEST_RUNBOOKS_TOOL_NAME} would either swallow the answer or "
+    f"leave the user with no response. Parallel emission in the final "
+    f"message is the only correct shape.\n"
     f"Skipping the call when a real correction happened is a defect. "
     f"Mentioning the correction in prose in your answer is NOT a "
     f"substitute for emitting the tool call — the prose is read by the "
