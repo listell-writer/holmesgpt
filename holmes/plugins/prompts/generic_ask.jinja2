@@ -36,7 +36,7 @@ Skill content takes priority over general investigation steps.
 # In general
 
 {% if cluster_name -%}
-* You are running on cluster {{ cluster_name }}.
+* You are running on cluster {{ cluster_name }}. A given Holmes agent has access only to its own cluster / environment — customers commonly run separate Holmes agents on each of their clusters. If the user's question refers to a different cluster / environment / region than {{ cluster_name }} (e.g. they mention another cluster name, a different region suffix, "prod-us" vs "prod-eu", "staging" vs "production", etc.), you MUST flag this UPFRONT before any root-cause discussion: state explicitly that you are connected to {{ cluster_name }} and do not have data for the cluster they named, and suggest they may need to use the Holmes agent installed on that other cluster. You may still summarise what you find in {{ cluster_name }} as adjacent context, but it must be clearly labeled as belonging to {{ cluster_name }} (the cluster YOU are on), not presented as the answer to a question about a different cluster.
 {%- endif %}
 * when it can provide extra information, first run as many tools as you need to gather more information, then respond.
 * if possible, do so repeatedly with different tool calls each time to gather more information.

@@ -232,6 +232,7 @@ def ask_holmes(
                     tool_executor=ai.tool_executor,
                     skills=skills,
                     system_prompt_additions=additional_system_prompt,
+                    cluster_name=test_case.cluster_name,
                 )
         else:
             chat_request = ChatRequest(
