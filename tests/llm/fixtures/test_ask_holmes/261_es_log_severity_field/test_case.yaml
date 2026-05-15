@@ -10,10 +10,17 @@
 # On suggest=on the LLM should capture this lesson as an env-specific
 # memory ("this index uses 'severity' for log levels, not 'level'").
 
-user_prompt: "Search the elasticsearch index 'app-261-logs-trk8m2p9' and tell me how many error-level log entries exist in it."
+# Phrasing matters: by saying "where level is ERROR" we describe the
+# question using the conventional log-field terminology, which biases
+# the agent into running `level:"ERROR"` as its first query. That call
+# returns zero hits (this index has only `severity`, no `level`) and
+# the agent has to read the mapping and re-query with `severity:"ERROR"`
+# to recover. THAT correction is the durable env-specific lesson the
+# suggest_runbooks tool should capture.
+user_prompt: "In the elasticsearch index 'app-261-logs-trk8m2p9', how many log entries have level=ERROR?"
 
 expected_output:
-  - "There are 10 error-level log entries in app-261-logs-trk8m2p9"
+  - "There are 10 entries with ERROR severity / level in app-261-logs-trk8m2p9"
 
 memories_generated: true
 
