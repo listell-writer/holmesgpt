@@ -465,6 +465,144 @@ def test_bash_session_prefix_memory_flow(
     print("=" * 60)
 
 
+@patch("holmes.core.supabase_dal.SupabaseDal._SupabaseDal__load_robusta_config")
+@patch("holmes.config.Config.create_toolcalling_llm")
+@patch("holmes.core.supabase_dal.SupabaseDal.get_global_instructions_for_account")
+def test_pending_approval_filters_already_allowed_prefixes(
+    mock_get_global_instructions,
+    mock_create_toolcalling_llm,
+    mock_load_robusta_config,
+    client,
+):
+    """
+    Regression test: when the LLM suggests prefixes that are partially in the
+    allow list (e.g. "kubectl get" is built-in, "awk" is not), the approval
+    request to the client must only contain the prefixes that actually need
+    approval. Both pending_approvals[*].params and the assistant message's
+    tool_call.function.arguments in conversation_history must reflect the
+    filtered list — otherwise frontends reading from either path will ask the
+    user to approve prefixes that are already auto-approved.
+    """
+    from holmes.plugins.toolsets.bash.bash_toolset import (
+        BashExecutorToolset,
+        RunBashCommand,
+    )
+    from holmes.plugins.toolsets.bash.common.config import BashExecutorConfig
+
+    mock_load_robusta_config.return_value = None
+    mock_get_global_instructions.return_value = []
+
+    mock_llm = MagicMock(spec=LLM)
+    mock_llm.count_tokens.return_value = ContextWindowUsage(
+        total_tokens=100,
+        system_tokens=0,
+        tools_to_call_tokens=0,
+        tools_tokens=0,
+        user_tokens=0,
+        assistant_tokens=0,
+        other_tokens=0,
+    )
+    mock_llm.get_context_window_size.return_value = 128000
+    mock_llm.get_maximum_output_token.return_value = 4096
+    mock_llm.get_max_token_count_for_single_tool.return_value = 10000
+    mock_llm.model = "gpt-4o"
+
+    bash_toolset = BashExecutorToolset()
+    bash_toolset.config = BashExecutorConfig(builtin_allowlist="core")
+    bash_toolset.status = MagicMock()
+    bash_toolset.status.value = "enabled"
+    real_bash_tool = RunBashCommand(bash_toolset)
+
+    mock_tool_executor = MagicMock()
+    mock_tool_executor.toolsets = [bash_toolset]
+    mock_tool_executor.get_tool_by_name.return_value = real_bash_tool
+    mock_tool_executor.get_toolset_name.return_value = "bash"
+    mock_tool_executor.ensure_toolset_initialized.return_value = None
+    mock_tool_executor.get_all_tools_openai_format.return_value = [
+        {
+            "type": "function",
+            "function": {
+                "name": "bash",
+                "description": "Execute bash commands",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "command": {"type": "string"},
+                        "suggested_prefixes": {"type": "array"},
+                    },
+                    "required": ["command", "suggested_prefixes"],
+                },
+            },
+        }
+    ]
+
+    ai = ToolCallingLLM(
+        tool_executor=mock_tool_executor,
+        max_steps=10,
+        llm=mock_llm,
+        tool_results_dir=None,
+    )
+    mock_create_toolcalling_llm.return_value = ai
+
+    # LLM suggests both an already-allowed prefix ("kubectl get") and one that
+    # needs approval ("awk"). Only "awk" should reach the client.
+    mock_llm.completion.return_value = create_mock_llm_response(
+        "Checking pods.",
+        tool_calls=[
+            create_mock_tool_call(
+                "call_1",
+                'kubectl get pods | awk "{print $1}"',
+                ["kubectl get", "awk"],
+            )
+        ],
+    )
+
+    response = client.post(
+        "/api/chat",
+        json={
+            "ask": "Get the pods",
+            "conversation_history": [
+                {"role": "system", "content": "You are helpful. Use bash tool."}
+            ],
+            "stream": True,
+            "enable_tool_approval": True,
+        },
+    )
+    assert response.status_code == 200
+
+    events = parse_sse_events(response.text)
+    approval_event = next(
+        e[1] for e in events if e[0] == StreamEvents.APPROVAL_REQUIRED.value
+    )
+
+    pending = approval_event["pending_approvals"][0]
+    assert pending["params"]["suggested_prefixes"] == ["awk"], (
+        f"pending_approvals[0].params.suggested_prefixes should be filtered to "
+        f"only ['awk'] (the prefix that actually needs approval), but got "
+        f"{pending['params']['suggested_prefixes']}"
+    )
+
+    # The assistant message's tool_call.function.arguments must also be
+    # filtered — clients reading from conversation_history must see the same
+    # list as pending_approvals.
+    conversation_history = approval_event["conversation_history"]
+    assistant_msg = next(
+        m
+        for m in conversation_history
+        if m.get("role") == "assistant" and m.get("tool_calls")
+    )
+    tool_call = next(
+        tc for tc in assistant_msg["tool_calls"] if tc["id"] == "call_1"
+    )
+    arguments = json.loads(tool_call["function"]["arguments"])
+    assert arguments["suggested_prefixes"] == ["awk"], (
+        f"assistant tool_call.function.arguments.suggested_prefixes should be "
+        f"filtered to only ['awk'], but got {arguments['suggested_prefixes']}. "
+        f"Frontends reading from conversation_history would otherwise prompt "
+        f"the user to approve already-allowed prefixes."
+    )
+
+
 # Unit tests for helper functions
 class TestExtractTextFromContent:
     """Tests for _extract_text_from_content helper function."""

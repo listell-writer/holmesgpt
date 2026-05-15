@@ -1344,6 +1344,16 @@ class ToolCallingLLM:
                             tool_call_id=approval.tool_call_id, messages=messages
                         )
                         tool_call["pending_approval"] = True
+                        # The bash toolset filters suggested_prefixes down to only
+                        # those that still need approval (dropping ones already in
+                        # the allow list or session-approved). Sync that filtered
+                        # view into the assistant tool_call.function.arguments so
+                        # clients reading params from the conversation history see
+                        # the same list as pending_approvals[*].params.
+                        function = tool_call.get("function") or {}
+                        if function.get("arguments") is not None:
+                            function["arguments"] = json.dumps(approval.params)
+                            tool_call["function"] = function
 
                 # If either type of pause is needed, emit a single APPROVAL_REQUIRED
                 # event that carries both pending_approvals and pending_frontend_tool_calls.
