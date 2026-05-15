@@ -27,7 +27,6 @@ import uvicorn
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import JSONResponse, StreamingResponse
 from litellm.exceptions import AuthenticationError
-
 from holmes import get_version, is_official_release
 from holmes.common.env_vars import (
     DEVELOPMENT_MODE,
@@ -70,6 +69,12 @@ from holmes.core.tools_utils.frontend_tools import (
     inject_frontend_tools,
 )
 from holmes.core.tracing import TracingFactory
+from holmes.core.usage_recorder import (
+    build_chat_recorder_state,
+    record_error,
+    record_from_llm_result,
+    stream_with_usage_recording,
+)
 from holmes.utils.stream import stream_chat_formatter
 
 
@@ -462,17 +467,31 @@ def chat(chat_request: ChatRequest, http_request: Request):
         )
 
         global_instructions = dal.get_global_instructions_for_account()
-        messages = build_chat_messages(
-            chat_request.ask,
-            chat_request.conversation_history,
-            ai=ai,
-            config=config,
-            global_instructions=global_instructions,
-            additional_system_prompt=chat_request.additional_system_prompt,
-            skills=skills,
-            images=chat_request.images,
-            prompt_component_overrides=prompt_component_overrides,
+
+        # A follow-up may carry only tool_decisions / frontend_tool_results
+        # (no new user question). In that case, resume from the existing
+        # conversation_history without appending an empty user message —
+        # otherwise the LLM sees a content-less user turn and responds with
+        # something like "looks like your question is empty, how can I help?".
+        resume_only = bool(
+            not chat_request.ask
+            and chat_request.conversation_history
+            and (chat_request.tool_decisions or chat_request.frontend_tool_results)
         )
+        if resume_only:
+            messages = list(chat_request.conversation_history)
+        else:
+            messages = build_chat_messages(
+                chat_request.ask,
+                chat_request.conversation_history,
+                ai=ai,
+                config=config,
+                global_instructions=global_instructions,
+                additional_system_prompt=chat_request.additional_system_prompt,
+                skills=skills,
+                images=chat_request.images,
+                prompt_component_overrides=prompt_component_overrides,
+            )
 
         try:
             request_ai, has_pause_tools = inject_frontend_tools(
@@ -503,7 +522,12 @@ def chat(chat_request: ChatRequest, http_request: Request):
                 inv_attrs = {"gen_ai_request_model": chat_request.model or config.model or "unknown"}
                 otel_metrics.investigation_count.add(1, inv_attrs)
 
-            stream = stream_chat_formatter(
+            # Build the usage recorder state and wrap the raw stream BEFORE the
+            # SSE formatter so the wrapper sees Holmes' native StreamMessage events.
+            recorder_state = build_chat_recorder_state(
+                chat_request, request_ai, dal=dal, is_streaming=True
+            )
+            recorded_stream = stream_with_usage_recording(
                 request_ai.call_stream(
                     msgs=messages,
                     enable_tool_approval=chat_request.enable_tool_approval or False,
@@ -513,6 +537,10 @@ def chat(chat_request: ChatRequest, http_request: Request):
                     request_context=request_context,
                     trace_span=trace_span,
                 ),
+                recorder_state,
+            )
+            stream = stream_chat_formatter(
+                recorded_stream,
                 [f.model_dump() for f in follow_up_actions],
                 model=chat_request.model or config.model,
             )
@@ -521,6 +549,9 @@ def chat(chat_request: ChatRequest, http_request: Request):
                 media_type="text/event-stream",
             )
         else:
+            recorder_state = build_chat_recorder_state(
+                chat_request, request_ai, dal=dal, is_streaming=False
+            )
             try:
                 # Use provided trace_span or create a root investigation span
                 trace_span = chat_request.trace_span
@@ -540,6 +571,9 @@ def chat(chat_request: ChatRequest, http_request: Request):
                     request_context=request_context,
                 )
 
+                # Record usage event for non-streaming path (fire-and-forget).
+                record_from_llm_result(recorder_state, llm_call)
+
                 # Record investigation metrics
                 otel_metrics = TracingFactory.get_metrics()
                 if otel_metrics:
@@ -558,14 +592,25 @@ def chat(chat_request: ChatRequest, http_request: Request):
                     )
                 else:
                     logging.info(f"Completed {req_info}")
+                # Surface request_id in the response metadata so the FE has a
+                # handle for the public.record_feedback() RPC later. Streaming
+                # path does the same via _inject_request_id in the stream wrapper.
+                response_metadata = dict(llm_call.metadata or {})
+                response_metadata["request_id"] = recorder_state.request_id
                 response = ChatResponse(
                     analysis=llm_call.result,
                     tool_calls=llm_call.tool_calls,
                     conversation_history=llm_call.messages,
                     follow_up_actions=follow_up_actions,
-                    metadata=llm_call.metadata,
+                    metadata=response_metadata,
                 )
                 return response
+            except Exception as e:
+                # Non-streaming path: record the failed event so it shows up in dashboards
+                # with status='error' / 'rate_limited'. Streaming path records via the
+                # wrapper's `finally` automatically.
+                record_error(recorder_state, e)
+                raise
             finally:
                 if trace_span is not None:
                     trace_span.end()

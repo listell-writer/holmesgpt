@@ -3,6 +3,7 @@
 import logging
 import os
 from typing import Dict, List, Optional, Tuple
+from urllib.parse import quote
 
 from tests.llm.utils.braintrust import get_braintrust_url
 from tests.llm.utils.braintrust_history import (
@@ -14,7 +15,42 @@ from tests.llm.utils.braintrust_history import (
     compare_with_benchmark,
     get_benchmark_baseline,
 )
+from tests.llm.utils.test_env_vars import GITHUB_REF_NAME
 from tests.llm.utils.test_results import TestStatus
+
+
+_TEST_TYPE_TO_FIXTURE_DIR = {
+    "ask": "test_ask_holmes",
+    "investigate": "test_investigate",
+}
+
+
+def _get_eval_source_url(test_type: str, test_case_name: str) -> Optional[str]:
+    """Build a GitHub URL to an eval's test_case.yaml on the branch this run executed from.
+
+    Returns None if the test_type is not a known fixture-backed test (e.g. "unknown").
+
+    Ref resolution (first non-empty wins):
+      1. EVAL_BRANCH — explicit override
+      2. GITHUB_HEAD_REF — PR head branch (only set on pull_request events;
+         GITHUB_REF_NAME on PRs is the virtual "<num>/merge" ref which is not browsable)
+      3. GITHUB_REF_NAME — branch name on push events
+      4. "master"
+    """
+    fixture_dir = _TEST_TYPE_TO_FIXTURE_DIR.get(test_type)
+    if not fixture_dir or not test_case_name:
+        return None
+    ref = (
+        os.environ.get("EVAL_BRANCH")
+        or os.environ.get("GITHUB_HEAD_REF")
+        or GITHUB_REF_NAME
+        or "master"
+    )
+    encoded_ref = quote(ref, safe="")
+    return (
+        f"https://github.com/HolmesGPT/holmesgpt/blob/{encoded_ref}"
+        f"/tests/llm/fixtures/{fixture_dir}/{test_case_name}/test_case.yaml"
+    )
 
 
 def _fmt_tokens(value: Optional[int]) -> str:
@@ -63,8 +99,13 @@ def _generate_comparison_tables(
         comparison = comparison_map.get(key)
         baseline = benchmark.get(key)
 
+        display_name = f"{test_name} ({model})" if model else test_name
+        source_url = _get_eval_source_url(result.get("test_type", ""), test_name)
+        if source_url:
+            display_name = f"{display_name} [📄]({source_url})"
+
         rows.append({
-            "name": f"{test_name} ({model})" if model else test_name,
+            "name": display_name,
             "current_time": result.get("holmes_duration"),
             "baseline_time": baseline.duration if baseline else None,
             "current_cost": result.get("cost"),
@@ -340,6 +381,13 @@ def generate_markdown_report(
         )
         if braintrust_url:
             test_case_name = f"[{test_case_name}]({braintrust_url})"
+
+        # Add 📄 link to the eval's test_case.yaml on the branch this run ran from
+        source_url = _get_eval_source_url(
+            result.get("test_type", ""), result["test_case_name"]
+        )
+        if source_url:
+            test_case_name = f"[📄]({source_url}) {test_case_name}"
 
         status = TestStatus(result)
 
