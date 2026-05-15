@@ -1,0 +1,178 @@
+# Test: Kafka metrics in this cluster are exposed under a non-standard
+# name. The upstream Kafka JMX exporter publishes
+# `kafka_server_brokertopicmetrics_messagesinpersec_total` (or similar
+# `kafka_topic_*` shapes), but this team's exporter renames everything
+# under the `acme_kafka_*` prefix via prom relabeling. A fresh LLM
+# defaulting to the upstream names returns zero series and has to
+# enumerate metric names (`{__name__=~"kafka.*"}` → empty, then
+# `{__name__=~".*kafka.*"}` or `label_values(__name__)`) to discover
+# the real prefix `acme_kafka_*`.
+#
+# On suggest=on the LLM should capture this lesson: "Kafka metrics in
+# this cluster live under the `acme_kafka_*` prefix, not the upstream
+# `kafka_*` names — always discover the real metric name via label
+# enumeration before querying."
+
+user_prompt: "How many messages have been consumed in total on the 'payments' Kafka topic in the app-262 cluster?"
+
+expected_output:
+  - "The payments topic has 47823 messages consumed"
+
+memories_generated: true
+
+description: |
+  Forces a wrong→right metric-name correction. The upstream Kafka exporter
+  name is renamed to a non-standard team-specific prefix, so default PromQL
+  returns no series and the agent must discover via metadata.
+
+tags:
+  - prometheus
+  - kubernetes
+  - regression
+  - medium
+
+port_forwards:
+  - namespace: app-262
+    service: prometheus
+    local_port: 10262
+    remote_port: 9090
+
+before_test: |
+  set -e
+  kubectl create namespace app-262 --save-config --dry-run=client -o yaml | kubectl apply -f - || true
+
+  # Static-text metrics exporter — fixed values let the eval check an
+  # exact total. Note the `acme_` prefix, the upstream name does not
+  # appear anywhere.
+  cat <<'EOF' | kubectl apply -n app-262 -f -
+  apiVersion: v1
+  kind: ConfigMap
+  metadata:
+    name: kafka-fake-metrics
+  data:
+    metrics: |
+      # HELP acme_kafka_msgs_consumed_total Total Kafka messages consumed by topic (acme team renamed metric)
+      # TYPE acme_kafka_msgs_consumed_total counter
+      acme_kafka_msgs_consumed_total{topic="payments"} 47823
+      acme_kafka_msgs_consumed_total{topic="checkout"} 11204
+      acme_kafka_msgs_consumed_total{topic="inventory"} 6042
+      # HELP acme_kafka_consumer_lag_records Consumer lag per topic
+      # TYPE acme_kafka_consumer_lag_records gauge
+      acme_kafka_consumer_lag_records{topic="payments"} 3
+      acme_kafka_consumer_lag_records{topic="checkout"} 0
+      acme_kafka_consumer_lag_records{topic="inventory"} 12
+  ---
+  apiVersion: apps/v1
+  kind: Deployment
+  metadata:
+    name: kafka-exporter
+  spec:
+    replicas: 1
+    selector:
+      matchLabels: { app: kafka-exporter }
+    template:
+      metadata:
+        labels: { app: kafka-exporter }
+      spec:
+        containers:
+        - name: nginx
+          image: nginx:1.27-alpine
+          ports:
+          - containerPort: 80
+          volumeMounts:
+          - name: cfg
+            mountPath: /etc/nginx/conf.d
+          - name: metrics
+            mountPath: /usr/share/nginx/html
+        volumes:
+        - name: cfg
+          configMap:
+            name: kafka-exporter-nginx
+        - name: metrics
+          configMap:
+            name: kafka-fake-metrics
+            items:
+            - key: metrics
+              path: metrics
+  ---
+  apiVersion: v1
+  kind: ConfigMap
+  metadata:
+    name: kafka-exporter-nginx
+  data:
+    default.conf: |
+      server {
+        listen 80;
+        location = /metrics {
+          add_header Content-Type "text/plain; version=0.0.4";
+          alias /usr/share/nginx/html/metrics;
+        }
+      }
+  ---
+  apiVersion: v1
+  kind: Service
+  metadata:
+    name: kafka-exporter
+  spec:
+    selector:
+      app: kafka-exporter
+    ports:
+    - port: 80
+      targetPort: 80
+  EOF
+
+  # Prometheus config pointing at the fake exporter
+  cat <<'EOF' | kubectl apply -n app-262 -f -
+  apiVersion: v1
+  kind: ConfigMap
+  metadata:
+    name: prometheus-config
+  data:
+    prometheus.yml: |
+      global:
+        scrape_interval: 5s
+        evaluation_interval: 5s
+      scrape_configs:
+      - job_name: 'kafka'
+        metrics_path: /metrics
+        static_configs:
+        - targets: ['kafka-exporter.app-262.svc.cluster.local:80']
+  EOF
+
+  kubectl apply -n app-262 -f ../../shared/prometheus.yaml
+
+  echo "⏳ Waiting for kafka-exporter to be ready..."
+  for i in {1..60}; do
+    if kubectl wait --for=condition=ready pod -l app=kafka-exporter -n app-262 --timeout=5s 2>/dev/null; then
+      echo "✅ kafka-exporter ready"; break
+    fi
+    sleep 1
+    [ "$i" -eq 60 ] && { kubectl describe pod -l app=kafka-exporter -n app-262; exit 1; }
+  done
+
+  echo "⏳ Waiting for prometheus to be ready..."
+  for i in {1..60}; do
+    if kubectl wait --for=condition=ready pod -l app=prometheus -n app-262 --timeout=5s 2>/dev/null; then
+      echo "✅ Prometheus ready"; break
+    fi
+    sleep 1
+    [ "$i" -eq 60 ] && { kubectl describe pod -l app=prometheus -n app-262; exit 1; }
+  done
+
+  # Wait for Prometheus to have actually scraped the exporter — check via
+  # exec'ing into the prometheus pod, no port-forward needed yet.
+  echo "⏳ Waiting for Prometheus to scrape acme_kafka_msgs_consumed_total..."
+  for i in {1..30}; do
+    VAL=$(kubectl exec -n app-262 deployment/prometheus -- \
+      wget -q -O- 'http://localhost:9090/api/v1/query?query=acme_kafka_msgs_consumed_total{topic="payments"}' \
+      2>/dev/null | grep -o '"value":\[[^]]*\]' || true)
+    if [ -n "$VAL" ]; then
+      echo "✅ Metric scraped: $VAL"
+      break
+    fi
+    sleep 1
+    [ "$i" -eq 30 ] && { echo "❌ Metric not scraped"; exit 1; }
+  done
+
+after_test: |
+  kubectl delete namespace app-262 --wait=false || true

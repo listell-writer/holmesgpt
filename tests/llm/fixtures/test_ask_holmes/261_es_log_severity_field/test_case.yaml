@@ -62,16 +62,22 @@ before_test: |
   fi
   sleep 2
 
-  # 10 ERROR, 5 WARN, 15 INFO — all using the "severity" field.
+  # 10 ERROR, 5 WARN, 15 INFO — all using the "severity" field. Pad the
+  # seconds field so i >= 10 still produces a valid ISO timestamp; an
+  # earlier version of this fixture concatenated "0${i}" which produced
+  # "12:00:010" for i=10 and ES rejected the doc.
   BULK_DATA=""
   for i in $(seq 1 10); do
-    BULK_DATA="${BULK_DATA}{\"index\":{}}\n{\"severity\":\"ERROR\",\"service\":\"checkout-261\",\"message\":\"DB connection refused $i\",\"@timestamp\":\"2026-05-14T12:00:0${i}Z\"}\n"
+    TS=$(printf '2026-05-14T12:00:%02dZ' "$i")
+    BULK_DATA="${BULK_DATA}{\"index\":{}}\n{\"severity\":\"ERROR\",\"service\":\"checkout-261\",\"message\":\"DB connection refused $i\",\"@timestamp\":\"${TS}\"}\n"
   done
   for i in $(seq 1 5); do
-    BULK_DATA="${BULK_DATA}{\"index\":{}}\n{\"severity\":\"WARN\",\"service\":\"checkout-261\",\"message\":\"Slow query $i\",\"@timestamp\":\"2026-05-14T12:01:0${i}Z\"}\n"
+    TS=$(printf '2026-05-14T12:01:%02dZ' "$i")
+    BULK_DATA="${BULK_DATA}{\"index\":{}}\n{\"severity\":\"WARN\",\"service\":\"checkout-261\",\"message\":\"Slow query $i\",\"@timestamp\":\"${TS}\"}\n"
   done
   for i in $(seq 1 15); do
-    BULK_DATA="${BULK_DATA}{\"index\":{}}\n{\"severity\":\"INFO\",\"service\":\"checkout-261\",\"message\":\"Health check $i\",\"@timestamp\":\"2026-05-14T12:02:0${i}Z\"}\n"
+    TS=$(printf '2026-05-14T12:02:%02dZ' "$i")
+    BULK_DATA="${BULK_DATA}{\"index\":{}}\n{\"severity\":\"INFO\",\"service\":\"checkout-261\",\"message\":\"Health check $i\",\"@timestamp\":\"${TS}\"}\n"
   done
 
   BULK_RESPONSE=$(echo -e "$BULK_DATA" | curl -sf -X POST "${ELASTICSEARCH_URL}/${HOLMES_ES_TEST_INDEX}/_bulk" \
