@@ -19,6 +19,7 @@ expected_output:
   - "The payments topic has 47823 messages consumed"
 
 memories_generated: true
+rerun_with_memory: true
 
 description: |
   Forces a wrong→right metric-name correction. The upstream Kafka exporter

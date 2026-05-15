@@ -44,6 +44,7 @@ from tests.llm.utils.tool_suggestions_config import (
     extract_suggested_memories,
     get_tool_suggestions_configs,
     maybe_inject_suggest_runbooks_tool,
+    write_memories_as_skill_files,
 )
 
 TEST_CASES_FOLDER = Path(
@@ -240,6 +241,100 @@ def test_ask_holmes(
                 f"Memories:\n{suggested_memories}"
             )
 
+    # Closed-loop replay: write the memories the first pass emitted as
+    # SKILL.md files in a tempdir, run the same prompt again with those
+    # skills injected, and check that the agent (a) fetched the skill —
+    # proving it judged the memory relevant — and (b) still produces the
+    # correct answer. Skips when not applicable (suggest=off, no memories
+    # emitted, or rerun_with_memory not set).
+    replay_eligible = (
+        suggest_on
+        and test_case.memories_generated
+        and getattr(test_case, "rerun_with_memory", False)
+        and suggested_memories
+    )
+    if replay_eligible:
+        import tempfile
+
+        update_property(request, "replay_attempted", True)
+        with tempfile.TemporaryDirectory(
+            prefix=f"replay-{test_case.id}-"
+        ) as skills_dir:
+            written = write_memories_as_skill_files(suggested_memories, skills_dir)
+            try:
+                with tracer.start_trace(
+                    name=f"{test_case.id}[replay][{model}]",
+                    span_type=SpanType.EVAL,
+                ) as replay_span:
+                    replay_result = ask_holmes(
+                        test_case=test_case,
+                        model=model,
+                        tracer=tracer,
+                        eval_span=replay_span,
+                        additional_system_prompt=additional_system_prompt,
+                        tool_suggestions=None,  # no suggest_runbooks on replay
+                        additional_skill_paths=[skills_dir],
+                        request=request,
+                    )
+            except Exception as e:
+                update_property(request, "replay_error", str(e)[:300])
+                raise
+
+        replay_tool_calls = replay_result.tool_calls or []
+        fetch_skill_called = any(
+            getattr(tc, "tool_name", "") == "fetch_skill" for tc in replay_tool_calls
+        )
+        update_property(
+            request, "replay_turns", replay_result.num_llm_calls
+        )
+        update_property(request, "replay_tool_calls_count", len(replay_tool_calls))
+        update_property(request, "replay_skill_loaded", fetch_skill_called)
+        update_property(
+            request,
+            "replay_skill_count",
+            len(written),
+        )
+        replay_output = replay_result.result or ""
+        update_property(request, "replay_answer", replay_output)
+
+        # Score replay correctness with the same judge — but separately, so
+        # the original correctness reading is preserved.
+        from tests.llm.utils.classifiers import evaluate_correctness
+        from tests.llm.utils.test_case_utils import Evaluation
+
+        expected = test_case.expected_output
+        if not isinstance(expected, list):
+            expected = [expected]
+        evaluation_type = "strict"
+        if hasattr(test_case, "evaluation") and isinstance(
+            test_case.evaluation.correctness, Evaluation
+        ):
+            evaluation_type = test_case.evaluation.correctness.type
+        replay_eval = evaluate_correctness(
+            output=replay_output,
+            expected_elements=expected,
+            parent_span=eval_span,
+            evaluation_type=evaluation_type,
+            caplog=caplog,
+        )
+        update_property(request, "replay_correctness", int(replay_eval.score))
+
+        # Hard assertions: the agent must have fetched the skill (so we
+        # know the memory was actually consulted) and the answer must
+        # still be correct.
+        assert fetch_skill_called, (
+            f"Test {test_case.id} replay: the LLM did NOT call fetch_skill, "
+            f"so the captured memory was ignored. Either the skill name "
+            f"description wasn't relevant enough, or the agent isn't using "
+            f"available skills for this kind of question. Replay tool "
+            f"calls: {[getattr(tc, 'tool_name', '?') for tc in replay_tool_calls]}"
+        )
+        assert int(replay_eval.score) == 1, (
+            f"Test {test_case.id} replay: the answer was wrong even with "
+            f"the skill available. Memory content may be misleading or "
+            f"incomplete.\nActual: {replay_output[:500]}"
+        )
+
 
 # TODO: can this call real ask_holmes so more of the logic is captured
 def ask_holmes(
@@ -249,6 +344,7 @@ def ask_holmes(
     eval_span,
     additional_system_prompt,
     tool_suggestions: Optional[ToolSuggestionsConfig] = None,
+    additional_skill_paths: Optional[list] = None,
     request=None,
 ) -> LLMResult:
     with eval_span.start_span(
@@ -259,6 +355,7 @@ def ask_holmes(
             test_case_folder=test_case.folder,
             allow_toolset_failures=getattr(test_case, "allow_toolset_failures", False),
             toolsets_config_path=getattr(test_case, "toolsets_config_path", None),
+            additional_skill_paths=additional_skill_paths,
         )
 
         tool_executor = ToolExecutor(toolset_manager.toolsets)

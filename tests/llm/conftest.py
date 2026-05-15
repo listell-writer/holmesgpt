@@ -869,6 +869,15 @@ def _collect_test_results_from_stats(terminalreporter):
                 ),
                 "memories_count": user_props.get("memories_count", 0),
                 "suggested_memories": user_props.get("suggested_memories", []),
+                # Replay-with-memory results (only populated when the test
+                # set rerun_with_memory: true AND a memory was actually
+                # captured on the first pass).
+                "replay_attempted": user_props.get("replay_attempted", False),
+                "replay_skill_loaded": user_props.get("replay_skill_loaded", False),
+                "replay_correctness": user_props.get("replay_correctness"),
+                "replay_turns": user_props.get("replay_turns"),
+                "replay_tool_calls_count": user_props.get("replay_tool_calls_count"),
+                "replay_skill_count": user_props.get("replay_skill_count"),
                 "clean_test_case_id": user_props.get("clean_test_case_id"),
                 "braintrust_span_id": user_props.get("braintrust_span_id"),
                 "braintrust_root_span_id": user_props.get("braintrust_root_span_id"),

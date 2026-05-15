@@ -434,6 +434,33 @@ def generate_markdown_report(
 
         markdown += f"| {status.markdown_symbol} | {test_case_name} | {tool_suggestions_str} | {memories_str} | {time_str} | {turns_str} | {tools_str} | {cost_str} | {total_tokens_str} | {input_str} | {max_prompt_str} | {output_str} | {max_completion_str} | {cached_tokens_str} | {non_cached_tokens_str} | {reasoning_str} | {compactions_str} |\n"
 
+        # If this test ran a closed-loop replay (rerun_with_memory: true and
+        # a memory was actually captured), emit a second row labeled
+        # `[replay]` right after, so the comparison is visible inline. The
+        # replay metrics live in dedicated user_properties; missing fields
+        # render as em dashes.
+        if result.get("replay_attempted"):
+            replay_correct = result.get("replay_correctness")
+            replay_status = (
+                ":white_check_mark:"
+                if replay_correct == 1
+                else (":x:" if replay_correct == 0 else ":heavy_minus_sign:")
+            )
+            replay_turns = result.get("replay_turns")
+            replay_tools = result.get("replay_tool_calls_count")
+            skill_loaded = result.get("replay_skill_loaded")
+            # Reuse the same row shape but with [replay] suffix on the
+            # test name and "skill loaded" badge in the Memories column.
+            replay_name = f"{test_case_name} [replay]"
+            replay_mem_str = "skill ✓" if skill_loaded else "skill ✗"
+            replay_turns_str = str(replay_turns) if replay_turns else "—"
+            replay_tools_str = str(replay_tools) if replay_tools else "—"
+            markdown += (
+                f"| {replay_status} | {replay_name} | — | {replay_mem_str} | — | "
+                f"{replay_turns_str} | {replay_tools_str} | — | — | — | — | — | — | "
+                f"— | — | — | — |\n"
+            )
+
     # Add summary row
     avg_time_str = f"{total_time / time_count:.1f}s" if time_count > 0 else "—"
     avg_turns_str = f"{total_turns / turns_count:.1f}" if turns_count > 0 else "—"

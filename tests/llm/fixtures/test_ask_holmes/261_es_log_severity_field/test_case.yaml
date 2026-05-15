@@ -23,6 +23,7 @@ expected_output:
   - "There are 10 entries with ERROR severity / level in app-261-logs-trk8m2p9"
 
 memories_generated: true
+rerun_with_memory: true
 
 tags:
   - elasticsearch

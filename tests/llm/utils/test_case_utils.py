@@ -158,6 +158,14 @@ class HolmesTestCase(BaseModel):
     # surfaced to the LLM judge alongside `expected_output`, so memory content
     # quality is scored by the judge — no extra wrapper fields are needed here.
     memories_generated: Optional[bool] = None
+    # When memories_generated=True and the first pass actually emitted
+    # memories, also run the same prompt a SECOND time with those memories
+    # rendered as SKILL.md files and injected into the SkillsToolset's
+    # search paths. The replay run checks that (a) the agent fetched the
+    # skill (proving it judged the memory relevant) and (b) the answer is
+    # still correct. Provides a closed-loop validation that the captured
+    # memory actually helps future investigations.
+    rerun_with_memory: Optional[bool] = False
 
 
 class AskHolmesTestCase(HolmesTestCase, BaseModel):

@@ -17,6 +17,7 @@ expected_output:
   - "There are 4 error-level log lines from the checkout service in app-263"
 
 memories_generated: true
+rerun_with_memory: true
 
 description: |
   Forces a wrong→right label correction. Promtail labels the stream with

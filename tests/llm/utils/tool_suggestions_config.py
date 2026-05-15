@@ -362,6 +362,72 @@ def append_suggest_runbooks_system_prompt(
     return SUGGEST_RUNBOOKS_SYSTEM_PROMPT
 
 
+def _slugify(text: str) -> str:
+    """Normalize a free-form title to a filesystem-safe slug."""
+    import re
+
+    text = (text or "skill").strip().lower()
+    text = re.sub(r"[^a-z0-9]+", "-", text)
+    text = re.sub(r"^-+|-+$", "", text)
+    return text[:60] or "skill"
+
+
+def write_memories_as_skill_files(
+    memories: List[Dict[str, Any]], target_dir: str
+) -> List[str]:
+    """Render each captured memory as a SKILL.md file under ``target_dir``,
+    one per memory, so the SkillsToolset can pick them up via its standard
+    file-scanning path. Returns the list of skill directories written.
+
+    Used by the rerun_with_memory replay flow: after the first eval pass
+    captures a memory, we write the memory to disk, point the
+    SkillsToolset at the tempdir, and run the same prompt a second time.
+    The agent — having read the skill description in the system prompt —
+    is expected to call fetch_skill to load the body, see the
+    failed_call/working_call pair, and go straight to the working call
+    shape, skipping the wrong call that the first pass needed to recover
+    from.
+    """
+    import os
+
+    written: List[str] = []
+    for idx, mem in enumerate(memories):
+        title = str(mem.get("title") or f"runbook-{idx + 1}")
+        slug = _slugify(title)
+        skill_dir = os.path.join(target_dir, f"{idx + 1:02d}-{slug}")
+        os.makedirs(skill_dir, exist_ok=True)
+        description = title
+
+        body_parts: List[str] = ["", "## When to use", ""]
+        body_parts.append(str(mem.get("when_to_use") or ""))
+        body_parts += ["", "## Failed call shape (avoid)", ""]
+        body_parts.append(str(mem.get("failed_call") or ""))
+        body_parts += ["", "## Working call shape", ""]
+        body_parts.append(str(mem.get("working_call") or ""))
+        body_parts += ["", "## Why this is env-specific", ""]
+        body_parts.append(str(mem.get("why_env_specific") or ""))
+
+        # YAML frontmatter must escape doubled-quote chars carefully — the
+        # title may contain quotes the agent emitted in its memory. Keep
+        # things simple: prefer single quotes and replace embedded singles
+        # with the YAML escape (''). Description is the same as title.
+        safe_title = description.replace("'", "''")
+        frontmatter = (
+            "---\n"
+            f"name: {slug}\n"
+            f"description: '{safe_title}'\n"
+            "---\n"
+        )
+
+        skill_md = os.path.join(skill_dir, "SKILL.md")
+        with open(skill_md, "w", encoding="utf-8") as f:
+            f.write(frontmatter)
+            f.write("\n".join(body_parts).strip() + "\n")
+        written.append(skill_dir)
+
+    return written
+
+
 def extract_suggested_memories(tool_calls: Optional[List[Any]]) -> List[Dict[str, Any]]:
     """Pull the parsed ``suggestions`` arrays out of any SUGGEST_RUNBOOKS calls
     found in the LLM tool-call history. Each dict is one suggestion; multiple
