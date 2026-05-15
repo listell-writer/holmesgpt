@@ -135,4 +135,8 @@ kubectl wait --for=condition=Ready pods --all -n kube-system --timeout=120s || t
 log "Cluster ready."
 kubectl get nodes
 echo
-echo "export KUBECONFIG=$KUBECONFIG"
+echo "Run evals with:"
+echo "  export KUBECONFIG=$KUBECONFIG"
+echo "  export MODEL=openrouter/openai/gpt-4.1-mini"
+echo "  export CLASSIFIER_MODEL=openrouter/openai/gpt-4.1"
+echo "  poetry run pytest -k '01_how_many_pods' --no-cov"

@@ -19,21 +19,32 @@ poetry install
 Claude Code on the web runs in a managed Linux container where Docker works but
 KIND fails (nested systemd cannot mount the systemd cgroup hierarchy under
 cgroup v1). The supported path is **k3s-in-Docker**, set up by
-`scripts/setup-sandbox-k8s.sh`. The script is idempotent; run it once per session
-before invoking pytest.
+`scripts/setup-sandbox-k8s.sh`. The script is idempotent; run it once per
+session before invoking pytest.
+
+**Complete steps (verified end-to-end):**
 
 ```bash
+# 1. One-time per session: start dockerd, install kubectl/helm/jq,
+#    bring up k3s, install the runc oomScoreAdj-stripping wrapper.
 ./scripts/setup-sandbox-k8s.sh
+
+# 2. Point kubectl + the eval framework at the cluster.
 export KUBECONFIG=/tmp/k3s-output/kubeconfig.yaml
 
-# Use OpenRouter (the API key already exists in the sandbox env)
-# CLASSIFIER_MODEL is required when MODEL points at OpenRouter
+# 3. Use OpenRouter — the only LLM provider with creds in this env
+#    (OPENROUTER_API_KEY is pre-populated). CLASSIFIER_MODEL must also
+#    point at OpenRouter, otherwise the classifier default fails.
 export MODEL="openrouter/openai/gpt-4.1-mini"
 export CLASSIFIER_MODEL="openrouter/openai/gpt-4.1"
 
-# Run a single eval end-to-end (~30-60s including pod setup)
+# 4. Run an eval. Smoke test: ~45s end-to-end (setup + 14 pods + LLM call).
 poetry run pytest -k "01_how_many_pods" --no-cov
 ```
+
+Verified on this branch:
+- `setup-sandbox-k8s.sh` from scratch: ~15s.
+- `01_how_many_pods` full cycle (setup → eval → cleanup): ~45s wall time, PASS.
 
 **What the setup script handles (and why):**
 
@@ -58,12 +69,21 @@ poetry run pytest -k "01_how_many_pods" --no-cov
   Stripping the field lets runc inherit the parent's value.
 
 **Fastest eval to run as a smoke test:** `01_how_many_pods` — minimal manifest
-(14 busybox pods), straightforward question, completes in ~30s including k8s
-setup. Use it as the canonical "did I break anything" check.
+(14 busybox pods), straightforward question, completes in ~45s including k8s
+namespace setup. Use it as the canonical "did I break anything" check.
 
-**Skipping setup on repeat runs:** Once `before_test` resources exist (e.g.,
-namespace `app-01`), `poetry run pytest -k "01_how_many_pods" --skip-setup --no-cov`
-runs the eval in ~25s.
+**Don't use `--skip-setup` in this sandbox.** It skips `before_test` but the
+test framework still runs `after_test` (which deletes the namespace), so the
+next run sees `0 pods` and fails. Run the full cycle each time.
+
+**Other env-var gotchas:**
+
+- `BRAINTRUST_API_KEY`: not set in this sandbox (only `BRAINTRUST_SERVICE_TOKEN`
+  is, which the eval framework ignores). Leave it alone. If you ever export
+  `BRAINTRUST_API_KEY=$BRAINTRUST_SERVICE_TOKEN`, expect tests to crash —
+  service tokens are read-only and `braintrust.init(... update=True)` 401s.
+- `OPENAI_API_KEY`: not required when `MODEL` is an `openrouter/...` string;
+  LiteLLM routes by the `openrouter/` prefix and reads `OPENROUTER_API_KEY`.
 
 **Limitations of the sandbox cluster (don't waste time trying to fix):**
 
