@@ -78,10 +78,29 @@ next run sees `0 pods` and fails. Run the full cycle each time.
 
 **Other env-var gotchas:**
 
-- `BRAINTRUST_API_KEY`: not set in this sandbox (only `BRAINTRUST_SERVICE_TOKEN`
-  is, which the eval framework ignores). Leave it alone. If you ever export
-  `BRAINTRUST_API_KEY=$BRAINTRUST_SERVICE_TOKEN`, expect tests to crash —
-  service tokens are read-only and `braintrust.init(... update=True)` 401s.
+- **Braintrust** — two different env vars and two different token types, easy to
+  confuse:
+  - `BRAINTRUST_API_KEY` is the only one the eval framework reads
+    (`tests/llm/utils/test_env_vars.py`); setting it flips `braintrust_enabled`
+    to true, which makes test setup call `braintrust.init_dataset()` and
+    `braintrust.init(... update=True)` (both **write** operations).
+  - `BRAINTRUST_SERVICE_TOKEN` is ignored by the eval framework (only
+    `braintrust_history.py` falls back to it, for read-only history fetches).
+  - Token-type rule of thumb: tokens that start with `bt-st-` are **service
+    tokens** — read-only by default. Anything else (typically a user API key
+    copied from your Braintrust profile) is writable.
+  - **How to check what you have in this shell:**
+    ```bash
+    env | grep -i braintrust
+    # BRAINTRUST_API_KEY     starting with bt-st-  → read-only,  WILL crash writes
+    # BRAINTRUST_API_KEY     anything else         → writable,   safe
+    # BRAINTRUST_SERVICE_TOKEN only                → framework ignores it, safe
+    # nothing                                      → braintrust disabled, safe
+    ```
+  - **This sandbox** ships with only `BRAINTRUST_SERVICE_TOKEN` (a `bt-st-…`
+    service token). Leave it alone. **Do not** copy it into
+    `BRAINTRUST_API_KEY` — tests will hit a 401 from `braintrust.init(...
+    update=True)` and fail.
 - `OPENAI_API_KEY`: not required when `MODEL` is an `openrouter/...` string;
   LiteLLM routes by the `openrouter/` prefix and reads `OPENROUTER_API_KEY`.
 
