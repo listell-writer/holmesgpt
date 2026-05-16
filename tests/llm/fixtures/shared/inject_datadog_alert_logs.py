@@ -102,6 +102,7 @@ def query_log_count(api_key: str, app_key: str, namespace: str,
 
 def wait_for_indexing(api_key: str, app_key: str, namespace: str,
                       from_ms: int, to_ms: int, min_count: int) -> None:
+    count = 0
     for attempt in range(1, 13):
         time.sleep(5 if attempt == 1 else 10)
         try:
@@ -251,7 +252,7 @@ def main():
     # Wait for indexing across the full span (+/- 5 min margin)
     from_ms = ts_ms(earliest - timedelta(minutes=5))
     to_ms = ts_ms(latest + timedelta(minutes=5))
-    wait_for_indexing(api_key, app_key, namespace, from_ms, to_ms, min_count=max(1, len(entries) // 2))
+    wait_for_indexing(api_key, app_key, namespace, from_ms, to_ms, min_count=len(entries))
 
     # Print the alert ISO timestamp on the LAST line so before_test can capture it
     print(f"ALERT_TIME={T.replace(microsecond=0).isoformat().replace('+00:00', 'Z')}")
