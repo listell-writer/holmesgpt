@@ -249,6 +249,10 @@
          <lastmod>2026-05-17</lastmod>
     </url>
     <url>
+         <loc>https://holmesgpt.dev/dev/data-sources/builtin-toolsets/kubernetes-mcp/</loc>
+         <lastmod>2026-05-17</lastmod>
+    </url>
+    <url>
          <loc>https://holmesgpt.dev/dev/data-sources/builtin-toolsets/kubernetes-remediation-mcp/</loc>
          <lastmod>2026-05-17</lastmod>
     </url>
