@@ -10,6 +10,7 @@ from enum import Enum
 from typing import TYPE_CHECKING, Dict, List, Optional, Tuple
 from uuid import uuid4
 
+import httpx
 import sentry_sdk
 import yaml  # type: ignore
 from cachetools import TTLCache  # type: ignore
@@ -79,6 +80,15 @@ HOLMES_USAGE_EVENTS_TABLE = "HolmesUsageEvents"
 
 ENRICHMENT_BLACKLIST = ["text_file", "graph", "ai_analysis", "holmes"]
 ENRICHMENT_BLACKLIST_SET = set(ENRICHMENT_BLACKLIST)
+
+# Transport-level errors that indicate the Holmes pod can't reach Supabase
+# (broken DNS, refused TCP, etc.). They are almost always transient cluster
+# networking issues, not Holmes bugs, and the calling code already swallows
+# them and returns a safe default. We log these as warnings instead of
+# exceptions so the Sentry logging integration records them as breadcrumbs
+# rather than firing a Sentry event on every poll tick — a single misconfigured
+# pod can otherwise produce thousands of identical events per day.
+_TRANSIENT_CONNECT_ERRORS = (httpx.ConnectError, httpx.ConnectTimeout)
 
 
 logging.getLogger(__name__).debug("Patching supabase_request_builder.pre_select")
@@ -641,6 +651,13 @@ class SupabaseDal:
                     RobustaSkillInstruction(id=id, symptom=symptom, title=title)
                 )
             return instructions
+        except _TRANSIENT_CONNECT_ERRORS as exc:
+            logging.warning(
+                "Failed to fetch skill catalog: transient connect error to %s (%s)",
+                self.url,
+                exc,
+            )
+            return None
         except Exception:
             logging.exception("Failed to fetch skill catalog", exc_info=True)
             return None
@@ -910,6 +927,13 @@ class SupabaseDal:
 
             count = res.count if hasattr(res, "count") else 0
             return count > 0
+        except _TRANSIENT_CONNECT_ERRORS as exc:
+            logging.warning(
+                "Failed to check scheduled prompt definitions: transient connect error to %s (%s)",
+                self.url,
+                exc,
+            )
+            return False
         except Exception:
             logging.exception(
                 "Supabase error while checking scheduled prompt definitions",
@@ -940,6 +964,13 @@ class SupabaseDal:
                 return None
 
             return row
+        except _TRANSIENT_CONNECT_ERRORS as exc:
+            logging.warning(
+                "Failed to claim scheduled prompt run: transient connect error to %s (%s)",
+                self.url,
+                exc,
+            )
+            return None
         except Exception:
             logging.exception(
                 "Supabase error while claiming scheduled prompt run",
