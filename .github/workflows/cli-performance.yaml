@@ -48,23 +48,58 @@ jobs:
         env:
           OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
         run: |
+          set -x
           echo "=== Benchmarking PR branch ==="
+          echo "openrouter_key_set=$([ -n "$OPENROUTER_API_KEY" ] && echo yes || echo no)"
+          poetry --version
+          poetry run python -c "import sys; print('py:', sys.version)"
+          poetry run holmes version || true
 
+          set +e
           python scripts/cli_performance_benchmark.py \
             --startup-only \
             --iterations 5 \
-            --output startup.json
+            --output startup.json 2>&1 | tee startup-output.log
+          STARTUP_EXIT=${PIPESTATUS[0]}
+          set -e
 
+          {
+            echo "## PR — startup benchmark (exit $STARTUP_EXIT)"
+            echo '```'
+            tail -300 startup-output.log
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+          LLM_EXIT=0
           if [ -n "$OPENROUTER_API_KEY" ]; then
+            set +e
             python scripts/cli_performance_benchmark.py \
               --e2e-only \
               --iterations 5 \
               --model "openrouter/anthropic/claude-haiku-4.5" \
-              --output llm.json
-            echo "llm_json=$(cat llm.json | jq -c)" >> "$GITHUB_OUTPUT"
+              --output llm.json 2>&1 | tee llm-output.log
+            LLM_EXIT=${PIPESTATUS[0]}
+            set -e
+
+            {
+              echo "## PR — e2e benchmark (exit $LLM_EXIT)"
+              echo '```'
+              tail -300 llm-output.log
+              echo '```'
+            } >> "$GITHUB_STEP_SUMMARY"
+
+            if [ "$LLM_EXIT" -eq 0 ]; then
+              echo "llm_json=$(cat llm.json | jq -c)" >> "$GITHUB_OUTPUT"
+            fi
           fi
 
-          echo "startup_json=$(cat startup.json | jq -c)" >> "$GITHUB_OUTPUT"
+          if [ "$STARTUP_EXIT" -eq 0 ]; then
+            echo "startup_json=$(cat startup.json | jq -c)" >> "$GITHUB_OUTPUT"
+          fi
+
+          if [ "$STARTUP_EXIT" -ne 0 ] || [ "$LLM_EXIT" -ne 0 ]; then
+            exit 1
+          fi
 
       - name: Post diagnostic comment (PR)
         if: always()
@@ -144,23 +179,58 @@ jobs:
         env:
           OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
         run: |
+          set -x
           echo "=== Benchmarking master branch ==="
+          echo "openrouter_key_set=$([ -n "$OPENROUTER_API_KEY" ] && echo yes || echo no)"
+          poetry --version
+          poetry run python -c "import sys; print('py:', sys.version)"
+          poetry run holmes version || true
 
+          set +e
           python scripts/cli_performance_benchmark.py \
             --startup-only \
             --iterations 5 \
-            --output startup.json
+            --output startup.json 2>&1 | tee startup-output.log
+          STARTUP_EXIT=${PIPESTATUS[0]}
+          set -e
 
+          {
+            echo "## Master — startup benchmark (exit $STARTUP_EXIT)"
+            echo '```'
+            tail -300 startup-output.log
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+          LLM_EXIT=0
           if [ -n "$OPENROUTER_API_KEY" ]; then
+            set +e
             python scripts/cli_performance_benchmark.py \
               --e2e-only \
               --iterations 5 \
               --model "openrouter/anthropic/claude-haiku-4.5" \
-              --output llm.json
-            echo "llm_json=$(cat llm.json | jq -c)" >> "$GITHUB_OUTPUT"
+              --output llm.json 2>&1 | tee llm-output.log
+            LLM_EXIT=${PIPESTATUS[0]}
+            set -e
+
+            {
+              echo "## Master — e2e benchmark (exit $LLM_EXIT)"
+              echo '```'
+              tail -300 llm-output.log
+              echo '```'
+            } >> "$GITHUB_STEP_SUMMARY"
+
+            if [ "$LLM_EXIT" -eq 0 ]; then
+              echo "llm_json=$(cat llm.json | jq -c)" >> "$GITHUB_OUTPUT"
+            fi
           fi
 
-          echo "startup_json=$(cat startup.json | jq -c)" >> "$GITHUB_OUTPUT"
+          if [ "$STARTUP_EXIT" -eq 0 ]; then
+            echo "startup_json=$(cat startup.json | jq -c)" >> "$GITHUB_OUTPUT"
+          fi
+
+          if [ "$STARTUP_EXIT" -ne 0 ] || [ "$LLM_EXIT" -ne 0 ]; then
+            exit 1
+          fi
 
       - name: Post diagnostic comment (Master)
         if: always()
