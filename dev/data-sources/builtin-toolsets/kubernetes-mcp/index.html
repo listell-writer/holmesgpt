@@ -5466,12 +5466,16 @@
 
 
 <h1 id="kubernetes-mcp">Kubernetes (MCP)<a class="headerlink" href="#kubernetes-mcp" title="Permanent link">&para;</a></h1>
-<div class="admonition note">
-<p class="admonition-title">Built-in Kubernetes toolsets are recommended for most users</p>
-<p>Holmes includes built-in Kubernetes toolsets (<a href="../kubernetes/"><code>kubernetes/core</code></a>, <code>kubernetes/logs</code>) that provide comprehensive cluster access — it uses bash to run kubectl commands directly, no additional setup required when deployed in-cluster.</p>
-<p>The Kubernetes MCP addon is for <strong>advanced scenarios</strong>: enterprise environments requiring OAuth/OIDC authentication or centralized access control via identity providers.</p>
+<div class="admonition tip">
+<p class="admonition-title">Which Kubernetes toolset should I use?</p>
+<p>Holmes has three Kubernetes integrations. Most users only need the first:</p>
+<ul>
+<li><strong><a href="../kubernetes/">Kubernetes (built-in)</a></strong> — <em>default for most users.</em> Read-only access to cluster resources via <code>kubectl</code>, authenticated with the pod's ServiceAccount in-cluster or your local kubeconfig for CLI. No extra deployment.</li>
+<li><strong><a href="./">Kubernetes (MCP)</a></strong> — <em>use when you need OAuth/OIDC authentication</em> (e.g. AKS with Microsoft Entra ID, or per-user RBAC enforced by your identity provider). Replaces the built-in toolset.</li>
+<li><strong><a href="../kubernetes-remediation-mcp/">Kubernetes Remediation (MCP)</a></strong> — <em>add on top of either of the above when you want Holmes to perform write actions</em> (restart, scale, drain, patch, etc.). Complements the read-only toolsets rather than replacing them.</li>
+</ul>
 </div>
-<p>The <a href="https://github.com/containers/kubernetes-mcp-server">Kubernetes MCP server</a> gives Holmes access to Kubernetes clusters via the MCP protocol, with support for OAuth/OIDC authentication.</p>
+<p>The <a href="https://github.com/containers/kubernetes-mcp-server">Kubernetes MCP server</a> gives Holmes access to Kubernetes clusters via the MCP protocol, with support for OAuth/OIDC authentication. It is intended to <strong>replace</strong> the built-in <code>kubernetes/core</code> and <code>kubernetes/logs</code> toolsets — the Helm examples below disable those to avoid overlap.</p>
 <h2 id="in-cluster-setup-serviceaccount">In-Cluster Setup (ServiceAccount)<a class="headerlink" href="#in-cluster-setup-serviceaccount" title="Permanent link">&para;</a></h2>
 <p>The simplest setup — the MCP server runs in the same cluster it monitors, using a ServiceAccount for authentication.</p>
 <h3 id="step-1-deploy">Step 1: Deploy<a class="headerlink" href="#step-1-deploy" title="Permanent link">&para;</a></h3>

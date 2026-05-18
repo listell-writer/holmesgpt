@@ -5354,7 +5354,17 @@
 
 
 <h1 id="kubernetes-remediation-mcp">Kubernetes Remediation (MCP)<a class="headerlink" href="#kubernetes-remediation-mcp" title="Permanent link">&para;</a></h1>
+<div class="admonition tip">
+<p class="admonition-title">Which Kubernetes toolset should I use?</p>
+<p>Holmes has three Kubernetes integrations. Most users only need the first:</p>
+<ul>
+<li><strong><a href="../kubernetes/">Kubernetes (built-in)</a></strong> — <em>default for most users.</em> Read-only access to cluster resources via <code>kubectl</code>, authenticated with the pod's ServiceAccount in-cluster or your local kubeconfig for CLI. No extra deployment.</li>
+<li><strong><a href="../kubernetes-mcp/">Kubernetes (MCP)</a></strong> — <em>use when you need OAuth/OIDC authentication</em> (e.g. AKS with Microsoft Entra ID, or per-user RBAC enforced by your identity provider). Replaces the built-in toolset.</li>
+<li><strong><a href="./">Kubernetes Remediation (MCP)</a></strong> — <em>add on top of either of the above when you want Holmes to perform write actions</em> (restart, scale, drain, patch, etc.). Complements the read-only toolsets rather than replacing them.</li>
+</ul>
+</div>
 <p>The Kubernetes Remediation MCP server provides safe kubectl command execution with layered security controls. It enables Holmes to not only diagnose Kubernetes issues but also <strong>remediate</strong> them — restarting pods, scaling deployments, draining nodes, and more.</p>
+<p>This toolset is <strong>additive</strong>: keep your existing read-only Kubernetes toolset (<a href="../kubernetes/">built-in</a> or <a href="../kubernetes-mcp/">MCP</a>) enabled for diagnosis, and enable this one alongside it for write actions.</p>
 <div class="admonition warning">
 <p class="admonition-title">Write operations</p>
 <p>Unlike the built-in read-only Kubernetes toolset, this MCP server can execute write operations (edit, patch, delete, scale, drain, etc.). Configure the <code>allowedCommands</code> setting carefully to match your security requirements.</p>
