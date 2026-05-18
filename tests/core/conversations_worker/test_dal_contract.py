@@ -63,10 +63,14 @@ def test_post_conversation_events_default_compact_false():
     assert params["_compact"] is False
 
 
-def test_post_conversation_events_promotes_mismatch_to_reassigned_error():
+def test_post_conversation_events_logs_mismatch_at_info_not_exception(caplog):
     """MISMATCH errors from the RPC (status / assignee / request_sequence guards)
-    should be raised as ConversationReassignedError rather than logged via
-    logging.exception — they are expected control-flow signals, not failures."""
+    are expected control-flow signals. They must be logged at info level
+    (not via logging.exception, which would surface them as Sentry errors)
+    and the original exception must propagate unchanged for the caller to
+    handle."""
+    import logging as _logging
+
     dal = SupabaseDal.__new__(SupabaseDal)
     dal.enabled = True
     dal.account_id = "acc-1"
@@ -79,13 +83,30 @@ def test_post_conversation_events_promotes_mismatch_to_reassigned_error():
             )
         )
     )
-    with pytest.raises(ConversationReassignedError, match="MISMATCH"):
-        dal.post_conversation_events(
-            conversation_id="c1",
-            assignee="h",
-            request_sequence=1,
-            events=[{"event": "token_count", "data": {}, "ts": "t"}],
-        )
+    with caplog.at_level(_logging.INFO):
+        with pytest.raises(Exception, match="MISMATCH") as exc_info:
+            dal.post_conversation_events(
+                conversation_id="c1",
+                assignee="h",
+                request_sequence=1,
+                events=[{"event": "token_count", "data": {}, "ts": "t"}],
+            )
+
+    # Must not be wrapped in ConversationReassignedError — the original
+    # exception is re-raised so the caller can classify it.
+    assert not isinstance(exc_info.value, ConversationReassignedError)
+
+    # The MISMATCH case must log at info, not error/exception.
+    mismatch_records = [
+        r for r in caplog.records if "stopped or reassigned" in r.getMessage()
+    ]
+    assert mismatch_records, "expected an info log describing the MISMATCH case"
+    assert all(r.levelno == _logging.INFO for r in mismatch_records)
+    # No error-level "Supabase error while posting conversation events" log.
+    assert not any(
+        "Supabase error while posting conversation events" in r.getMessage()
+        for r in caplog.records
+    )
 
 
 # ---- get_conversation_events (RPC-based, returns flat list) ----

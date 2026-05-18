@@ -1130,14 +1130,11 @@ class SupabaseDal:
             # The RPC raises MISMATCH errors when assignee, request_sequence,
             # or status guards fail (e.g. the conversation was stopped or
             # reassigned mid-stream). These are expected control-flow signals,
-            # not real failures — log them at info level so they're visible
-            # but don't show up as errors in Sentry, then propagate as
-            # ConversationReassignedError so the worker exits cleanly.
+            # not real failures — log at info level so they're visible but
+            # don't show up as errors in Sentry. The caller
+            # (ConversationEventPublisher) already converts MISMATCH errors
+            # to ConversationReassignedError, so just re-raise.
             if "mismatch" in str(e).lower():
-                from holmes.core.conversations_worker.models import (
-                    ConversationReassignedError,
-                )
-
                 logging.info(
                     "Skipping post_conversation_events for conversation %s — "
                     "conversation was stopped or reassigned (assignee=%s, "
@@ -1147,7 +1144,7 @@ class SupabaseDal:
                     request_sequence,
                     e,
                 )
-                raise ConversationReassignedError(str(e)) from e
+                raise
             logging.exception(
                 "Supabase error while posting conversation events", exc_info=True
             )
