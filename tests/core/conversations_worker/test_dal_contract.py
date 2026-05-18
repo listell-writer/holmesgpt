@@ -63,6 +63,31 @@ def test_post_conversation_events_default_compact_false():
     assert params["_compact"] is False
 
 
+def test_post_conversation_events_promotes_mismatch_to_reassigned_error():
+    """MISMATCH errors from the RPC (status / assignee / request_sequence guards)
+    should be raised as ConversationReassignedError rather than logged via
+    logging.exception — they are expected control-flow signals, not failures."""
+    dal = SupabaseDal.__new__(SupabaseDal)
+    dal.enabled = True
+    dal.account_id = "acc-1"
+    dal.cluster = "cluster-1"
+    dal.client = MagicMock()
+    dal.client.rpc.return_value = MagicMock(
+        execute=MagicMock(
+            side_effect=Exception(
+                "MISMATCH Conversation c1 is not running (status=stopped)"
+            )
+        )
+    )
+    with pytest.raises(ConversationReassignedError, match="MISMATCH"):
+        dal.post_conversation_events(
+            conversation_id="c1",
+            assignee="h",
+            request_sequence=1,
+            events=[{"event": "token_count", "data": {}, "ts": "t"}],
+        )
+
+
 # ---- get_conversation_events (RPC-based, returns flat list) ----
 
 

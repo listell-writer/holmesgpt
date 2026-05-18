@@ -1126,7 +1126,19 @@ class SupabaseDal:
                     return None
                 return int(res.data[0]) if not isinstance(res.data[0], dict) else None
             return int(res.data)
-        except Exception:
+        except Exception as e:
+            # The RPC raises MISMATCH errors when assignee, request_sequence,
+            # or status guards fail (e.g. the conversation was stopped or
+            # reassigned mid-stream). These are expected control-flow signals,
+            # not real failures — propagate as ConversationReassignedError so
+            # the worker exits the loop cleanly, and don't log via
+            # logging.exception (which would surface them as Sentry errors).
+            if "mismatch" in str(e).lower():
+                from holmes.core.conversations_worker.models import (
+                    ConversationReassignedError,
+                )
+
+                raise ConversationReassignedError(str(e)) from e
             logging.exception(
                 "Supabase error while posting conversation events", exc_info=True
             )
