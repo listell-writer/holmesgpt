@@ -528,8 +528,9 @@ class ConversationWorker:
         except ConversationReassignedError:
             # Conversation was stopped or reassigned before we could post the
             # error event — nothing actionable here.
-            logging.debug(
-                "Skipped error event for conversation %s — already reassigned/stopped",
+            logging.info(
+                "Skipped posting error event for conversation %s — "
+                "conversation was stopped or reassigned",
                 task.conversation_id,
             )
         except Exception:
@@ -554,8 +555,9 @@ class ConversationWorker:
         except ConversationReassignedError:
             # Conversation was stopped or reassigned before we could mark it
             # failed — DB already reflects a terminal state, nothing to do.
-            logging.debug(
-                "Skipped failed-status update for conversation %s — already reassigned/stopped",
+            logging.info(
+                "Skipped failed-status update for conversation %s — "
+                "conversation was stopped or reassigned",
                 task.conversation_id,
             )
         except Exception:
