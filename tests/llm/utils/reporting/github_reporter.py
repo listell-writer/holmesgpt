@@ -1,4 +1,7 @@
-"""GitHub Actions reporting functionality."""
+"""GitHub Actions reporting functionality.
+
+Rows include closed-loop replay output when an eval has rerun_with_memory.
+"""
 
 import logging
 import os
