@@ -441,13 +441,20 @@ def generate_markdown_report(
         # render as em dashes.
         if result.get("replay_attempted"):
             replay_correct = result.get("replay_correctness")
-            replay_status = (
-                ":white_check_mark:"
-                if replay_correct == 1
-                else (":x:" if replay_correct == 0 else ":heavy_minus_sign:")
-            )
-            replay_name = f"{test_case_name} [replay]"
             skill_loaded = result.get("replay_skill_loaded")
+            # The replay passes only when BOTH the judge accepted the
+            # answer AND the agent loaded the captured skill. The
+            # fetch_skill assertion is logged *after* the correctness
+            # score, so without the AND-with-skill_loaded check the row
+            # would show :white_check_mark: when pytest had actually
+            # failed the test on the skill-not-loaded assertion.
+            if replay_correct == 1 and skill_loaded:
+                replay_status = ":white_check_mark:"
+            elif replay_correct is None:
+                replay_status = ":heavy_minus_sign:"
+            else:
+                replay_status = ":x:"
+            replay_name = f"{test_case_name} [replay]"
             replay_mem_str = "skill ✓" if skill_loaded else "skill ✗"
 
             r_duration = result.get("replay_duration")
