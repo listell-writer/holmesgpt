@@ -446,19 +446,59 @@ def generate_markdown_report(
                 if replay_correct == 1
                 else (":x:" if replay_correct == 0 else ":heavy_minus_sign:")
             )
-            replay_turns = result.get("replay_turns")
-            replay_tools = result.get("replay_tool_calls_count")
-            skill_loaded = result.get("replay_skill_loaded")
-            # Reuse the same row shape but with [replay] suffix on the
-            # test name and "skill loaded" badge in the Memories column.
             replay_name = f"{test_case_name} [replay]"
+            skill_loaded = result.get("replay_skill_loaded")
             replay_mem_str = "skill ✓" if skill_loaded else "skill ✗"
-            replay_turns_str = str(replay_turns) if replay_turns else "—"
-            replay_tools_str = str(replay_tools) if replay_tools else "—"
+
+            r_duration = result.get("replay_duration")
+            r_time_str = (
+                f"{r_duration:.1f}s" if r_duration and r_duration > 0 else "—"
+            )
+            r_turns = result.get("replay_turns")
+            r_turns_str = str(r_turns) if r_turns else "—"
+            r_tools = result.get("replay_tool_calls_count")
+            r_tools_str = str(r_tools) if r_tools else "—"
+            r_cost = result.get("replay_total_cost")
+            r_cost_str = f"${r_cost:.4f}" if r_cost and r_cost > 0 else "—"
+            r_total_tokens = result.get("replay_total_tokens") or 0
+            r_prompt_tokens = result.get("replay_prompt_tokens") or 0
+            r_completion_tokens = result.get("replay_completion_tokens") or 0
+            r_cached_tokens = result.get("replay_cached_tokens")
+            r_reasoning_tokens = result.get("replay_reasoning_tokens") or 0
+            r_max_completion = (
+                result.get("replay_max_completion_tokens_per_call") or 0
+            )
+            r_max_prompt = result.get("replay_max_prompt_tokens_per_call") or 0
+            r_num_compactions = result.get("replay_num_compactions") or 0
+            if r_total_tokens == 0:
+                r_total_tokens = r_prompt_tokens + r_completion_tokens
+            if r_prompt_tokens > 0 and r_cached_tokens is not None:
+                r_non_cached = r_prompt_tokens - r_cached_tokens
+            else:
+                r_non_cached = None
+
+            r_total_tokens_str = _fmt_tokens(r_total_tokens)
+            r_input_str = _fmt_tokens(r_prompt_tokens)
+            r_output_str = _fmt_tokens(r_completion_tokens)
+            r_cached_str = (
+                f"{r_cached_tokens:,}" if r_cached_tokens is not None else "—"
+            )
+            r_non_cached_str = (
+                f"{r_non_cached:,}" if r_non_cached is not None else "—"
+            )
+            r_reasoning_str = _fmt_tokens(r_reasoning_tokens)
+            r_max_completion_str = _fmt_tokens(r_max_completion)
+            r_max_prompt_str = _fmt_tokens(r_max_prompt)
+            r_compactions_str = (
+                str(r_num_compactions) if r_num_compactions > 0 else "—"
+            )
+
             markdown += (
-                f"| {replay_status} | {replay_name} | — | {replay_mem_str} | — | "
-                f"{replay_turns_str} | {replay_tools_str} | — | — | — | — | — | — | "
-                f"— | — | — | — |\n"
+                f"| {replay_status} | {replay_name} | — | {replay_mem_str} | "
+                f"{r_time_str} | {r_turns_str} | {r_tools_str} | {r_cost_str} | "
+                f"{r_total_tokens_str} | {r_input_str} | {r_max_prompt_str} | "
+                f"{r_output_str} | {r_max_completion_str} | {r_cached_str} | "
+                f"{r_non_cached_str} | {r_reasoning_str} | {r_compactions_str} |\n"
             )
 
     # Add summary row

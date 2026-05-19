@@ -266,6 +266,7 @@ def test_ask_holmes(
                     name=f"{test_case.id}[replay][{model}]",
                     span_type=SpanType.EVAL,
                 ) as replay_span:
+                    replay_start = time.time()
                     replay_result = ask_holmes(
                         test_case=test_case,
                         model=model,
@@ -276,6 +277,7 @@ def test_ask_holmes(
                         additional_skill_paths=[skills_dir],
                         request=request,
                     )
+                    replay_duration = time.time() - replay_start
             except Exception as e:
                 update_property(request, "replay_error", str(e)[:300])
                 raise
@@ -284,16 +286,28 @@ def test_ask_holmes(
         fetch_skill_called = any(
             getattr(tc, "tool_name", "") == "fetch_skill" for tc in replay_tool_calls
         )
-        update_property(
-            request, "replay_turns", replay_result.num_llm_calls
-        )
+        # Capture the full LLMResult stats for the replay so the GitHub
+        # report can show side-by-side duration / tokens / cost vs the
+        # original run.
+        update_property(request, "replay_turns", replay_result.num_llm_calls)
         update_property(request, "replay_tool_calls_count", len(replay_tool_calls))
         update_property(request, "replay_skill_loaded", fetch_skill_called)
-        update_property(
-            request,
-            "replay_skill_count",
-            len(written),
-        )
+        update_property(request, "replay_skill_count", len(written))
+        update_property(request, "replay_duration", replay_duration)
+        for attr in (
+            "total_cost",
+            "total_tokens",
+            "prompt_tokens",
+            "completion_tokens",
+            "cached_tokens",
+            "reasoning_tokens",
+            "max_completion_tokens_per_call",
+            "max_prompt_tokens_per_call",
+            "num_compactions",
+        ):
+            value = getattr(replay_result, attr, None)
+            if value is not None:
+                update_property(request, f"replay_{attr}", value)
         replay_output = replay_result.result or ""
         update_property(request, "replay_answer", replay_output)
 

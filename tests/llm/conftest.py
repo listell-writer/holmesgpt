@@ -878,6 +878,24 @@ def _collect_test_results_from_stats(terminalreporter):
                 "replay_turns": user_props.get("replay_turns"),
                 "replay_tool_calls_count": user_props.get("replay_tool_calls_count"),
                 "replay_skill_count": user_props.get("replay_skill_count"),
+                "replay_duration": user_props.get("replay_duration"),
+                "replay_total_cost": user_props.get("replay_total_cost"),
+                "replay_total_tokens": user_props.get("replay_total_tokens"),
+                "replay_prompt_tokens": user_props.get("replay_prompt_tokens"),
+                "replay_completion_tokens": user_props.get(
+                    "replay_completion_tokens"
+                ),
+                "replay_cached_tokens": user_props.get("replay_cached_tokens"),
+                "replay_reasoning_tokens": user_props.get(
+                    "replay_reasoning_tokens"
+                ),
+                "replay_max_completion_tokens_per_call": user_props.get(
+                    "replay_max_completion_tokens_per_call"
+                ),
+                "replay_max_prompt_tokens_per_call": user_props.get(
+                    "replay_max_prompt_tokens_per_call"
+                ),
+                "replay_num_compactions": user_props.get("replay_num_compactions"),
                 "clean_test_case_id": user_props.get("clean_test_case_id"),
                 "braintrust_span_id": user_props.get("braintrust_span_id"),
                 "braintrust_root_span_id": user_props.get("braintrust_root_span_id"),
