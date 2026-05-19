@@ -70,6 +70,10 @@ from holmes.utils.stream import (
     add_token_count_to_metadata,
     build_stream_event_token_count,
 )
+from holmes.utils.message_diagnostics import (
+    find_orphan_tool_uses,
+    summarize_messages,
+)
 from holmes.utils.tags import parse_messages_tags
 
 
@@ -1084,6 +1088,17 @@ class ToolCallingLLM:
 
             logging.debug(f"sending messages={messages}\n\ntools={tools}")
 
+            orphans = find_orphan_tool_uses(messages)
+            if orphans:
+                logging.warning(
+                    "tool_calling_llm: orphan tool_use blocks detected pre-flight "
+                    "at iteration %s, model=%s. orphans=%s structure=%s",
+                    i,
+                    getattr(self.llm, "model", "unknown"),
+                    orphans,
+                    summarize_messages(messages),
+                )
+
             # Create a child gen_ai.chat span for each LLM call iteration.
             # The span is activated in context so httpx calls during completion()
             # (e.g. LiteLLM HTTP calls) become children of this gen_ai.chat span.
@@ -1147,6 +1162,20 @@ class ToolCallingLLM:
                         "The Azure model you chose is not supported. Model version 1106 and higher required."
                     ) from e
                 else:
+                    err_text = str(e)
+                    if (
+                        "Expected toolResult blocks" in err_text
+                        or "tool_use_id" in err_text
+                        or "toolUse" in err_text
+                    ):
+                        logging.error(
+                            "LLM tool-pairing error on model=%s iteration=%s. "
+                            "orphans=%s structure=%s",
+                            self.llm.model,
+                            i,
+                            find_orphan_tool_uses(messages),
+                            summarize_messages(messages),
+                        )
                     logging.error(
                         f"LLM BadRequestError on model={self.llm.model} (streaming iteration {i}): {e}",
                         exc_info=True,
