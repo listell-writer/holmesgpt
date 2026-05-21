@@ -1670,6 +1670,8 @@
       
         
       
+        
+      
     
     
     
@@ -3652,6 +3654,34 @@
     
   
     HTTP Header Propagation
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../data-sources/tool-execution-safety/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Tool Execution Safety
   
 
     
@@ -5779,6 +5809,7 @@
 </span><span id="__span-4-6"><a id="__codelineno-4-6" name="__codelineno-4-6" href="#__codelineno-4-6"></a><span class="w">    </span><span class="nt">cpu</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">100m</span><span class="w">        </span><span class="c1"># Optional CPU limit</span>
 </span><span id="__span-4-7"><a id="__codelineno-4-7" name="__codelineno-4-7" href="#__codelineno-4-7"></a><span class="w">    </span><span class="nt">memory</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">1024Mi</span>
 </span></code></pre></div>
+<p>Holmes also enforces a separate <strong>per-subprocess</strong> virtual memory cap on every tool command it runs (via <code>ulimit -v</code>), controlled by the <code>TOOL_MEMORY_LIMIT_MB</code> environment variable. This cap operates <em>inside</em> the pod's memory limit, so the two must be coordinated — keep <code>TOOL_MEMORY_LIMIT_MB</code> comfortably below <code>resources.limits.memory</code> to leave headroom for Holmes itself. If you raise the pod limit to support larger tool outputs, raise <code>TOOL_MEMORY_LIMIT_MB</code> in lockstep. See <a href="../../data-sources/tool-execution-safety/">Tool Execution Safety</a> for the full mechanism and tuning guidance.</p>
 <h3 id="toolset-configuration_1">Toolset Configuration<a class="headerlink" href="#toolset-configuration_1" title="Permanent link">&para;</a></h3>
 <p>Enable or disable specific toolsets:</p>
 <div class="language-yaml highlight"><pre><span></span><code><span id="__span-5-1"><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a><span class="nt">toolsets</span><span class="p">:</span>
