@@ -2248,6 +2248,23 @@
     </span>
   </a>
   
+    <nav class="md-nav" aria-label="Configuration Options">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#http-jsoneachrow-mode-clickhouse_use_http_json" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        HTTP JSONEachRow mode (clickhouse_use_http_json)
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
 </li>
       
         <li class="md-nav__item">
@@ -5257,6 +5274,23 @@
     </span>
   </a>
   
+    <nav class="md-nav" aria-label="Configuration Options">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#http-jsoneachrow-mode-clickhouse_use_http_json" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        HTTP JSONEachRow mode (clickhouse_use_http_json)
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
 </li>
       
         <li class="md-nav__item">
@@ -5404,7 +5438,8 @@
 </span><span id="__span-2-9"><a id="__codelineno-2-9" name="__codelineno-2-9" href="#__codelineno-2-9"></a><span class="w">    </span><span class="nt">type</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">database</span>
 </span><span id="__span-2-10"><a id="__codelineno-2-10" name="__codelineno-2-10" href="#__codelineno-2-10"></a><span class="w">    </span><span class="nt">config</span><span class="p">:</span>
 </span><span id="__span-2-11"><a id="__codelineno-2-11" name="__codelineno-2-11" href="#__codelineno-2-11"></a><span class="w">      </span><span class="nt">connection_url</span><span class="p">:</span><span class="w"> </span><span class="s">&quot;clickhouse+http://log_reader:pass@clickhouse-logs.internal:8123/logs&quot;</span>
-</span><span id="__span-2-12"><a id="__codelineno-2-12" name="__codelineno-2-12" href="#__codelineno-2-12"></a><span class="w">    </span><span class="nt">llm_instructions</span><span class="p">:</span><span class="w"> </span><span class="s">&quot;Log</span><span class="nv"> </span><span class="s">analytics</span><span class="nv"> </span><span class="s">database</span><span class="nv"> </span><span class="s">with</span><span class="nv"> </span><span class="s">application</span><span class="nv"> </span><span class="s">and</span><span class="nv"> </span><span class="s">system</span><span class="nv"> </span><span class="s">logs&quot;</span>
+</span><span id="__span-2-12"><a id="__codelineno-2-12" name="__codelineno-2-12" href="#__codelineno-2-12"></a><span class="w">      </span><span class="nt">clickhouse_use_http_json</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">true</span>
+</span><span id="__span-2-13"><a id="__codelineno-2-13" name="__codelineno-2-13" href="#__codelineno-2-13"></a><span class="w">    </span><span class="nt">llm_instructions</span><span class="p">:</span><span class="w"> </span><span class="s">&quot;Log</span><span class="nv"> </span><span class="s">analytics</span><span class="nv"> </span><span class="s">database</span><span class="nv"> </span><span class="s">with</span><span class="nv"> </span><span class="s">application</span><span class="nv"> </span><span class="s">and</span><span class="nv"> </span><span class="s">system</span><span class="nv"> </span><span class="s">logs&quot;</span>
 </span></code></pre></div>
 <p><strong>Using environment variables:</strong></p>
 <div class="language-yaml highlight"><pre><span></span><code><span id="__span-3-1"><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a><span class="nt">toolsets</span><span class="p">:</span>
@@ -5521,14 +5556,31 @@
 <li><strong>read_only</strong> (default: <code>true</code>): Only allow SELECT/SHOW/DESCRIBE/EXPLAIN/WITH statements</li>
 <li><strong>verify_ssl</strong> (default: <code>true</code>): Verify SSL certificates</li>
 <li><strong>max_rows</strong> (default: <code>200</code>): Maximum rows to return (1-10000)</li>
+<li><strong>timeout_seconds</strong> (default: <code>60</code>): HTTP JSONEachRow query timeout in seconds (1-600); used when <code>clickhouse_use_http_json</code> is enabled</li>
+<li><strong>clickhouse_use_http_json</strong> (default: <code>false</code>): Use ClickHouse HTTP API with <code>JSONEachRow</code> instead of the SQLAlchemy driver's TSV format for query results</li>
 <li><strong>llm_instructions</strong>: Context about this database</li>
 </ul>
+<h3 id="http-jsoneachrow-mode-clickhouse_use_http_json">HTTP JSONEachRow mode (<code>clickhouse_use_http_json</code>)<a class="headerlink" href="#http-jsoneachrow-mode-clickhouse_use_http_json" title="Permanent link">&para;</a></h3>
+<p>The default SQLAlchemy HTTP driver returns <code>TabSeparatedWithNamesAndTypes</code> and parses <code>DateTime64</code> timestamps with Python <code>strptime</code> using microsecond precision (<code>%f</code>). Result sets with <strong>nanosecond</strong> timestamps (common in OpenTelemetry log tables, e.g. <code>DateTime64(9)</code>) can fail while reading rows with:</p>
+<div class="language-text highlight"><pre><span></span><code><span id="__span-11-1"><a id="__codelineno-11-1" name="__codelineno-11-1" href="#__codelineno-11-1"></a>ValueError: unconverted data remains: 789
+</span></code></pre></div>
+<p>Enable JSONEachRow when you query tables that return high-precision <code>DateTime64</code> columns:</p>
+<div class="language-yaml highlight"><pre><span></span><code><span id="__span-12-1"><a id="__codelineno-12-1" name="__codelineno-12-1" href="#__codelineno-12-1"></a><span class="nt">toolsets</span><span class="p">:</span>
+</span><span id="__span-12-2"><a id="__codelineno-12-2" name="__codelineno-12-2" href="#__codelineno-12-2"></a><span class="w">  </span><span class="nt">clickhouse-otel-logs</span><span class="p">:</span>
+</span><span id="__span-12-3"><a id="__codelineno-12-3" name="__codelineno-12-3" href="#__codelineno-12-3"></a><span class="w">    </span><span class="nt">type</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">database</span>
+</span><span id="__span-12-4"><a id="__codelineno-12-4" name="__codelineno-12-4" href="#__codelineno-12-4"></a><span class="w">    </span><span class="nt">config</span><span class="p">:</span>
+</span><span id="__span-12-5"><a id="__codelineno-12-5" name="__codelineno-12-5" href="#__codelineno-12-5"></a><span class="w">      </span><span class="nt">connection_url</span><span class="p">:</span><span class="w"> </span><span class="s">&quot;clickhouse+http://user:pass@clickhouse:8123/otel&quot;</span>
+</span><span id="__span-12-6"><a id="__codelineno-12-6" name="__codelineno-12-6" href="#__codelineno-12-6"></a><span class="w">      </span><span class="nt">clickhouse_use_http_json</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">true</span>
+</span><span id="__span-12-7"><a id="__codelineno-12-7" name="__codelineno-12-7" href="#__codelineno-12-7"></a><span class="w">      </span><span class="nt">read_only</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">true</span>
+</span><span id="__span-12-8"><a id="__codelineno-12-8" name="__codelineno-12-8" href="#__codelineno-12-8"></a><span class="w">      </span><span class="nt">max_rows</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">200</span>
+</span></code></pre></div>
+<p>This path only affects <strong>query execution</strong> (<code>execute_query</code>); list/describe tools still use SQLAlchemy. Use <code>clickhouse+http://</code> (port 8123), not the native protocol, with this option.</p>
 <h2 id="common-use-cases">Common Use Cases<a class="headerlink" href="#common-use-cases" title="Permanent link">&para;</a></h2>
-<div class="language-text highlight"><pre><span></span><code><span id="__span-11-1"><a id="__codelineno-11-1" name="__codelineno-11-1" href="#__codelineno-11-1"></a>&quot;Analyze query performance: SELECT count() FROM events WHERE date &gt;= today() - 30&quot;
+<div class="language-text highlight"><pre><span></span><code><span id="__span-13-1"><a id="__codelineno-13-1" name="__codelineno-13-1" href="#__codelineno-13-1"></a>&quot;Analyze query performance: SELECT count() FROM events WHERE date &gt;= today() - 30&quot;
 </span></code></pre></div>
-<div class="language-text highlight"><pre><span></span><code><span id="__span-12-1"><a id="__codelineno-12-1" name="__codelineno-12-1" href="#__codelineno-12-1"></a>&quot;Show table sizes and compression ratios&quot;
+<div class="language-text highlight"><pre><span></span><code><span id="__span-14-1"><a id="__codelineno-14-1" name="__codelineno-14-1" href="#__codelineno-14-1"></a>&quot;Show table sizes and compression ratios&quot;
 </span></code></pre></div>
-<div class="language-text highlight"><pre><span></span><code><span id="__span-13-1"><a id="__codelineno-13-1" name="__codelineno-13-1" href="#__codelineno-13-1"></a>&quot;Check for inefficient queries scanning too many rows&quot;
+<div class="language-text highlight"><pre><span></span><code><span id="__span-15-1"><a id="__codelineno-15-1" name="__codelineno-15-1" href="#__codelineno-15-1"></a>&quot;Check for inefficient queries scanning too many rows&quot;
 </span></code></pre></div>
 
 
