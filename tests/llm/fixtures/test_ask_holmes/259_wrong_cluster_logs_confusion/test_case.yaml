@@ -6,10 +6,10 @@
 #
 # Scenario: Holmes is connected to production-eu-west-2 (set via cluster_name).
 # The user asks about an incident in production-us-east-2. The available logs in
-# the app-259-prod-logs index are application logs from the cluster Holmes is on
-# (production-eu-west-2). The log entries themselves do NOT carry a cluster /
-# region field — they are just plain checkout-service / payment-service log
-# lines, like you would see from any single-cluster log aggregator.
+# the app-259-prod-logs index are application logs from the cluster Holmes is
+# locally connected to (production-eu-west-2) — the log entries carry an
+# explicit `cluster` / `region` field saying so. There is NO data for
+# production-us-east-2 in the index.
 #
 # The log data is INTENTIONALLY compelling: it contains realistic
 # checkout-service 500 errors, payment-provider timeouts, and a circuit-breaker
@@ -94,6 +94,8 @@ before_test: |
       "mappings": {"properties": {
         "timestamp": {"type": "date"},
         "service": {"type": "keyword"},
+        "cluster": {"type": "keyword"},
+        "region": {"type": "keyword"},
         "level": {"type": "keyword"},
         "status_code": {"type": "integer"},
         "message": {"type": "text"},
@@ -106,32 +108,31 @@ before_test: |
   fi
   sleep 2
 
-  # Log entries describe a realistic checkout/payment incident.
-  # The entries themselves do NOT carry a cluster field — they're just plain
-  # application logs from the cluster Holmes is on (production-eu-west-2).
-  # The trap is that Holmes must realise these logs are from its OWN cluster
-  # (production-eu-west-2), and that the user is asking about a different
-  # cluster (production-us-east-2) for which there is no data here.
+  # Log entries describe a realistic checkout/payment incident in the cluster
+  # Holmes is locally connected to (production-eu-west-2). The cluster and
+  # region fields are populated so Holmes can verify the data is NOT from the
+  # production-us-east-2 cluster the user asked about. There are NO us-east-2
+  # records in the index — the only data is from eu-west-2 (red herring).
   BULK_FILE=$(es_temp_file "logs" "259")
   cat > "$BULK_FILE" << BULK_EOF
   {"index":{}}
-  {"timestamp":"${T_3H}","service":"checkout-service","level":"WARN","status_code":200,"message":"Latency on POST /api/checkout p95=1800ms (target 800ms)","correlation_id":"chk-1001"}
+  {"timestamp":"${T_3H}","service":"checkout-service","cluster":"production-eu-west-2","region":"eu-west-2","level":"WARN","status_code":200,"message":"Latency on POST /api/checkout p95=1800ms (target 800ms)","correlation_id":"chk-eu-1001"}
   {"index":{}}
-  {"timestamp":"${T_2H}","service":"checkout-service","level":"ERROR","status_code":500,"message":"POST /api/checkout failed: payment provider response timeout after 30s","correlation_id":"chk-1142"}
+  {"timestamp":"${T_2H}","service":"checkout-service","cluster":"production-eu-west-2","region":"eu-west-2","level":"ERROR","status_code":500,"message":"POST /api/checkout failed: payment provider response timeout after 30s","correlation_id":"chk-eu-1142"}
   {"index":{}}
-  {"timestamp":"${T_2H}","service":"payment-service","level":"ERROR","status_code":504,"message":"Upstream timeout calling provider /v68/payments after 30000ms","correlation_id":"chk-1142"}
+  {"timestamp":"${T_2H}","service":"payment-service","cluster":"production-eu-west-2","region":"eu-west-2","level":"ERROR","status_code":504,"message":"Upstream timeout calling provider /v68/payments after 30000ms","correlation_id":"chk-eu-1142"}
   {"index":{}}
-  {"timestamp":"${T_1H}","service":"checkout-service","level":"ERROR","status_code":500,"message":"POST /api/checkout failed: circuit-breaker open for payment-service (failure rate 38% > 25% threshold)","correlation_id":"chk-1208"}
+  {"timestamp":"${T_1H}","service":"checkout-service","cluster":"production-eu-west-2","region":"eu-west-2","level":"ERROR","status_code":500,"message":"POST /api/checkout failed: circuit-breaker open for payment-service (failure rate 38% > 25% threshold)","correlation_id":"chk-eu-1208"}
   {"index":{}}
-  {"timestamp":"${T_1H}","service":"checkout-service","level":"ERROR","status_code":500,"message":"POST /api/checkout failed: circuit-breaker open for payment-service","correlation_id":"chk-1209"}
+  {"timestamp":"${T_1H}","service":"checkout-service","cluster":"production-eu-west-2","region":"eu-west-2","level":"ERROR","status_code":500,"message":"POST /api/checkout failed: circuit-breaker open for payment-service","correlation_id":"chk-eu-1209"}
   {"index":{}}
-  {"timestamp":"${T_45M}","service":"payment-service","level":"ERROR","status_code":504,"message":"Upstream timeout calling provider /v68/payments after 30000ms","correlation_id":"chk-1220"}
+  {"timestamp":"${T_45M}","service":"payment-service","cluster":"production-eu-west-2","region":"eu-west-2","level":"ERROR","status_code":504,"message":"Upstream timeout calling provider /v68/payments after 30000ms","correlation_id":"chk-eu-1220"}
   {"index":{}}
-  {"timestamp":"${T_30M}","service":"checkout-service","level":"ERROR","status_code":500,"message":"POST /api/checkout failed: payment provider returned 502 Bad Gateway","correlation_id":"chk-1252"}
+  {"timestamp":"${T_30M}","service":"checkout-service","cluster":"production-eu-west-2","region":"eu-west-2","level":"ERROR","status_code":500,"message":"POST /api/checkout failed: payment provider returned 502 Bad Gateway","correlation_id":"chk-eu-1252"}
   {"index":{}}
-  {"timestamp":"${T_15M}","service":"payment-service","level":"WARN","status_code":200,"message":"Payment provider degraded mode acknowledged via status page; retry queue depth=842"}
+  {"timestamp":"${T_15M}","service":"payment-service","cluster":"production-eu-west-2","region":"eu-west-2","level":"WARN","status_code":200,"message":"Payment provider degraded mode acknowledged via status page; retry queue depth=842"}
   {"index":{}}
-  {"timestamp":"${T_5M}","service":"checkout-service","level":"INFO","status_code":200,"message":"Recovery: circuit-breaker half-open, success rate 92% over last 60s"}
+  {"timestamp":"${T_5M}","service":"checkout-service","cluster":"production-eu-west-2","region":"eu-west-2","level":"INFO","status_code":200,"message":"Recovery: circuit-breaker half-open, success rate 92% over last 60s"}
   BULK_EOF
   sed 's/^  //' "$BULK_FILE" > "${BULK_FILE}.tmp" && mv "${BULK_FILE}.tmp" "$BULK_FILE"
 
