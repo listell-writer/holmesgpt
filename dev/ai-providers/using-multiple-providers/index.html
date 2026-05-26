@@ -1747,6 +1747,17 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#custom-model-pricing" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Custom Model Pricing
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#see-also" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -5336,6 +5347,17 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#custom-model-pricing" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Custom Model Pricing
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#see-also" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -5695,6 +5717,21 @@
 </span></code></pre></div></p>
 <h3 id="robusta-ai-integration">Robusta AI Integration<a class="headerlink" href="#robusta-ai-integration" title="Permanent link">&para;</a></h3>
 <p>If you're a Robusta customer, you can also use <a href="../robusta-ai/">Robusta AI</a> which provides access to multiple models without managing individual API keys.</p>
+<h2 id="custom-model-pricing">Custom Model Pricing<a class="headerlink" href="#custom-model-pricing" title="Permanent link">&para;</a></h2>
+<p>HolmesGPT reports per-call LLM cost in its usage events. The cost number comes from LiteLLM's bundled cost map. For first-party names (<code>gpt-5</code>, <code>claude-opus-4-5-20251101</code>) and standard Bedrock IDs LiteLLM already has prices, so the cost field is populated automatically. Robusta-hosted models also work without configuration: Holmes looks up pricing for the <em>real</em> upstream model name (e.g. <code>bedrock/us.anthropic.claude-opus-4-6-v1</code>) in LiteLLM's bundled map and registers it under the internal routing name automatically.</p>
+<p>You only need to add per-token pricing yourself if you're pointing Holmes at a model LiteLLM doesn't recognise — an internal OpenAI-compatible endpoint, a private-preview model, or a fork. In that case, add <code>input_cost_per_token</code> and <code>output_cost_per_token</code> (and optionally Anthropic cache pricing) to the model's entry:</p>
+<div class="language-yaml highlight"><pre><span></span><code><span id="__span-7-1"><a id="__codelineno-7-1" name="__codelineno-7-1" href="#__codelineno-7-1"></a><span class="nt">my-internal-opus</span><span class="p">:</span>
+</span><span id="__span-7-2"><a id="__codelineno-7-2" name="__codelineno-7-2" href="#__codelineno-7-2"></a><span class="w">    </span><span class="nt">model</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">openai/opus-4.6</span>
+</span><span id="__span-7-3"><a id="__codelineno-7-3" name="__codelineno-7-3" href="#__codelineno-7-3"></a><span class="w">    </span><span class="nt">api_base</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">https://llm.internal.example.com/v1</span>
+</span><span id="__span-7-4"><a id="__codelineno-7-4" name="__codelineno-7-4" href="#__codelineno-7-4"></a><span class="w">    </span><span class="nt">api_key</span><span class="p">:</span><span class="w"> </span><span class="s">&quot;{{</span><span class="nv"> </span><span class="s">env.INTERNAL_LLM_KEY</span><span class="nv"> </span><span class="s">}}&quot;</span>
+</span><span id="__span-7-5"><a id="__codelineno-7-5" name="__codelineno-7-5" href="#__codelineno-7-5"></a><span class="w">    </span><span class="nt">input_cost_per_token</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">0.000003</span>
+</span><span id="__span-7-6"><a id="__codelineno-7-6" name="__codelineno-7-6" href="#__codelineno-7-6"></a><span class="w">    </span><span class="nt">output_cost_per_token</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">0.000015</span>
+</span><span id="__span-7-7"><a id="__codelineno-7-7" name="__codelineno-7-7" href="#__codelineno-7-7"></a><span class="w">    </span><span class="c1"># Optional Anthropic prompt-cache pricing</span>
+</span><span id="__span-7-8"><a id="__codelineno-7-8" name="__codelineno-7-8" href="#__codelineno-7-8"></a><span class="w">    </span><span class="nt">cache_creation_input_token_cost</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">0.00000375</span>
+</span><span id="__span-7-9"><a id="__codelineno-7-9" name="__codelineno-7-9" href="#__codelineno-7-9"></a><span class="w">    </span><span class="nt">cache_read_input_token_cost</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">0.0000003</span>
+</span></code></pre></div>
+<p>Values are USD per token. Both <code>input_cost_per_token</code> and <code>output_cost_per_token</code> must be set — configuring only one is ignored. User-configured pricing always wins over the auto-lookup.</p>
+<p>If Holmes can't find pricing through any mechanism, it logs one <code>INFO</code> line at startup naming the model so you know its usage-event costs will be <code>0</code>.</p>
 <h2 id="see-also">See Also<a class="headerlink" href="#see-also" title="Permanent link">&para;</a></h2>
 <ul>
 <li><a href="../../reference/environment-variables/">Environment Variables Reference</a></li>
