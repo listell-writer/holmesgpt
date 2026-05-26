@@ -1724,6 +1724,17 @@
   
 </li>
         
+          <li class="md-nav__item">
+  <a href="#selecting-a-region" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Selecting a Region
+      
+    </span>
+  </a>
+  
+</li>
+        
       </ul>
     </nav>
   
@@ -5424,6 +5435,17 @@
   
 </li>
         
+          <li class="md-nav__item">
+  <a href="#selecting-a-region" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Selecting a Region
+      
+    </span>
+  </a>
+  
+</li>
+        
       </ul>
     </nav>
   
@@ -5672,12 +5694,48 @@
 </span><span id="__span-3-4"><a id="__codelineno-3-4" name="__codelineno-3-4" href="#__codelineno-3-4"></a><span class="w">    </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">ROBUSTA_AI</span>
 </span><span id="__span-3-5"><a id="__codelineno-3-5" name="__codelineno-3-5" href="#__codelineno-3-5"></a><span class="w">      </span><span class="nt">value</span><span class="p">:</span><span class="w"> </span><span class="s">&quot;false&quot;</span>
 </span></code></pre></div>
+<h3 id="selecting-a-region">Selecting a Region<a class="headerlink" href="#selecting-a-region" title="Permanent link">&para;</a></h3>
+<p>The Robusta platform is hosted in multiple regions. HolmesGPT defaults to the US endpoint. If your Robusta account lives in the EU or AP region, set <code>ROBUSTA_API_ENDPOINT</code> to the matching API URL — pick your region below:</p>
+<div class="tabbed-set" data-tabs="1:3">
+<input checked="checked" id="__tabbed_175e67fc_670b_4cc8_ad66_898256538651_1" name="__tabbed_175e67fc_670b_4cc8_ad66_898256538651" type="radio">
+<input id="__tabbed_175e67fc_670b_4cc8_ad66_898256538651_2" name="__tabbed_175e67fc_670b_4cc8_ad66_898256538651" type="radio">
+<input id="__tabbed_175e67fc_670b_4cc8_ad66_898256538651_3" name="__tabbed_175e67fc_670b_4cc8_ad66_898256538651" type="radio">
+<div class="tabbed-labels">
+<label for="__tabbed_175e67fc_670b_4cc8_ad66_898256538651_1">US</label>
+<label for="__tabbed_175e67fc_670b_4cc8_ad66_898256538651_2">EU</label>
+<label for="__tabbed_175e67fc_670b_4cc8_ad66_898256538651_3">AP</label>
+</div>
+<div class="tabbed-content">
+<div class="tabbed-block"><pre><code class="language-yaml"># Add to generated_values.yaml
+holmes:
+  additionalEnvVars:
+    - name: ROBUSTA_AI
+      value: &quot;true&quot;
+    - name: ROBUSTA_API_ENDPOINT
+      value: &quot;https://api.robusta.dev&quot;</code></pre></div>
+<div class="tabbed-block"><pre><code class="language-yaml"># Add to generated_values.yaml
+holmes:
+  additionalEnvVars:
+    - name: ROBUSTA_AI
+      value: &quot;true&quot;
+    - name: ROBUSTA_API_ENDPOINT
+      value: &quot;https://api.eu.robusta.dev&quot;</code></pre></div>
+<div class="tabbed-block"><pre><code class="language-yaml"># Add to generated_values.yaml
+holmes:
+  additionalEnvVars:
+    - name: ROBUSTA_AI
+      value: &quot;true&quot;
+    - name: ROBUSTA_API_ENDPOINT
+      value: &quot;https://api.ap.robusta.dev&quot;</code></pre></div>
+</div>
+</div>
+<p>The endpoint must match the region your cluster is connected to in the Robusta platform — using the wrong endpoint will cause authentication and model-discovery failures.</p>
 <h2 id="how-it-works">How It Works<a class="headerlink" href="#how-it-works" title="Permanent link">&para;</a></h2>
 <ol>
 <li><strong>Authentication</strong>: HolmesGPT reads your Robusta token from the cluster configuration</li>
 <li><strong>Session creation</strong>: A session token is created with the Robusta platform</li>
-<li><strong>Model discovery</strong>: Available models are fetched from <code>https://api.robusta.dev/api/llm/models/v2</code></li>
-<li><strong>Proxy access</strong>: Models are accessed through Robusta's proxy endpoint at <code>https://api.robusta.dev/llm/{model_name}</code></li>
+<li><strong>Model discovery</strong>: Available models are fetched from <code>${ROBUSTA_API_ENDPOINT}/api/llm/models/v2</code> (default: <code>https://api.robusta.dev/api/llm/models/v2</code>)</li>
+<li><strong>Proxy access</strong>: Models are accessed through Robusta's proxy endpoint at <code>${ROBUSTA_API_ENDPOINT}/llm/{model_name}</code> (default: <code>https://api.robusta.dev/llm/{model_name}</code>)</li>
 <li><strong>Automatic refresh</strong>: Authentication tokens are automatically refreshed when they expire</li>
 </ol>
 <h2 id="available-models">Available Models<a class="headerlink" href="#available-models" title="Permanent link">&para;</a></h2>
@@ -5694,7 +5752,8 @@
 <p>Check that:</p>
 <ol>
 <li>Your Robusta token is valid and not expired</li>
-<li>HolmesGPT can reach <code>api.robusta.dev</code></li>
+<li>HolmesGPT can reach the Robusta API endpoint for your region (<code>api.robusta.dev</code>, <code>api.eu.robusta.dev</code>, or <code>api.ap.robusta.dev</code>)</li>
+<li><code>ROBUSTA_API_ENDPOINT</code> matches the region your Robusta account is in (see <a href="#selecting-a-region">Selecting a Region</a>)</li>
 <li><code>ROBUSTA_AI</code> is set to <code>true</code></li>
 <li>Check logs for authentication errors</li>
 </ol>
@@ -5715,7 +5774,7 @@
 </tr>
 <tr>
 <td><code>ROBUSTA_API_ENDPOINT</code></td>
-<td>Robusta API endpoint (different for on-premise users)</td>
+<td>Robusta API endpoint. Set per region (<code>https://api.robusta.dev</code>, <code>https://api.eu.robusta.dev</code>, <code>https://api.ap.robusta.dev</code>) or to your on-premise URL. See <a href="#selecting-a-region">Selecting a Region</a>.</td>
 <td><code>https://api.robusta.dev</code></td>
 </tr>
 </tbody>
