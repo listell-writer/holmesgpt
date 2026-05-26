@@ -1,0 +1,48 @@
+user_prompt: |
+  The github-mcp-server pod in namespace app-260 has a memory leak — it has been
+  OOMKilled and restarted many times over the last few days. Investigate the
+  source code of the pod and tell me, at the source level, what is causing the
+  leak. Name the specific data structures in the application code that grow
+  without bound.
+
+tags:
+  - logs
+  - kubernetes
+
+expected_output: |
+  Holmes must identify the source-level cause of the memory leak by reading the
+  application source code (server.py). It must name BOTH of these unbounded data
+  structures as the root cause:
+  1. The `request_history` list — every incoming MCP request/response is appended
+     to it and it is never trimmed or cleared.
+  2. The `response_cache` dictionary — every response is stored keyed by request
+     id and it has no eviction policy.
+
+  It is acceptable (but not required) for Holmes to also mention the OOMKilled
+  symptom and restart count. The PASS criterion is source-level detection: the
+  answer must reference the actual variable / data structure in the code, not
+  just say "there is a memory leak".
+
+before_test: |
+  kubectl create namespace app-260 || true
+  kubectl apply -f manifest.yaml
+  # Wait for the pod to start and accumulate enough memory growth to be visible.
+  POD_READY=false
+  for i in {1..30}; do
+    if kubectl wait --for=condition=ready pod -l app=github-mcp-server -n app-260 --timeout=5s 2>/dev/null; then
+      POD_READY=true
+      break
+    fi
+    sleep 1
+  done
+  if [ "$POD_READY" = false ]; then
+    echo "github-mcp-server pod failed to become ready"
+    kubectl describe pod -l app=github-mcp-server -n app-260
+    kubectl logs -l app=github-mcp-server -n app-260 --tail=50 || true
+    exit 1
+  fi
+  # Let the self-traffic loop grow the leaked structures.
+  sleep 30
+
+after_test: |
+  kubectl delete namespace app-260 --force --grace-period=0 --ignore-not-found

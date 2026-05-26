@@ -1,0 +1,160 @@
+apiVersion: v1
+kind: Secret
+metadata:
+  name: github-mcp-server-src
+  namespace: app-260
+type: Opaque
+stringData:
+  server.py: |
+    # Minimal MCP-style HTTP server simulating the GitHub MCP server.
+    # Exposes /mcp/list_tools and /mcp/call_tool endpoints.
+    import json
+    import os
+    import time
+    from datetime import datetime
+    from http.server import BaseHTTPRequestHandler, HTTPServer
+    from threading import Thread
+
+    # ---- LEAK SOURCE ----
+    # request_history stores every incoming request forever.
+    # No eviction, no size cap. Grows on each MCP tool call.
+    request_history = []
+
+    # response_cache caches the full response body keyed by request id.
+    # No eviction policy => unbounded growth alongside request_history.
+    response_cache = {}
+    # ---------------------
+
+    TOOLS = [
+        {"name": "list_issues", "description": "List GitHub issues for a repo"},
+        {"name": "get_pull_request", "description": "Fetch a pull request by number"},
+        {"name": "create_comment", "description": "Add a comment to an issue or PR"},
+    ]
+
+    class MCPHandler(BaseHTTPRequestHandler):
+        def log_message(self, fmt, *args):
+            print(f"[{datetime.utcnow().isoformat()}Z] {fmt % args}", flush=True)
+
+        def do_POST(self):
+            length = int(self.headers.get("content-length", 0) or 0)
+            body = self.rfile.read(length) if length else b"{}"
+            try:
+                payload = json.loads(body or b"{}")
+            except Exception:
+                payload = {"raw": body.decode("utf-8", errors="ignore")}
+
+            req_id = len(request_history) + 1
+            # Simulate a non-trivial GitHub API response (~30KB per request).
+            fake_response = {
+                "id": req_id,
+                "data": "x" * 30000,
+                "received_at": datetime.utcnow().isoformat() + "Z",
+                "payload": payload,
+            }
+
+            # LEAK: append the full request+response to in-memory history.
+            request_history.append({
+                "id": req_id,
+                "received_at": fake_response["received_at"],
+                "payload": payload,
+                "response": fake_response,
+            })
+            # LEAK: also cache the response.
+            response_cache[req_id] = fake_response
+
+            if req_id % 25 == 0:
+                print(
+                    f"[{datetime.utcnow().isoformat()}Z] "
+                    f"served req_id={req_id} "
+                    f"history_size={len(request_history)} "
+                    f"cache_size={len(response_cache)}",
+                    flush=True,
+                )
+
+            self.send_response(200)
+            self.send_header("content-type", "application/json")
+            self.end_headers()
+            self.wfile.write(json.dumps({"ok": True, "id": req_id}).encode())
+
+        def do_GET(self):
+            self.send_response(200)
+            self.send_header("content-type", "application/json")
+            self.end_headers()
+            self.wfile.write(json.dumps({"tools": TOOLS}).encode())
+
+    def serve():
+        HTTPServer(("0.0.0.0", 8080), MCPHandler).serve_forever()
+
+    def self_traffic():
+        # Generate continuous MCP traffic so the leak manifests quickly.
+        import urllib.request
+        time.sleep(2)
+        i = 0
+        while True:
+            i += 1
+            try:
+                req = urllib.request.Request(
+                    "http://127.0.0.1:8080/mcp/call_tool",
+                    data=json.dumps({"tool": "list_issues", "args": {"repo": f"r{i}"}}).encode(),
+                    headers={"content-type": "application/json"},
+                )
+                urllib.request.urlopen(req, timeout=2).read()
+            except Exception as e:
+                print(f"[{datetime.utcnow().isoformat()}Z] client error: {e}", flush=True)
+            time.sleep(0.02)
+
+    if __name__ == "__main__":
+        print(f"[{datetime.utcnow().isoformat()}Z] github-mcp-server starting (pid={os.getpid()})", flush=True)
+        Thread(target=self_traffic, daemon=True).start()
+        serve()
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: github-mcp-server
+  namespace: app-260
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: github-mcp-server
+  template:
+    metadata:
+      labels:
+        app: github-mcp-server
+    spec:
+      containers:
+        - name: github-mcp-server
+          image: python:3.11-slim
+          command: ["python", "/app/server.py"]
+          env:
+            - name: PYTHONUNBUFFERED
+              value: "1"
+          ports:
+            - containerPort: 8080
+          resources:
+            requests:
+              memory: "32Mi"
+              cpu: "10m"
+            limits:
+              memory: "96Mi"
+          volumeMounts:
+            - name: src
+              mountPath: /app
+      volumes:
+        - name: src
+          secret:
+            secretName: github-mcp-server-src
+            defaultMode: 0755
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: github-mcp-server
+  namespace: app-260
+spec:
+  selector:
+    app: github-mcp-server
+  ports:
+    - port: 8080
+      targetPort: 8080

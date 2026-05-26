@@ -1,0 +1,46 @@
+user_prompt: |
+  The events-processor pod in namespace app-261 is a Node.js worker and it has
+  a memory leak — the pod has been OOMKilled and restarted many times. Look at
+  the application source code and tell me, at the source level, what is causing
+  the leak. Name the specific data structures that grow without bound.
+
+tags:
+  - logs
+  - kubernetes
+
+expected_output: |
+  Holmes must identify the source-level cause of the memory leak by reading the
+  application source code (worker.js). It must name BOTH of these unbounded data
+  structures as the root cause:
+  1. The `subscribers` Map — a new entry is added per event keyed by event id
+     and nothing is ever removed. The handler closes over the payload so each
+     entry retains the full event body.
+  2. The `eventAuditLog` array — every processed event is pushed onto this
+     array and it is never trimmed.
+
+  It is acceptable (but not required) for Holmes to also mention the OOMKilled
+  symptom and restart count. The PASS criterion is source-level detection: the
+  answer must reference the actual variable / data structure in the JavaScript
+  code, not just say "there is a memory leak".
+
+before_test: |
+  kubectl create namespace app-261 || true
+  kubectl apply -f manifest.yaml
+  POD_READY=false
+  for i in {1..30}; do
+    if kubectl wait --for=condition=ready pod -l app=events-processor -n app-261 --timeout=5s 2>/dev/null; then
+      POD_READY=true
+      break
+    fi
+    sleep 1
+  done
+  if [ "$POD_READY" = false ]; then
+    echo "events-processor pod failed to become ready"
+    kubectl describe pod -l app=events-processor -n app-261
+    kubectl logs -l app=events-processor -n app-261 --tail=50 || true
+    exit 1
+  fi
+  sleep 30
+
+after_test: |
+  kubectl delete namespace app-261 --force --grace-period=0 --ignore-not-found

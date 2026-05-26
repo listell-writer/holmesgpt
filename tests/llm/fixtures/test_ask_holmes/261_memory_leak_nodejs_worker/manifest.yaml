@@ -1,0 +1,112 @@
+apiVersion: v1
+kind: Secret
+metadata:
+  name: events-processor-src
+  namespace: app-261
+type: Opaque
+stringData:
+  worker.js: |
+    // Background events processor — pulls webhook payloads off a fake queue,
+    // fans them out to subscribers, and keeps an audit trail.
+    'use strict';
+
+    // ---- LEAK SOURCE ----
+    // subscribers: every webhook adds an entry but nothing is ever removed.
+    // Functions hold closures over the payload, so each entry retains the
+    // full event body.
+    const subscribers = new Map();
+
+    // eventAuditLog: every processed event is pushed here. Unbounded.
+    const eventAuditLog = [];
+    // ---------------------
+
+    function buildPayload(id) {
+      // Simulate a ~25KB webhook body.
+      return {
+        id,
+        receivedAt: new Date().toISOString(),
+        body: 'x'.repeat(25000),
+        meta: { source: 'github', delivery: `d-${id}` },
+      };
+    }
+
+    function processEvent(id) {
+      const payload = buildPayload(id);
+
+      // LEAK: register a fresh subscriber per event, keyed by event id.
+      // The handler closes over `payload`, keeping the full body alive.
+      subscribers.set(`sub-${id}`, function handler() {
+        return payload;
+      });
+
+      // LEAK: push processed event onto an unbounded audit array.
+      eventAuditLog.push({
+        id,
+        processedAt: new Date().toISOString(),
+        payload,
+      });
+
+      if (id % 25 === 0) {
+        console.log(
+          `[${new Date().toISOString()}] processed event=${id} ` +
+          `subscribers=${subscribers.size} auditLog=${eventAuditLog.length}`
+        );
+      }
+    }
+
+    async function main() {
+      console.log(`[${new Date().toISOString()}] events-processor starting pid=${process.pid}`);
+      let id = 0;
+      // Aggressive loop so the leak is visible within the eval window.
+      while (true) {
+        id += 1;
+        try {
+          processEvent(id);
+        } catch (e) {
+          console.error(`[${new Date().toISOString()}] processing error: ${e.message}`);
+        }
+        // Yield to the event loop frequently.
+        if (id % 50 === 0) {
+          await new Promise((r) => setImmediate(r));
+        }
+      }
+    }
+
+    main().catch((e) => {
+      console.error('fatal', e);
+      process.exit(1);
+    });
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: events-processor
+  namespace: app-261
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: events-processor
+  template:
+    metadata:
+      labels:
+        app: events-processor
+    spec:
+      containers:
+        - name: events-processor
+          image: node:20-alpine
+          command: ["node", "--max-old-space-size=80", "/app/worker.js"]
+          resources:
+            requests:
+              memory: "32Mi"
+              cpu: "10m"
+            limits:
+              memory: "128Mi"
+          volumeMounts:
+            - name: src
+              mountPath: /app
+      volumes:
+        - name: src
+          secret:
+            secretName: events-processor-src
+            defaultMode: 0755

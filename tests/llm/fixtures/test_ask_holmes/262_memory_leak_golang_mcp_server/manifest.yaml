@@ -1,0 +1,176 @@
+apiVersion: v1
+kind: Secret
+metadata:
+  name: azure-mcp-server-src
+  namespace: app-262
+type: Opaque
+stringData:
+  main.go: |
+    // Minimal MCP-style HTTP server simulating the Azure GitHub MCP server.
+    // Exposes /mcp/list_tools and /mcp/call_tool endpoints.
+    package main
+
+    import (
+        "encoding/json"
+        "fmt"
+        "io"
+        "log"
+        "net/http"
+        "strings"
+        "sync"
+        "time"
+    )
+
+    type Request struct {
+        ID         int64       `json:"id"`
+        ReceivedAt time.Time   `json:"received_at"`
+        Payload    interface{} `json:"payload"`
+        Response   string      `json:"response"`
+    }
+
+    var (
+        mu sync.Mutex
+
+        // ---- LEAK SOURCE ----
+        // requestLog accumulates every request that the server handles.
+        // It is never trimmed, capped, or rotated.
+        requestLog = make([]Request, 0)
+
+        // sessionResponses caches the full response body for every request,
+        // keyed by request id. No eviction policy.
+        sessionResponses = make(map[int64]string)
+        // ---------------------
+
+        nextID int64 = 0
+    )
+
+    func callTool(w http.ResponseWriter, r *http.Request) {
+        body, _ := io.ReadAll(r.Body)
+        defer r.Body.Close()
+
+        var payload interface{}
+        _ = json.Unmarshal(body, &payload)
+
+        mu.Lock()
+        nextID++
+        id := nextID
+        // Simulate a non-trivial GitHub API response (~30KB per request).
+        resp := strings.Repeat("x", 30000)
+
+        // LEAK: append every request to an unbounded slice.
+        requestLog = append(requestLog, Request{
+            ID:         id,
+            ReceivedAt: time.Now().UTC(),
+            Payload:    payload,
+            Response:   resp,
+        })
+        // LEAK: also cache the response keyed by id.
+        sessionResponses[id] = resp
+
+        if id%25 == 0 {
+            log.Printf("served req_id=%d requestLog=%d sessionResponses=%d",
+                id, len(requestLog), len(sessionResponses))
+        }
+        mu.Unlock()
+
+        w.Header().Set("content-type", "application/json")
+        _ = json.NewEncoder(w).Encode(map[string]interface{}{"ok": true, "id": id})
+    }
+
+    func listTools(w http.ResponseWriter, r *http.Request) {
+        w.Header().Set("content-type", "application/json")
+        _ = json.NewEncoder(w).Encode(map[string]interface{}{
+            "tools": []map[string]string{
+                {"name": "list_repos", "description": "List Azure repos"},
+                {"name": "get_pipeline", "description": "Fetch a pipeline by id"},
+                {"name": "create_work_item", "description": "Create a work item"},
+            },
+        })
+    }
+
+    // selfTraffic generates continuous load against the server so the leak
+    // manifests within the eval window.
+    func selfTraffic() {
+        time.Sleep(2 * time.Second)
+        client := &http.Client{Timeout: 2 * time.Second}
+        i := 0
+        for {
+            i++
+            body := strings.NewReader(fmt.Sprintf(`{"tool":"list_repos","args":{"repo":"r%d"}}`, i))
+            req, _ := http.NewRequest("POST", "http://127.0.0.1:8080/mcp/call_tool", body)
+            req.Header.Set("content-type", "application/json")
+            if resp, err := client.Do(req); err == nil {
+                _, _ = io.Copy(io.Discard, resp.Body)
+                resp.Body.Close()
+            }
+            time.Sleep(20 * time.Millisecond)
+        }
+    }
+
+    func main() {
+        log.Println("azure-mcp-server starting")
+        http.HandleFunc("/mcp/call_tool", callTool)
+        http.HandleFunc("/mcp/list_tools", listTools)
+        go selfTraffic()
+        log.Fatal(http.ListenAndServe(":8080", nil))
+    }
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: azure-mcp-server
+  namespace: app-262
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: azure-mcp-server
+  template:
+    metadata:
+      labels:
+        app: azure-mcp-server
+    spec:
+      containers:
+        - name: azure-mcp-server
+          image: golang:1.22-alpine
+          workingDir: /app
+          command: ["go", "run", "/app/main.go"]
+          env:
+            - name: GOMEMLIMIT
+              value: "100MiB"
+            - name: GOCACHE
+              value: /tmp/.gocache
+            - name: GOPATH
+              value: /tmp/go
+          ports:
+            - containerPort: 8080
+          resources:
+            requests:
+              memory: "64Mi"
+              cpu: "50m"
+            limits:
+              memory: "160Mi"
+          volumeMounts:
+            - name: src
+              mountPath: /app
+            - name: gocache
+              mountPath: /tmp
+      volumes:
+        - name: src
+          secret:
+            secretName: azure-mcp-server-src
+            defaultMode: 0755
+        - name: gocache
+          emptyDir: {}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: azure-mcp-server
+  namespace: app-262
+spec:
+  selector:
+    app: azure-mcp-server
+  ports:
+    - port: 8080
+      targetPort: 8080

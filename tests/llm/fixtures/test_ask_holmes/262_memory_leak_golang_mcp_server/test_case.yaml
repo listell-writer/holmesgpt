@@ -1,0 +1,47 @@
+user_prompt: |
+  The azure-mcp-server pod in namespace app-262 is a Go MCP server and it has a
+  memory leak — the pod has been OOMKilled and restarted many times. Investigate
+  the source code of the pod and tell me, at the source level, what is causing
+  the leak. Name the specific data structures in the Go source that grow without
+  bound.
+
+tags:
+  - logs
+  - kubernetes
+
+expected_output: |
+  Holmes must identify the source-level cause of the memory leak by reading the
+  application source code (main.go). It must name BOTH of these unbounded data
+  structures as the root cause:
+  1. The `requestLog` slice (`[]Request`) — every incoming MCP request is
+     appended to it and it is never trimmed or rotated.
+  2. The `sessionResponses` map — every response body is cached keyed by
+     request id with no eviction policy.
+
+  It is acceptable (but not required) for Holmes to also mention the OOMKilled
+  symptom and restart count. The PASS criterion is source-level detection: the
+  answer must reference the actual variable / data structure in the Go code,
+  not just say "there is a memory leak".
+
+before_test: |
+  kubectl create namespace app-262 || true
+  kubectl apply -f manifest.yaml
+  # `go run` builds the binary first, which can take longer than other images.
+  POD_READY=false
+  for i in {1..60}; do
+    if kubectl wait --for=condition=ready pod -l app=azure-mcp-server -n app-262 --timeout=5s 2>/dev/null; then
+      POD_READY=true
+      break
+    fi
+    sleep 2
+  done
+  if [ "$POD_READY" = false ]; then
+    echo "azure-mcp-server pod failed to become ready"
+    kubectl describe pod -l app=azure-mcp-server -n app-262
+    kubectl logs -l app=azure-mcp-server -n app-262 --tail=50 || true
+    exit 1
+  fi
+  sleep 30
+
+after_test: |
+  kubectl delete namespace app-262 --force --grace-period=0 --ignore-not-found
