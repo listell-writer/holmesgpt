@@ -627,11 +627,26 @@ class ConversationWorker:
             ask = self._extract_last_user_ask(task.conversation_history) or "Continue"
 
         if not ask:
-            logging.warning(
-                "Conversation %s has no user question, marking as failed",
-                task.conversation_id,
-            )
-            self._fail_conversation(task, "No user question found in conversation events")
+            # Distinguish the orphan case (no events at all — the parent
+            # Conversations row outlived its ConversationEvents, e.g. an
+            # external delete blew the seed event away while leaving the
+            # claim intact) from the malformed-payload case (events
+            # present but no usable `ask`). Both still fail — but the
+            # orphan path is a data-integrity issue worth flagging
+            # separately so log-mining doesn't conflate them.
+            if not events:
+                reason = "Conversation has no events; parent row is orphaned (seed user_message missing)"
+                logging.warning(
+                    "Conversation %s has no events at all (orphaned), marking as failed",
+                    task.conversation_id,
+                )
+            else:
+                reason = "No user question found in conversation events"
+                logging.warning(
+                    "Conversation %s has no user question, marking as failed",
+                    task.conversation_id,
+                )
+            self._fail_conversation(task, reason)
             return
 
         publisher = ConversationEventPublisher(
