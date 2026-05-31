@@ -131,6 +131,7 @@ class OAuthToolConnector:
                     "Failed to load OAuth tools for user %s on toolset %s: %s",
                     user_id, toolset.name, self._extract_error_message(e),
                 )
+                self._log_token_config_mismatch(user_id, toolset)
             return []
 
     def store_user_tools(self, user_id: str, toolset_name: str, tools: List[Tool]) -> None:
@@ -223,6 +224,60 @@ class OAuthToolConnector:
         while hasattr(current, "exceptions") and current.exceptions:
             current = current.exceptions[0]
         return str(current)
+
+    @staticmethod
+    def _log_token_config_mismatch(user_id: str, toolset: Any) -> None:
+        """On MCP failure, log if the stored token was issued under a different
+        client_id / token_url than the toolset's current OAuth config.
+
+        Catches config drift that would otherwise be invisible: rotated
+        client_id, two toolsets sharing a provider URL with different client
+        configs, or a stale cached token after credentials were changed.
+        Also surfaces the workspace/team the token belongs to for servers
+        that gate access per workspace (e.g. Slack), so users can spot
+        wrong-workspace auth.
+        """
+        try:
+            oauth_cfg = getattr(getattr(toolset, "_mcp_config", None), "oauth", None)
+            if oauth_cfg is None:
+                return
+            store = getattr(_get_token_manager(), "_store", None)
+            if store is None:
+                return
+            provider = getattr(oauth_cfg, "authorization_url", None) or "unknown"
+            try:
+                tok = store.get_token(provider, user_id=user_id)
+            except TypeError:
+                tok = store.get_token(provider)
+            if not isinstance(tok, dict):
+                return
+
+            cfg_client_id = getattr(oauth_cfg, "client_id", None)
+            cfg_token_url = getattr(oauth_cfg, "token_url", None)
+            tok_client_id = tok.get("client_id")
+            tok_token_url = tok.get("token_url")
+            tok_team = tok.get("team")
+
+            mismatches = []
+            if cfg_client_id and tok_client_id and cfg_client_id != tok_client_id:
+                mismatches.append(f"client_id: stored={tok_client_id} config={cfg_client_id}")
+            if cfg_token_url and tok_token_url and cfg_token_url != tok_token_url:
+                mismatches.append(f"token_url: stored={tok_token_url} config={cfg_token_url}")
+
+            if mismatches:
+                logger.warning(
+                    "MCP token/config mismatch for user %s on toolset %s — %s. "
+                    "The cached token was issued under a different OAuth config; re-authenticate.",
+                    user_id, toolset.name, "; ".join(mismatches),
+                )
+            elif tok_team:
+                logger.warning(
+                    "MCP failure for user %s on toolset %s — token was issued in workspace %s. "
+                    "If the server gates access per workspace, the user may have authenticated in the wrong one.",
+                    user_id, toolset.name, tok_team,
+                )
+        except Exception:
+            logger.debug("Failed to log token/config mismatch", exc_info=True)
 
     @staticmethod
     def _evict_expired_token(user_id: str, toolset: Any) -> None:

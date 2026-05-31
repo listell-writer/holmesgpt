@@ -32,7 +32,9 @@ from holmes.core.oauth_config import (
     OAuthDecisionCode,
     OAuthEndpoints,
     OAuthExchangeManager,
+    OAuthTokenExchangeError,
     _get_exchange_manager,
+    exchange_code_for_tokens,
     parse_oauth_decision,
 )
 from holmes.core.oauth_utils import (
@@ -369,6 +371,73 @@ class TestExchangeCodeForToken:
         oauth_code = OAuthDecisionCode(toolset_name="x", code="x", redirect_uri="x")
         _get_exchange_manager().complete_exchange("nonexistent-id", oauth_code, None)
         # Should log error but not raise
+
+    def test_client_secret_post_falls_back_when_idp_returns_200_on_error(self):
+        """Regression: Slack (and other client_secret_post-only IdPs) return HTTP 200
+        with {"ok": false, "error": ...} when the secret is sent via Basic Auth.
+
+        The exchange must detect a 200 response without an access_token and retry
+        with client_secret in the POST body.
+        """
+        basic_auth_resp = MagicMock()
+        basic_auth_resp.status_code = 200
+        basic_auth_resp.is_success = True
+        basic_auth_resp.json.return_value = {"ok": False, "error": "bad_client_secret"}
+
+        body_auth_resp = MagicMock()
+        body_auth_resp.status_code = 200
+        body_auth_resp.is_success = True
+        body_auth_resp.json.return_value = {
+            "ok": True,
+            "access_token": "xoxp-slack-token",
+            "token_type": "Bearer",
+        }
+
+        with patch(
+            "holmes.core.oauth_config.httpx.post",
+            side_effect=[basic_auth_resp, body_auth_resp],
+        ) as mock_post:
+            token_data = exchange_code_for_tokens(
+                token_url="https://slack.com/api/oauth.v2.user.access",
+                code="slack-auth-code",
+                redirect_uri="http://frontend/callback",
+                client_id="slack-client-id",
+                code_verifier="slack-pkce-verifier",
+                client_secret="slack-client-secret",
+            )
+
+        assert token_data["access_token"] == "xoxp-slack-token"
+        assert mock_post.call_count == 2
+
+        first_call_kwargs = mock_post.call_args_list[0].kwargs
+        assert isinstance(first_call_kwargs.get("auth"), httpx.BasicAuth)
+
+        second_call_kwargs = mock_post.call_args_list[1].kwargs
+        assert second_call_kwargs.get("auth") is None
+        assert second_call_kwargs["data"]["client_secret"] == "slack-client-secret"
+
+    def test_client_secret_post_raises_when_body_retry_also_fails(self):
+        """If even the POST-body retry returns 200 without access_token, the function
+        must still raise OAuthTokenExchangeError (no silent success)."""
+        bad_resp = MagicMock()
+        bad_resp.status_code = 200
+        bad_resp.is_success = True
+        bad_resp.text = '{"ok": false, "error": "bad_client_secret"}'
+        bad_resp.json.return_value = {"ok": False, "error": "bad_client_secret"}
+
+        with patch(
+            "holmes.core.oauth_config.httpx.post",
+            side_effect=[bad_resp, bad_resp],
+        ):
+            with pytest.raises(OAuthTokenExchangeError) as excinfo:
+                exchange_code_for_tokens(
+                    token_url="https://slack.com/api/oauth.v2.user.access",
+                    code="slack-auth-code",
+                    redirect_uri="http://frontend/callback",
+                    client_id="slack-client-id",
+                    client_secret="slack-client-secret",
+                )
+            assert "access_token" in str(excinfo.value.detail)
 
 
 class TestParseOAuthDecision:
