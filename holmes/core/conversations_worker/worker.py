@@ -403,10 +403,7 @@ class ConversationWorker:
         # slots open up.
         claimed = self.dal.claim_conversations(self.holmes_id)
         if claimed:
-            claimed_ids = [c.get("conversation_id") for c in claimed]
-            logging.info(
-                "Claimed %d conversation(s): %s", len(claimed), claimed_ids
-            )
+            logging.info("Claimed %d conversation(s)", len(claimed))
         for conv in claimed:
             task = self._build_task_from_conversation_row(conv)
             if task is None:
