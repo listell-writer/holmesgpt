@@ -114,6 +114,58 @@ class TestGrafanaLoki:
             assert rsps.calls[-1].request.headers.get("Authorization") == f"Bearer {key}"
 
 
+class TestGrafanaBasicAuth:
+    """Basic auth (username/password) restored from master.
+
+    The Grafana toolset authenticates via `api_key` (Bearer) OR `username`+`password`
+    (HTTP basic auth). Verifies a top-level username/password falls through to every
+    instance and is sent as `Authorization: Basic ...` on the wire, while a per-instance
+    api_key still wins for the instance that sets it.
+    """
+
+    import base64
+
+    EU = "https://gba-eu.example.com"
+    US = "https://gba-us.example.com"
+
+    def _mock(self, rsps):
+        _reg(rsps, responses.GET, r"https://gba-(eu|us)\.example\.com/api/(dashboards/tags|search).*", [])
+
+    def _build(self, rsps):
+        self._mock(rsps)
+        ts = multi_instance(GrafanaToolset)
+        ok, _ = ts.prerequisites_callable(
+            {
+                "username": "admin",
+                "password": "prom-operator",
+                "instances": [
+                    {"name": "eu", "api_url": self.EU},
+                    {"name": "us", "api_url": self.US, "api_key": "tok_us"},
+                ],
+            }
+        )
+        assert ok is True
+        return ts
+
+    def test_global_basic_auth_falls_through(self):
+        expected = "Basic " + self.base64.b64encode(b"admin:prom-operator").decode()
+        with responses.RequestsMock(assert_all_requests_are_fired=False) as rsps:
+            ts = self._build(rsps)
+            tool = next(t for t in ts.tools if t.name == "grafana_search_dashboards")
+            tool.invoke({"query": "x", INSTANCE_PARAM_NAME: "eu"}, create_mock_tool_invoke_context())
+            last = rsps.calls[-1].request
+            assert last.headers.get("Authorization") == expected
+
+    def test_per_instance_api_key_overrides_global_basic_auth(self):
+        with responses.RequestsMock(assert_all_requests_are_fired=False) as rsps:
+            ts = self._build(rsps)
+            tool = next(t for t in ts.tools if t.name == "grafana_search_dashboards")
+            tool.invoke({"query": "x", INSTANCE_PARAM_NAME: "us"}, create_mock_tool_invoke_context())
+            last = rsps.calls[-1].request
+            # instance set its own api_key -> Bearer, NOT inherited basic auth
+            assert last.headers.get("Authorization") == "Bearer tok_us"
+
+
 class TestGrafanaTempo:
     EU = "http://tempo-eu.svc:3200"
     US = "http://tempo-us.svc:3200"

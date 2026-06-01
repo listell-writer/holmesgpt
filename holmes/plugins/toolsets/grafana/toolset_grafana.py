@@ -19,6 +19,7 @@ from holmes.core.tools import (
 from holmes.plugins.toolsets.grafana.base_grafana_toolset import BaseGrafanaToolset
 from holmes.plugins.toolsets.grafana.common import (
     GrafanaConfig,
+    build_auth,
     build_headers,
     get_base_url,
 )
@@ -134,6 +135,7 @@ class GrafanaToolset(BaseGrafanaToolset):
             resp = requests.get(
                 f"{base_url}/api/rendering/version",
                 headers=headers,
+                auth=build_auth(config),
                 timeout=10,
                 verify=config.verify_ssl,
             )
@@ -157,6 +159,7 @@ class GrafanaToolset(BaseGrafanaToolset):
                 resp = requests.get(
                     f"{base_url}/render/d-solo/nonexistent/_?panelId=1&width=100&height=100",
                     headers=headers,
+                    auth=build_auth(config),
                     timeout=10,
                     verify=config.verify_ssl,
                 )
@@ -249,6 +252,7 @@ class BaseGrafanaTool(Tool, ABC):
             response = requests.get(
                 url,
                 headers=headers,
+                auth=build_auth(config),
                 params=query_params,
                 timeout=timeout,
                 verify=config.verify_ssl,
@@ -600,6 +604,7 @@ class BaseGrafanaRenderTool(Tool, ABC):
             response = requests.get(
                 url,
                 headers=headers,
+                auth=build_auth(config),
                 params=query_params,
                 timeout=timeout,
                 verify=config.verify_ssl,
