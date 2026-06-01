@@ -186,6 +186,15 @@ holmes ask "list Datadog monitors"
 
 That's it! You're now connected to Datadog with all toolsets enabled.
 
+```multi-instance
+toolset: datadog/logs
+name: Datadog
+config: |
+  api_key: "{{ env.DATADOG_API_KEY }}"
+  app_key: "{{ env.DATADOG_APP_KEY }}"
+  api_url: https://api.datadoghq.com
+```
+
 ## Available Toolsets
 
 HolmesGPT provides four specialized Datadog toolsets:

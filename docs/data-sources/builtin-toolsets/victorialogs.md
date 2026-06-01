@@ -79,6 +79,13 @@ toolsets:
       external_url: https://logs.example.com
 ```
 
+```multi-instance
+toolset: victorialogs
+name: VictoriaLogs
+config: |
+  api_url: http://victorialogs.monitoring.svc:9428
+```
+
 ## Common Use Cases
 
 ```text

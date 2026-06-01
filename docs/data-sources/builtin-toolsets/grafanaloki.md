@@ -96,6 +96,15 @@ toolsets:
       grafana_datasource_uid: <the UID of the Loki datasource>
 ```
 
+```multi-instance
+toolset: grafana/loki
+name: Grafana Loki
+config: |
+  api_url: http://grafana.monitoring.svc.cluster.local
+  api_key: <your grafana API key>
+  grafana_datasource_uid: <the UID of the Loki datasource>
+```
+
 ## Advanced Configuration
 
 ### SSL Verification
