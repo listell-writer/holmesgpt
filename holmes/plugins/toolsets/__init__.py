@@ -57,6 +57,7 @@ from holmes.plugins.toolsets.kafka import KafkaToolset
 from holmes.plugins.toolsets.kubectl_run.kubectl_run_toolset import KubectlRunToolset
 from holmes.plugins.toolsets.kubernetes_logs import KubernetesLogsToolset
 from holmes.plugins.toolsets.mcp.toolset_mcp import RemoteMCPToolset
+from holmes.plugins.toolsets.multi_instance import multi_instance
 from holmes.plugins.toolsets.newrelic.newrelic import NewRelicToolset
 from holmes.plugins.toolsets.rabbitmq.toolset_rabbitmq import RabbitMQToolset
 from holmes.plugins.toolsets.robusta.robusta import RobustaToolset
@@ -112,10 +113,10 @@ def load_python_toolsets(
         GrafanaToolset(),
         NotionToolset(),
         KafkaToolset(),
-        DatadogLogsToolset(),
-        DatadogGeneralToolset(),
-        DatadogMetricsToolset(),
-        DatadogTracesToolset(),
+        multi_instance(DatadogLogsToolset),
+        multi_instance(DatadogGeneralToolset),
+        multi_instance(DatadogMetricsToolset),
+        multi_instance(DatadogTracesToolset),
         OpenSearchQueryAssistToolset(),
         CoralogixToolset(),
         RabbitMQToolset(),
@@ -125,7 +126,7 @@ def load_python_toolsets(
         MongoDBAtlasToolset(),
         SkillsToolset(dal=dal, additional_search_paths=additional_search_paths),
         AzureSQLToolset(),
-        ServiceNowTablesToolset(),
+        multi_instance(ServiceNowTablesToolset),
         VictoriaLogsToolset(),
         DatabaseToolset(),
         ElasticsearchDataToolset(),
