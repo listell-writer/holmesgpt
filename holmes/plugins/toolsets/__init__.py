@@ -122,7 +122,7 @@ def load_python_toolsets(
         RabbitMQToolset(),
         BashExecutorToolset(),
         KubectlRunToolset(),
-        ConfluenceToolset(),
+        multi_instance(ConfluenceToolset),
         multi_instance(MongoDBAtlasToolset),
         SkillsToolset(dal=dal, additional_search_paths=additional_search_paths),
         AzureSQLToolset(),
