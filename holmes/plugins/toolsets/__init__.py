@@ -136,7 +136,7 @@ def load_python_toolsets(
     if not DISABLE_PROMETHEUS_TOOLSET:
         from holmes.plugins.toolsets.prometheus.prometheus import PrometheusToolset
 
-        toolsets.append(PrometheusToolset())
+        toolsets.append(multi_instance(PrometheusToolset))
 
     if not USE_LEGACY_KUBERNETES_LOGS:
         toolsets.append(KubernetesLogsToolset())
