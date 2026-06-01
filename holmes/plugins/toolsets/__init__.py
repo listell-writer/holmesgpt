@@ -123,7 +123,7 @@ def load_python_toolsets(
         BashExecutorToolset(),
         KubectlRunToolset(),
         ConfluenceToolset(),
-        MongoDBAtlasToolset(),
+        multi_instance(MongoDBAtlasToolset),
         SkillsToolset(dal=dal, additional_search_paths=additional_search_paths),
         AzureSQLToolset(),
         multi_instance(ServiceNowTablesToolset),
