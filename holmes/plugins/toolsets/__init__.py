@@ -109,7 +109,7 @@ def load_python_toolsets(
         RobustaToolset(dal),
         multi_instance(GrafanaLokiToolset),
         multi_instance(GrafanaTempoToolset),
-        NewRelicToolset(),
+        multi_instance(NewRelicToolset),
         multi_instance(GrafanaToolset),
         NotionToolset(),
         KafkaToolset(),
