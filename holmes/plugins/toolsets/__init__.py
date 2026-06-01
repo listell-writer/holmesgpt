@@ -107,10 +107,10 @@ def load_python_toolsets(
         InternetToolset(),
         ConnectivityCheckToolset(),
         RobustaToolset(dal),
-        GrafanaLokiToolset(),
-        GrafanaTempoToolset(),
+        multi_instance(GrafanaLokiToolset),
+        multi_instance(GrafanaTempoToolset),
         NewRelicToolset(),
-        GrafanaToolset(),
+        multi_instance(GrafanaToolset),
         NotionToolset(),
         KafkaToolset(),
         multi_instance(DatadogLogsToolset),
@@ -129,8 +129,8 @@ def load_python_toolsets(
         multi_instance(ServiceNowTablesToolset),
         multi_instance(VictoriaLogsToolset),
         DatabaseToolset(),
-        ElasticsearchDataToolset(),
-        ElasticsearchClusterToolset(),
+        multi_instance(ElasticsearchDataToolset),
+        multi_instance(ElasticsearchClusterToolset),
     ]
 
     if not DISABLE_PROMETHEUS_TOOLSET:
