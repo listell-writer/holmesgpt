@@ -72,7 +72,7 @@ _ATOMIC_GROUPS: List[set] = [
 ]
 
 # Non-secret fields surfaced by the list-instances tool when present on an instance.
-_IDENTIFYING_FIELDS = ("api_url", "url", "prometheus_url", "connection_url")
+_IDENTIFYING_FIELDS = ("api_url", "url", "prometheus_url", "connection_url", "domain")
 
 
 def _merge_instance_config(globals_: Dict[str, Any], entry: Dict[str, Any]) -> Dict[str, Any]:
