@@ -259,7 +259,7 @@ class DatadogGeneralToolset(Toolset):
             success, error_msg = self._perform_healthcheck(dd_config)
             return success, error_msg
         except Exception as e:
-            logging.exception("Failed to set up Datadog general toolset")
+            logging.warning("Failed to set up Datadog general toolset", exc_info=True)
             return False, f"Invalid Datadog General configuration: {e}"
 
     def _perform_healthcheck(self, dd_config: DatadogGeneralConfig) -> Tuple[bool, str]:
@@ -287,7 +287,9 @@ class DatadogGeneralToolset(Toolset):
                 return False, f"Datadog General health check failed: {error_msg}"
 
         except Exception as e:
-            logging.exception("Failed during Datadog general API health check")
+            logging.warning(
+                "Failed during Datadog general API health check", exc_info=True
+            )
             return False, f"Datadog General health check failed: {e}"
 
 
@@ -479,7 +481,7 @@ class DatadogAPIGet(BaseDatadogGeneralTool):
             )
 
         except DataDogRequestError as e:
-            logging.exception(e, exc_info=True)
+            logging.warning(e, exc_info=True)
 
             if e.status_code == 429:
                 error_msg = f"Datadog API rate limit exceeded. Failed after {MAX_RETRY_COUNT_ON_RATE_LIMIT} retry attempts."
@@ -507,7 +509,7 @@ class DatadogAPIGet(BaseDatadogGeneralTool):
             )
 
         except Exception as e:
-            logging.exception(f"Failed to query Datadog API: {params}", exc_info=True)
+            logging.warning(f"Failed to query Datadog API: {params}", exc_info=True)
             return StructuredToolResult(
                 status=StructuredToolResultStatus.ERROR,
                 error=f"Unexpected error: {str(e)}",
@@ -676,7 +678,7 @@ class DatadogAPIPostSearch(BaseDatadogGeneralTool):
             )
 
         except DataDogRequestError as e:
-            logging.exception(e, exc_info=True)
+            logging.warning(e, exc_info=True)
 
             if e.status_code == 429:
                 error_msg = f"Datadog API rate limit exceeded. Failed after {MAX_RETRY_COUNT_ON_RATE_LIMIT} retry attempts."
@@ -702,7 +704,7 @@ class DatadogAPIPostSearch(BaseDatadogGeneralTool):
             )
 
         except Exception as e:
-            logging.exception(f"Failed to query Datadog API: {params}", exc_info=True)
+            logging.warning(f"Failed to query Datadog API: {params}", exc_info=True)
             return StructuredToolResult(
                 status=StructuredToolResultStatus.ERROR,
                 error=f"Unexpected error: {str(e)}",

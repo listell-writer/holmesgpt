@@ -379,7 +379,7 @@ class AMPConfig(PrometheusConfig):
                 )
                 self._aws_client_created_at = time.time()
             except Exception:
-                logging.exception("Failed to create/refresh AWS client")
+                logging.warning("Failed to create/refresh AWS client", exc_info=True)
                 return self._aws_client
         return self._aws_client
 
@@ -2177,7 +2177,7 @@ class PrometheusToolset(Toolset):
             self._reload_llm_instructions()
             return self._is_healthy()
         except Exception as e:
-            logging.exception("Failed to set up prometheus")
+            logging.warning("Failed to set up prometheus", exc_info=True)
             return False, f"Invalid Prometheus configuration: {e}"
 
     def auto_detect_prometheus_url(self) -> Optional[str]:

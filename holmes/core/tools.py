@@ -987,7 +987,10 @@ class Toolset(BaseModel):
                     if error_message:
                         local_error = f"{error_message}"
                 except Exception as e:
-                    logger.exception(f"Toolset {self.name} prerequisite check failed")
+                    logger.warning(
+                        f"Toolset {self.name} prerequisite check failed",
+                        exc_info=True,
+                    )
                     local_status = ToolsetStatusEnum.FAILED
                     local_error = f"Prerequisite call failed unexpectedly: {str(e)}"
 

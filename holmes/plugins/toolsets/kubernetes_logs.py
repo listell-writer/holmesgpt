@@ -211,7 +211,9 @@ class KubernetesLogsToolset(Toolset):
                 return_code=return_code,
             )
         except Exception as e:
-            logging.exception(f"Error fetching logs for pod {params.pod_name}")
+            logging.warning(
+                f"Error fetching logs for pod {params.pod_name}", exc_info=True
+            )
             return StructuredToolResult(
                 status=StructuredToolResultStatus.ERROR,
                 error=f"Error fetching logs: {str(e)}",

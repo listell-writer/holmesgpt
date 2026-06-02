@@ -1458,5 +1458,5 @@ class KafkaToolset(Toolset):
 
             return len(self.clients) > 0, "\n".join(errors)
         except Exception as e:
-            logging.exception("Failed to set up Kafka toolset")
+            logging.warning("Failed to set up Kafka toolset", exc_info=True)
             return False, str(e)
