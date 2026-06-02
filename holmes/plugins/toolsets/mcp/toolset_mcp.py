@@ -164,6 +164,13 @@ class MCPConfig(ToolsetConfig):
         title="OAuth",
         description="OAuth authorization_code configuration. When set, users authenticate via browser before tools can be used.",
     )
+    health_check_url: Optional[str] = Field(
+        default=None,
+        title="Health Check URL",
+        description="Optional URL to check server connectivity before establishing MCP session. "
+        "If not set, a quick HTTP probe is performed against the MCP URL itself.",
+        examples=["http://example.com:8000/health", "http://example.com:8000/api/status"],
+    )
 
     def get_lock_string(self) -> str:
         return str(self.url)
@@ -927,6 +934,14 @@ class RemoteMCPToolset(Toolset):
             if self.is_oauth_enabled:
                 return self._check_oauth_server_reachable()
 
+            # For non-OAuth servers, perform a quick HTTP health check before
+            # establishing the full MCP session. This catches connectivity issues,
+            # invalid tokens, and other configuration problems early with a clear
+            # error message, rather than waiting for the MCP session to timeout.
+            health_ok, health_error = self._check_server_health()
+            if not health_ok:
+                return (False, health_error)
+
             self.tools = self._load_remote_tools()
 
             if not self.tools:
@@ -1004,6 +1019,92 @@ class RemoteMCPToolset(Toolset):
         self.tools = [RemoteMCPTool.create(placeholder, self)]
         logging.info("OAuth MCP server %s is reachable, registered placeholder tool (auth required)", self.name)
         return (True, "")
+
+    def _check_server_health(self) -> Tuple[bool, str]:
+        """Perform a quick HTTP health check before establishing the full MCP session.
+
+        This catches common issues (bad tokens, unreachable servers, SSL errors) early
+        with a clear error message. For SSE/Streamable HTTP modes, we probe the server
+        URL with the configured headers to verify connectivity and authentication.
+
+        Returns:
+            (True, "") on success, (False, error_message) on failure.
+        """
+        if not isinstance(self._mcp_config, MCPConfig):
+            return (True, "")
+
+        # Determine the URL to check
+        health_url = self._mcp_config.health_check_url
+        if not health_url:
+            # Default to probing the MCP URL itself
+            health_url = str(self._mcp_config.url).rstrip("/")
+            # For SSE mode, strip the /sse suffix if present (probe the base endpoint)
+            if health_url.endswith("/sse"):
+                health_url = health_url[:-4]
+
+        # Build headers (same as would be used for MCP connection)
+        headers = self._render_headers(request_context=None) or {}
+
+        try:
+            # Quick HTTP probe with short timeout
+            response = httpx.get(
+                health_url,
+                headers=headers,
+                timeout=10,
+                verify=self._mcp_config.verify_ssl,
+                follow_redirects=True,
+            )
+
+            # Accept any 2xx/3xx response, or 401/405 (server is reachable but may require auth or different method)
+            # We mainly want to catch: connection refused, DNS errors, SSL errors, timeouts
+            if response.status_code >= 500:
+                return (
+                    False,
+                    f"MCP server {self.name} health check failed: HTTP {response.status_code} - {response.text[:200]}\n"
+                    f"URL: {health_url}",
+                )
+
+            # 401/403 might indicate auth issues - warn but don't fail (MCP session might handle auth differently)
+            if response.status_code in (401, 403):
+                logging.warning(
+                    "MCP server %s returned %d on health check - authentication may be misconfigured. "
+                    "Proceeding with MCP session initialization.",
+                    self.name,
+                    response.status_code,
+                )
+
+            logging.debug("MCP server %s health check passed (HTTP %d)", self.name, response.status_code)
+            return (True, "")
+
+        except httpx.ConnectError as e:
+            # Check if this is an SSL-related error
+            error_str = str(e).lower()
+            if "ssl" in error_str or "certificate" in error_str:
+                return (
+                    False,
+                    f"MCP server {self.name} SSL error: {e}\n"
+                    f"URL: {health_url}\n"
+                    f"If using a self-signed certificate, set verify_ssl: false in the config.",
+                )
+            return (
+                False,
+                f"MCP server {self.name} unreachable: connection refused or DNS error\n"
+                f"URL: {health_url}\nError: {e}",
+            )
+        except httpx.TimeoutException:
+            return (
+                False,
+                f"MCP server {self.name} health check timed out after 10 seconds\n"
+                f"URL: {health_url}",
+            )
+        except Exception as e:
+            # Log but don't fail on unexpected errors - let the MCP session handle it
+            logging.warning(
+                "MCP server %s health check encountered unexpected error: %s. Proceeding with MCP session.",
+                self.name,
+                e,
+            )
+            return (True, "")
 
     def _discover_oauth_endpoints(self, mcp_url: str, initial_response: httpx.Response) -> bool:
         """Auto-discover OAuth endpoints following the MCP SDK's discovery flow.

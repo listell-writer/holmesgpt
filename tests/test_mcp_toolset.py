@@ -5,7 +5,7 @@ import logging
 import shutil
 import subprocess
 import sys
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 from mcp.types import (
@@ -47,6 +47,20 @@ def suppress_migration_warnings():
     logger.setLevel(logging.ERROR)
     yield
     logger.setLevel(original_level)
+
+
+@pytest.fixture
+def mock_health_check_pass():
+    """Mock the MCP health check to always pass.
+
+    Use this when testing other aspects of the MCP toolset that don't involve
+    the health check itself. The health check performs an HTTP GET to verify
+    server connectivity, which needs to be mocked for unit tests.
+    """
+    mock_response = MagicMock()
+    mock_response.status_code = 200
+    with patch("holmes.plugins.toolsets.mcp.toolset_mcp.httpx.get", return_value=mock_response):
+        yield
 
 
 class TestToolParameter:
@@ -483,6 +497,11 @@ class TestMCPGeneral:
         assert tool.parameters == expected_schema
 
     def test_unreachable_server_returns_error(self, suppress_migration_warnings):
+        """Test that unreachable servers fail with a clear error message.
+
+        Note: The health check now catches this earlier than the MCP session,
+        so the error message comes from the health check, not the tool loading.
+        """
         mcp_toolset = RemoteMCPToolset(
             name="test_mcp",
             description="",
@@ -491,10 +510,12 @@ class TestMCPGeneral:
 
         result = mcp_toolset.prerequisites_callable(config=mcp_toolset.config)
         assert result[0] is False
-        assert "Failed to load mcp server test_mcp" in result[1]
+        # Health check now catches this with its own message format
+        assert "test_mcp" in result[1]
+        assert "unreachable" in result[1].lower() or "Failed to load" in result[1]
 
     def test_server_with_one_tool_initializes_correctly(
-        self, monkeypatch, suppress_migration_warnings
+        self, monkeypatch, suppress_migration_warnings, mock_health_check_pass
     ):
         mcp_toolset = RemoteMCPToolset(
             name="test_mcp",
@@ -523,7 +544,7 @@ class TestMCPGeneral:
         assert len(list(mcp_toolset.tools)) == 1
 
     def test_toolset_returns_configured_headers(
-        self, monkeypatch, suppress_migration_warnings
+        self, monkeypatch, suppress_migration_warnings, mock_health_check_pass
     ):
         mcp_toolset = RemoteMCPToolset(
             name="test_mcp",
@@ -538,7 +559,9 @@ class TestMCPGeneral:
         mcp_toolset.prerequisites_callable(config=mcp_toolset.config)
         assert mcp_toolset._mcp_config.headers.get("header1") == "test1"
 
-    def test_toolset_without_headers_returns_none(self, suppress_migration_warnings):
+    def test_toolset_without_headers_returns_none(
+        self, suppress_migration_warnings, mock_health_check_pass
+    ):
         mcp_toolset = RemoteMCPToolset(
             name="test_mcp",
             description="demo mcp with 2 simple functions",
@@ -549,7 +572,7 @@ class TestMCPGeneral:
         assert mcp_toolset._mcp_config.headers is None
 
     def test_old_config_format_with_url_field_returns_true(
-        self, monkeypatch, suppress_migration_warnings
+        self, monkeypatch, suppress_migration_warnings, mock_health_check_pass
     ):
         # Test that url passed as field parameter gets migrated to config
         mcp_toolset = RemoteMCPToolset(
@@ -568,7 +591,7 @@ class TestMCPGeneral:
         assert mcp_toolset._mcp_config.mode == MCPMode.SSE
 
     def test_new_config_format_with_url_in_config_returns_true(
-        self, monkeypatch, suppress_migration_warnings
+        self, monkeypatch, suppress_migration_warnings, mock_health_check_pass
     ):
         mcp_toolset = RemoteMCPToolset(
             name="test_mcp",
@@ -607,7 +630,7 @@ class TestMCPGeneral:
         assert "Config is required" in result[1]
 
     def test_no_mode_configured_defaults_to_sse(
-        self, monkeypatch, suppress_migration_warnings
+        self, monkeypatch, suppress_migration_warnings, mock_health_check_pass
     ):
         mcp_toolset = RemoteMCPToolset(
             name="test_mcp",
@@ -636,7 +659,9 @@ class TestMCPGeneral:
         assert result[0] is False
         assert 'Invalid mode "invalid-mode", allowed modes are' in result[1]
 
-    def test_streamable_http_mode_works(self, monkeypatch, suppress_migration_warnings):
+    def test_streamable_http_mode_works(
+        self, monkeypatch, suppress_migration_warnings, mock_health_check_pass
+    ):
         mcp_toolset = RemoteMCPToolset(
             name="test_mcp",
             description="Test toolset",
@@ -830,7 +855,7 @@ class TestExceptionGroupUnwrapping:
         assert _extract_root_error_message(exc) == "some error"
 
     def test_prerequisites_callable_surfaces_auth_error(
-        self, monkeypatch, suppress_migration_warnings
+        self, monkeypatch, suppress_migration_warnings, mock_health_check_pass
     ):
         mcp_toolset = RemoteMCPToolset(
             name="dynatrace",
@@ -2574,3 +2599,212 @@ class TestJenkinsMCPConfig:
 
         assert ok is False
         assert msg  # error message must be non-empty
+
+
+class TestMCPServerHealthCheck:
+    """Tests for the MCP server health check functionality.
+
+    The health check performs a quick HTTP probe before establishing the full
+    MCP session to catch connectivity issues, invalid tokens, and other
+    configuration problems early with a clear error message.
+    """
+
+    def _make_toolset(self, url: str = "http://mcp.example.com:8000", **config_overrides) -> RemoteMCPToolset:
+        """Create a test MCP toolset."""
+        config = {
+            "url": url,
+            "mode": "sse",
+            **config_overrides,
+        }
+        return RemoteMCPToolset(
+            name="test-mcp",
+            description="Test MCP server",
+            config=config,
+        )
+
+    def test_health_check_passes_on_successful_connection(self, monkeypatch):
+        """Health check should pass when server returns 2xx."""
+        import httpx
+
+        toolset = self._make_toolset()
+        toolset._mcp_config = MCPConfig(url="http://mcp.example.com:8000/sse", mode=MCPMode.SSE)
+
+        mock_response = MagicMock()
+        mock_response.status_code = 200
+
+        with patch("holmes.plugins.toolsets.mcp.toolset_mcp.httpx.get", return_value=mock_response) as mock_get:
+            ok, msg = toolset._check_server_health()
+
+            assert ok is True
+            assert msg == ""
+            mock_get.assert_called_once()
+            # Should strip /sse suffix and probe the base URL
+            assert mock_get.call_args[0][0] == "http://mcp.example.com:8000"
+
+    def test_health_check_uses_custom_health_url_when_configured(self, monkeypatch):
+        """Health check should use health_check_url when provided."""
+        toolset = self._make_toolset()
+        toolset._mcp_config = MCPConfig(
+            url="http://mcp.example.com:8000/sse",
+            mode=MCPMode.SSE,
+            health_check_url="http://mcp.example.com:8000/api/health",
+        )
+
+        mock_response = MagicMock()
+        mock_response.status_code = 200
+
+        with patch("holmes.plugins.toolsets.mcp.toolset_mcp.httpx.get", return_value=mock_response) as mock_get:
+            ok, msg = toolset._check_server_health()
+
+            assert ok is True
+            mock_get.assert_called_once()
+            assert mock_get.call_args[0][0] == "http://mcp.example.com:8000/api/health"
+
+    def test_health_check_fails_on_server_error(self, monkeypatch):
+        """Health check should fail on 5xx errors."""
+        toolset = self._make_toolset()
+        toolset._mcp_config = MCPConfig(url="http://mcp.example.com:8000", mode=MCPMode.SSE)
+
+        mock_response = MagicMock()
+        mock_response.status_code = 500
+        mock_response.text = "Internal Server Error"
+
+        with patch("holmes.plugins.toolsets.mcp.toolset_mcp.httpx.get", return_value=mock_response):
+            ok, msg = toolset._check_server_health()
+
+            assert ok is False
+            assert "500" in msg
+            assert "test-mcp" in msg
+
+    def test_health_check_warns_but_passes_on_401(self, monkeypatch, caplog):
+        """Health check should warn but pass on 401 - MCP session may handle auth differently."""
+        toolset = self._make_toolset()
+        toolset._mcp_config = MCPConfig(url="http://mcp.example.com:8000", mode=MCPMode.SSE)
+
+        mock_response = MagicMock()
+        mock_response.status_code = 401
+
+        with patch("holmes.plugins.toolsets.mcp.toolset_mcp.httpx.get", return_value=mock_response):
+            with caplog.at_level(logging.WARNING):
+                ok, msg = toolset._check_server_health()
+
+                assert ok is True
+                assert "401" in caplog.text or "authentication" in caplog.text.lower()
+
+    def test_health_check_fails_on_connection_error(self, monkeypatch):
+        """Health check should fail with clear message on connection refused."""
+        import httpx
+
+        toolset = self._make_toolset()
+        toolset._mcp_config = MCPConfig(url="http://mcp.example.com:8000", mode=MCPMode.SSE)
+
+        with patch(
+            "holmes.plugins.toolsets.mcp.toolset_mcp.httpx.get",
+            side_effect=httpx.ConnectError("Connection refused"),
+        ):
+            ok, msg = toolset._check_server_health()
+
+            assert ok is False
+            assert "unreachable" in msg.lower()
+            assert "test-mcp" in msg
+
+    def test_health_check_fails_on_timeout(self, monkeypatch):
+        """Health check should fail with clear message on timeout."""
+        import httpx
+
+        toolset = self._make_toolset()
+        toolset._mcp_config = MCPConfig(url="http://mcp.example.com:8000", mode=MCPMode.SSE)
+
+        with patch(
+            "holmes.plugins.toolsets.mcp.toolset_mcp.httpx.get",
+            side_effect=httpx.TimeoutException("timed out"),
+        ):
+            ok, msg = toolset._check_server_health()
+
+            assert ok is False
+            assert "timed out" in msg.lower()
+
+    def test_health_check_fails_on_ssl_error(self, monkeypatch):
+        """Health check should fail with helpful message on SSL errors."""
+        import httpx
+
+        toolset = self._make_toolset()
+        toolset._mcp_config = MCPConfig(url="https://mcp.example.com:8000", mode=MCPMode.SSE)
+
+        # SSL errors in httpx are wrapped as ConnectError with SSL-related message
+        with patch(
+            "holmes.plugins.toolsets.mcp.toolset_mcp.httpx.get",
+            side_effect=httpx.ConnectError("[SSL: CERTIFICATE_VERIFY_FAILED] certificate verify failed"),
+        ):
+            ok, msg = toolset._check_server_health()
+
+            assert ok is False
+            assert "ssl" in msg.lower()
+            assert "verify_ssl" in msg.lower()  # Should suggest the fix
+
+    def test_health_check_includes_configured_headers(self, monkeypatch):
+        """Health check should use the same headers as the MCP connection."""
+        toolset = self._make_toolset()
+        toolset._mcp_config = MCPConfig(
+            url="http://mcp.example.com:8000",
+            mode=MCPMode.SSE,
+            headers={"Authorization": "Bearer test-token"},
+        )
+
+        mock_response = MagicMock()
+        mock_response.status_code = 200
+
+        with patch("holmes.plugins.toolsets.mcp.toolset_mcp.httpx.get", return_value=mock_response) as mock_get:
+            toolset._check_server_health()
+
+            call_kwargs = mock_get.call_args[1]
+            assert call_kwargs["headers"]["Authorization"] == "Bearer test-token"
+
+    def test_health_check_respects_verify_ssl_setting(self, monkeypatch):
+        """Health check should respect verify_ssl=False setting."""
+        toolset = self._make_toolset()
+        toolset._mcp_config = MCPConfig(
+            url="https://mcp.example.com:8000",
+            mode=MCPMode.SSE,
+            verify_ssl=False,
+        )
+
+        mock_response = MagicMock()
+        mock_response.status_code = 200
+
+        with patch("holmes.plugins.toolsets.mcp.toolset_mcp.httpx.get", return_value=mock_response) as mock_get:
+            toolset._check_server_health()
+
+            call_kwargs = mock_get.call_args[1]
+            assert call_kwargs["verify"] is False
+
+    def test_prerequisites_callable_runs_health_check_before_loading_tools(self, monkeypatch):
+        """prerequisites_callable should run health check and fail early if server unreachable."""
+        import httpx
+
+        toolset = self._make_toolset()
+
+        with patch(
+            "holmes.plugins.toolsets.mcp.toolset_mcp.httpx.get",
+            side_effect=httpx.ConnectError("Connection refused"),
+        ):
+            ok, msg = toolset.prerequisites_callable(config=toolset.config)
+
+            assert ok is False
+            assert "unreachable" in msg.lower()
+
+    def test_prerequisites_callable_proceeds_after_health_check_passes(self, monkeypatch):
+        """prerequisites_callable should proceed to load tools after health check passes."""
+        toolset = self._make_toolset()
+
+        mock_response = MagicMock()
+        mock_response.status_code = 200
+
+        async def mock_get_server_tools():
+            return ListToolsResult(tools=[])
+
+        with patch("holmes.plugins.toolsets.mcp.toolset_mcp.httpx.get", return_value=mock_response):
+            monkeypatch.setattr(toolset, "_get_server_tools", mock_get_server_tools)
+            ok, msg = toolset.prerequisites_callable(config=toolset.config)
+
+            assert ok is True
