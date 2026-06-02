@@ -120,7 +120,7 @@ class AzureSQLToolset(BaseAzureSQLToolset):
 
             except Exception as e:
                 message = f"Failed to set up Azure authentication: {str(e)}"
-                logging.error(message)
+                logging.warning(message)
                 errors.append(message)
                 return False, message
 

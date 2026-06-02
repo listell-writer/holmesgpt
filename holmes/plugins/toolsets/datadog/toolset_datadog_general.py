@@ -283,7 +283,7 @@ class DatadogGeneralToolset(Toolset):
                 return True, ""
             else:
                 error_msg = "Datadog API key validation failed"
-                logging.error(f"Datadog General health check failed: {error_msg}")
+                logging.warning(f"Datadog General health check failed: {error_msg}")
                 return False, f"Datadog General health check failed: {error_msg}"
 
         except Exception as e:
@@ -424,7 +424,7 @@ class DatadogAPIGet(BaseDatadogGeneralTool):
             allow_custom=self.toolset.dd_config.allow_custom_endpoints,
         )
         if not is_allowed:
-            logging.error(f"Endpoint validation failed: {error_msg}")
+            logging.warning(f"Endpoint validation failed: {error_msg}")
             return StructuredToolResult(
                 status=StructuredToolResultStatus.ERROR,
                 error=f"Endpoint validation failed: {error_msg}",
@@ -620,7 +620,7 @@ class DatadogAPIPostSearch(BaseDatadogGeneralTool):
             allow_custom=self.toolset.dd_config.allow_custom_endpoints,
         )
         if not is_allowed:
-            logging.error(f"Endpoint validation failed: {error_msg}")
+            logging.warning(f"Endpoint validation failed: {error_msg}")
             return StructuredToolResult(
                 status=StructuredToolResultStatus.ERROR,
                 error=f"Endpoint validation failed: {error_msg}",

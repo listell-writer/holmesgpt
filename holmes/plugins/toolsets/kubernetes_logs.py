@@ -112,7 +112,7 @@ class KubernetesLogsToolset(Toolset):
                         else:
                             current_logs_result = result
                     except Exception as e:
-                        logging.error(f"Error fetching {log_type} logs: {str(e)}")
+                        logging.warning(f"Error fetching {log_type} logs: {str(e)}")
                         error_result = LogResult(
                             logs=[],
                             error=f"Error fetching {log_type} logs: {str(e)}",
@@ -284,7 +284,7 @@ class KubernetesLogsToolset(Toolset):
             )
         except Exception as e:
             error_msg = f"Error executing kubectl: {str(e)}"
-            logging.error(
+            logging.warning(
                 f"Error executing kubectl logs for pod {params.pod_name} "
                 f"(previous={previous}): {str(e)}"
             )

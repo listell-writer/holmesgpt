@@ -603,7 +603,7 @@ class AzurePrometheusConfig(PrometheusConfig):
         # Request new token if needed
         if self._should_refresh_token():
             if not self.request_new_token():
-                logging.error("Failed to request new Azure access token")
+                logging.warning("Failed to request new Azure access token")
                 return {}
             self._token_created_at = time.time()
 

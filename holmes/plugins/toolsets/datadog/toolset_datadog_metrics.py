@@ -748,7 +748,7 @@ class DatadogMetricsToolset(Toolset):
                 return True, ""
             else:
                 error_msg = "Datadog API key validation failed"
-                logging.error(f"Datadog Metrics health check failed: {error_msg}")
+                logging.warning(f"Datadog Metrics health check failed: {error_msg}")
                 return False, f"Datadog Metrics health check failed: {error_msg}"
 
         except Exception as e:

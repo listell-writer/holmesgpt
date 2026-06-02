@@ -47,7 +47,7 @@ class FetchRobustaFinding(Tool):
             return self._dal.get_issue_data(finding_id)
         else:
             error = f"Failed to find a finding with finding_id={finding_id}: Holmes' data access layer is not enabled."
-            logging.error(error)
+            logging.warning(error)
             return {"error": error}
 
     def _invoke(self, params: dict, context: ToolInvokeContext) -> StructuredToolResult:
@@ -67,8 +67,7 @@ class FetchRobustaFinding(Tool):
                     params=params,
                 )
         except Exception as e:
-            logging.error(e)
-            logging.error(
+            logging.warning(
                 f"There was an internal error while fetching finding {finding_id}. {str(e)}"
             )
 

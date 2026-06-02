@@ -119,7 +119,7 @@ class DatadogTracesToolset(Toolset):
             return True, ""
 
         except DataDogRequestError as e:
-            logging.error(
+            logging.warning(
                 f"Datadog API error during healthcheck: {e.status_code} - {e.response_text}"
             )
             if e.status_code == 403:

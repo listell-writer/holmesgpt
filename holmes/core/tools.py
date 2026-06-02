@@ -512,7 +512,7 @@ class Tool(ABC, BaseModel):
                 # Continue with other transformers, don't fail the entire chain
                 continue
             except Exception as e:
-                logger.error(
+                logger.warning(
                     f"Unexpected error applying transformer '{transformer_instance.name}' to tool '{self.name}': {e}"
                 )
                 # Continue with other transformers
@@ -687,7 +687,7 @@ class YAMLTool(Tool, BaseModel):
             output = check_oom_and_append_hint(output, result.returncode)
             return output, result.returncode
         except Exception as e:
-            logger.error(
+            logger.warning(
                 f"An unexpected error occurred while running '{cmd}': {e}",
                 exc_info=True,
             )
