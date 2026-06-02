@@ -79,6 +79,8 @@ toolsets:
       external_url: https://logs.example.com
 ```
 
+## Multiple Instances
+
 ```multi-instance
 toolset: victorialogs
 name: VictoriaLogs

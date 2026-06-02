@@ -104,6 +104,8 @@ For visual rendering, the [Grafana Image Renderer](https://grafana.com/grafana/p
 
     --8<-- "snippets/helm_upgrade_command.md"
 
+## Multiple Instances
+
 ```multi-instance
 toolset: grafana/dashboards
 name: Grafana

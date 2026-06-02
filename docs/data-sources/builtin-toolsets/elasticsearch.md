@@ -134,6 +134,8 @@ Enable only the toolset(s) you need. Most users who just want to search logs onl
 !!! tip "Enable only what you need"
     You can enable just `elasticsearch/data` or `elasticsearch/cluster` depending on your needs. Most users who just want to search logs only need `elasticsearch/data`.
 
+## Multiple Instances
+
 ```multi-instance
 toolset: elasticsearch/data
 name: Elasticsearch

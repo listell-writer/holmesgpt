@@ -314,6 +314,8 @@ HolmesGPT authenticates to a self-hosted Confluence Data Center (or Server) inst
 
     --8<-- "snippets/helm_upgrade_command.md"
 
+## Multiple Instances
+
 ```multi-instance
 toolset: confluence
 name: Confluence

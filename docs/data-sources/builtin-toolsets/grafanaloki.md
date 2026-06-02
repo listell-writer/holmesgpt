@@ -96,6 +96,8 @@ toolsets:
       grafana_datasource_uid: <the UID of the Loki datasource>
 ```
 
+## Multiple Instances
+
 ```multi-instance
 toolset: grafana/loki
 name: Grafana Loki

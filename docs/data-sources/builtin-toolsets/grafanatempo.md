@@ -277,6 +277,8 @@ curl -s -H "Authorization: Bearer <service-account-token>" https://<your-stack>.
 
     --8<-- "snippets/helm_upgrade_command.md"
 
+## Multiple Instances
+
 ```multi-instance
 toolset: grafana/tempo
 name: Grafana Tempo

@@ -284,8 +284,6 @@ def multi_instance_fence_format(source, language, css_class, options, md, **kwar
     name_e = html.escape(name)
     list_tool_e = html.escape(str(list_tool))
     return (
-        '<div class="admonition note">\n'
-        '<p class="admonition-title">Multiple Instances</p>\n'
         f"<p>The {name_e} toolset can connect to more than one {name_e} instance. "
         "List each one under <code>instances:</code> with a unique <code>name</code>. "
         "Any config field set outside <code>instances:</code> becomes a default that "
@@ -298,6 +296,5 @@ def multi_instance_fence_format(source, language, css_class, options, md, **kwar
         "<code>instances:</code> — the tools are unchanged and fully backwards "
         "compatible.</p>\n"
         f'<p>See <a href="{MULTI_INSTANCE_DOC_URL}">Multiple Instances</a> for the full '
-        "behaviour, including global defaults and health reporting.</p>\n"
-        "</div>"
+        "behaviour, including global defaults and health reporting.</p>"
     )

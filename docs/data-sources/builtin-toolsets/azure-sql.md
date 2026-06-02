@@ -190,6 +190,8 @@ By enabling this toolset, HolmesGPT can analyze Azure SQL Database performance, 
 
     --8<-- "snippets/helm_upgrade_command.md"
 
+## Multiple Instances
+
 ```multi-instance
 toolset: azure/sql
 name: Azure SQL

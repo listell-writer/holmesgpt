@@ -58,6 +58,8 @@ By enabling this toolset, HolmesGPT can access MongoDB Atlas projects and proces
             project_id: "<your-project-id>"
     ```
 
+## Multiple Instances
+
 ```multi-instance
 toolset: MongoDBAtlas
 name: MongoDB Atlas

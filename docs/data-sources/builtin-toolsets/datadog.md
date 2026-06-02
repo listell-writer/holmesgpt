@@ -186,6 +186,8 @@ holmes ask "list Datadog monitors"
 
 That's it! You're now connected to Datadog with all toolsets enabled.
 
+## Multiple Instances
+
 ```multi-instance
 toolset: datadog/logs
 name: Datadog
