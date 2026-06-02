@@ -281,6 +281,12 @@ class TestInstanceStampAndMeta:
         r = _call(ts, {"q": "x"})
         assert INSTANCE_PARAM_NAME not in (r.params or {})
 
+    def test_single_instance_publishes_no_meta_instances(self):
+        # A flat/single toolset must look like a plain single toolset (the old way):
+        # no per-instance meta, so the UI doesn't expand it.
+        ts = _wrap({"api_url": "http://one"})
+        assert "instances" not in (ts.meta or {})
+
     def test_meta_instances_published(self):
         ts = _wrap(
             {"instances": [

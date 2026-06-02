@@ -296,6 +296,14 @@ class MultiInstanceToolset(Toolset):
         -> supabase -> frontend); no storage schema change. The frontend derives a
         "degraded" state when any instance is unhealthy.
         """
+        # Single-instance (flat/`default`) toolsets behave exactly like a normal
+        # single toolset — don't advertise per-instance health, so the UI shows
+        # them the old way (one row, no instance breakdown).
+        if (len(self._instance_configs) + len(self._offline_instances)) <= 1:
+            if self.meta:
+                self.meta.pop("instances", None)
+            return
+
         instances_meta: List[Dict[str, Any]] = []
         for name, flat in self._instance_configs.items():
             entry: Dict[str, Any] = {"name": name, "healthy": True, "reason": None}
