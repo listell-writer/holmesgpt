@@ -226,3 +226,70 @@ class TestHealthAggregation:
         )
         assert ok is True
         assert "failed:" in msg
+
+
+class TestOfflineInstances:
+    def _wrap_one_bad(self):
+        # "good" is healthy; "bad" has no api_url -> fails prereqs -> offline.
+        return _wrap(
+            {"instances": [
+                {"name": "good", "api_url": "http://good"},
+                {"name": "bad"},
+            ]}
+        )
+
+    def test_offline_instance_not_routable(self):
+        ts = self._wrap_one_bad()
+        assert list(ts._children) == ["good"]            # only healthy is routable
+        assert "bad" in ts._offline_instances
+
+    def test_param_and_list_tool_present_despite_offline(self):
+        # >1 configured (1 healthy + 1 offline) -> instance param + list tool appear
+        ts = self._wrap_one_bad()
+        fake = next(t for t in ts.tools if t.name == "fake_do")
+        assert INSTANCE_PARAM_NAME in fake.parameters
+        assert any(isinstance(t, ListInstancesTool) for t in ts.tools)
+
+    def test_calling_offline_instance_returns_reason(self):
+        ts = self._wrap_one_bad()
+        r = _call(ts, {INSTANCE_PARAM_NAME: "bad"})
+        assert r.status is StructuredToolResultStatus.ERROR
+        assert "offline" in r.error and "missing api_url" in r.error
+
+    def test_list_instances_separates_offline(self):
+        ts = self._wrap_one_bad()
+        tool = next(t for t in ts.tools if isinstance(t, ListInstancesTool))
+        r = tool._invoke({}, create_mock_tool_invoke_context())
+        assert [i["name"] for i in r.data["instances"]] == ["good"]
+        offline = r.data["offline_instances"]
+        assert offline == [{"name": "bad", "reason": "missing api_url"}]
+
+
+class TestInstanceStampAndMeta:
+    def test_result_stamped_with_instance_when_multi(self):
+        ts = _wrap(
+            {"instances": [
+                {"name": "a", "api_url": "http://a"},
+                {"name": "b", "api_url": "http://b"},
+            ]}
+        )
+        r = _call(ts, {INSTANCE_PARAM_NAME: "b"})
+        assert r.params[INSTANCE_PARAM_NAME] == "b"
+
+    def test_result_not_stamped_for_single_default(self):
+        ts = _wrap({"api_url": "http://one"})
+        r = _call(ts, {"q": "x"})
+        assert INSTANCE_PARAM_NAME not in (r.params or {})
+
+    def test_meta_instances_published(self):
+        ts = _wrap(
+            {"instances": [
+                {"name": "good", "api_url": "http://good"},
+                {"name": "bad"},
+            ]}
+        )
+        by_name = {i["name"]: i for i in ts.meta["instances"]}
+        assert by_name["good"]["healthy"] is True
+        assert by_name["good"]["api_url"] == "http://good"
+        assert by_name["bad"]["healthy"] is False
+        assert by_name["bad"]["reason"] == "missing api_url"

@@ -139,6 +139,7 @@ class _RoutingTool(Tool):
         )
         self._wrapper = wrapper
         self._template = template
+        self._add_instance_param = add_instance_param
 
     @property
     def toolset(self):
@@ -148,7 +149,7 @@ class _RoutingTool(Tool):
         call_params = dict(params)
         requested = call_params.pop(INSTANCE_PARAM_NAME, None)
         try:
-            child = self._wrapper._resolve_child(requested)
+            name, child = self._wrapper._resolve_child(requested)
         except ValueError as e:
             return StructuredToolResult(
                 status=StructuredToolResultStatus.ERROR, error=str(e), params=params
@@ -163,7 +164,12 @@ class _RoutingTool(Tool):
                 ),
                 params=params,
             )
-        return child_tool.invoke(call_params, context)
+        result = child_tool.invoke(call_params, context)
+        # Record which instance answered so it's visible in the tool output.
+        # Only when multi-instance, so a single/`default` toolset is unchanged.
+        if self._add_instance_param:
+            result.params = {**(result.params or call_params), INSTANCE_PARAM_NAME: name}
+        return result
 
     def _invoke(self, params: dict, context: ToolInvokeContext) -> StructuredToolResult:
         # `invoke` is overridden to delegate; `_invoke` is never reached.
@@ -201,7 +207,10 @@ class ListInstancesTool(Tool):
     def _invoke(self, params: dict, context: ToolInvokeContext) -> StructuredToolResult:
         return StructuredToolResult(
             status=StructuredToolResultStatus.SUCCESS,
-            data={"instances": self._wrapper._instance_summaries()},
+            data={
+                "instances": self._wrapper._instance_summaries(),
+                "offline_instances": self._wrapper._offline_summaries(),
+            },
             params=params,
         )
 
@@ -232,6 +241,7 @@ class MultiInstanceToolset(Toolset):
         self._child_cls = child_cls
         self._children: Dict[str, Toolset] = {}
         self._instance_configs: Dict[str, Dict[str, Any]] = {}
+        self._offline_instances: Dict[str, str] = {}
 
     # Config schema/example come from the child's config classes (the wrapper's own
     # `config_classes` ClassVar stays empty). The `instances:` shape is documented;
@@ -256,6 +266,7 @@ class MultiInstanceToolset(Toolset):
 
         self._children = {}
         self._instance_configs = {}
+        self._offline_instances = {}
         failures: List[str] = []
         successes: List[str] = []
 
@@ -263,13 +274,42 @@ class MultiInstanceToolset(Toolset):
             child = self._child_cls()
             self._forward_overrides(child)
             ok, msg = self._run_child_prerequisites(child, flat)
-            self._children[name] = child
-            self._instance_configs[name] = flat
-            label = f"[{name}] {msg}".strip()
-            (successes if ok else failures).append(label)
+            if ok:
+                # Only healthy instances are routable; offline ones are tracked
+                # separately so tools can't be silently called against them.
+                self._children[name] = child
+                self._instance_configs[name] = flat
+                successes.append(f"[{name}] {msg}".strip())
+            else:
+                reason = msg or "prerequisite check failed"
+                self._offline_instances[name] = reason
+                failures.append(f"[{name}] {reason}".strip())
 
         self._build_tools()
+        self._publish_instance_meta()
         return self._aggregate(failures, successes)
+
+    def _publish_instance_meta(self) -> None:
+        """Expose per-instance health in `meta` so the UI can render each instance.
+
+        Rides the existing free-form `meta` JSONB (holmes_sync_toolsets -> ToolsetDBModel
+        -> supabase -> frontend); no storage schema change. The frontend derives a
+        "degraded" state when any instance is unhealthy.
+        """
+        instances_meta: List[Dict[str, Any]] = []
+        for name, flat in self._instance_configs.items():
+            entry: Dict[str, Any] = {"name": name, "healthy": True, "reason": None}
+            for field in _IDENTIFYING_FIELDS:
+                if flat.get(field):
+                    entry[field] = flat[field]
+                    break
+            instances_meta.append(entry)
+        for name, reason in self._offline_instances.items():
+            instances_meta.append({"name": name, "healthy": False, "reason": reason})
+
+        meta = dict(self.meta or {})
+        meta["instances"] = instances_meta
+        self.meta = meta
 
     def _forward_overrides(self, child: Toolset) -> None:
         """Propagate toolset-level overrides so the child enforces them too."""
@@ -293,8 +333,13 @@ class MultiInstanceToolset(Toolset):
             return False, str(e)
 
     def _build_tools(self) -> None:
-        """Expose the union of children's tools as routing proxies (+ list tool when >1)."""
-        multi = len(self._children) > 1
+        """Expose the union of children's tools as routing proxies (+ list tool when >1).
+
+        "Multi" counts offline instances too, so the `instance` param and the list tool
+        appear whenever >1 instance is configured — even if some are currently down — so
+        the LLM can still discover/target them (and get a clear offline error).
+        """
+        multi = (len(self._children) + len(self._offline_instances)) > 1
         templates: Dict[str, Tool] = {}
         for child in self._children.values():
             for tool in child.tools:
@@ -324,11 +369,16 @@ class MultiInstanceToolset(Toolset):
 
     # --- routing helpers used by the proxy tools ---
 
-    def _resolve_child(self, requested: Optional[str]) -> Toolset:
-        configured = sorted(self._children)
+    def _resolve_child(self, requested: Optional[str]) -> Tuple[str, Toolset]:
+        configured = sorted(set(self._children) | set(self._offline_instances))
+        if requested and requested in self._offline_instances:
+            raise ValueError(
+                f"Instance '{requested}' is offline: {self._offline_instances[requested]}"
+            )
         if not requested:
             if len(self._children) == 1:
-                return next(iter(self._children.values()))
+                name = next(iter(self._children))
+                return name, self._children[name]
             raise ValueError(
                 f"`{INSTANCE_PARAM_NAME}` is required (configured: {configured})"
             )
@@ -336,7 +386,7 @@ class MultiInstanceToolset(Toolset):
             raise ValueError(
                 f"Unknown {INSTANCE_PARAM_NAME} '{requested}'. Configured: {configured}"
             )
-        return self._children[requested]
+        return requested, self._children[requested]
 
     @staticmethod
     def _child_tool(child: Toolset, name: str) -> Optional[Tool]:
@@ -352,6 +402,13 @@ class MultiInstanceToolset(Toolset):
                     break
             summaries.append(summary)
         return summaries
+
+    def _offline_summaries(self) -> List[Dict[str, Any]]:
+        """Instances that failed their health check: name + why they're offline."""
+        return [
+            {"name": name, "reason": reason}
+            for name, reason in self._offline_instances.items()
+        ]
 
 
 def multi_instance(child_cls: Type[Toolset]) -> MultiInstanceToolset:
