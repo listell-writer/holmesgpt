@@ -2740,7 +2740,7 @@ class TestMCPHealthCheckTool:
 
         monkeypatch.setattr(toolset, "_call_health_check_tool_async", mock_call_health_check)
 
-        ok, msg = toolset.prerequisites_callable(config=toolset.config)
+        ok, _ = toolset.prerequisites_callable(config=toolset.config)
         assert ok is True
         assert call_count["count"] == 0  # health check should not be called
 
@@ -2775,5 +2775,5 @@ class TestMCPHealthCheckTool:
 
         monkeypatch.setattr(toolset, "_call_health_check_tool_async", mock_call_health_check)
 
-        ok, msg = toolset.prerequisites_callable(config=toolset.config)
+        ok, _ = toolset.prerequisites_callable(config=toolset.config)
         assert ok is True

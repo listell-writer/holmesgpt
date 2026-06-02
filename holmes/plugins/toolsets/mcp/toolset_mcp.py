@@ -170,7 +170,7 @@ class MCPConfig(ToolsetConfig):
         description="Name of a read-only tool to invoke during health check to verify authentication works. "
         "If set, this tool will be called with empty arguments after loading tools to ensure the "
         "connection is fully functional (e.g., API token is valid). Example: 'get_me' for GitHub MCP.",
-        examples=["get_me", "list_repositories"],
+        examples=["get_me", "get_current_user"],
     )
 
     def get_lock_string(self) -> str:
@@ -215,7 +215,7 @@ class StdioMCPConfig(ToolsetConfig):
         description="Name of a read-only tool to invoke during health check to verify authentication works. "
         "If set, this tool will be called with empty arguments after loading tools to ensure the "
         "connection is fully functional (e.g., API token is valid). Example: 'get_me' for GitHub MCP.",
-        examples=["get_me", "list_repositories"],
+        examples=["get_me", "get_current_user"],
     )
 
     def get_lock_string(self) -> str:
@@ -983,12 +983,15 @@ class RemoteMCPToolset(Toolset):
         try:
             result = asyncio.run(self._call_health_check_tool_async(tool_name))
             if result.isError:
-                error_text = ""
-                if result.content:
-                    for item in result.content:
-                        if hasattr(item, "text"):
-                            error_text = item.text
-                            break
+                error_chunks = [
+                    RemoteMCPTool._extract_text_from_content_block(c)
+                    for c in result.content
+                ]
+                error_text = " ".join(t for t in error_chunks if t)
+                logging.warning(
+                    "MCP server %s health check failed (tool: %s): %s",
+                    self.name, tool_name, error_text or "unknown error"
+                )
                 return (
                     False,
                     f"MCP server {self.name}: health check failed - {error_text or 'unknown error'}",
@@ -997,6 +1000,10 @@ class RemoteMCPToolset(Toolset):
             return (True, "")
         except Exception as e:
             error_detail = _extract_root_error_message(e)
+            logging.warning(
+                "MCP server %s health check exception (tool: %s): %s",
+                self.name, tool_name, error_detail
+            )
             return (
                 False,
                 f"MCP server {self.name}: health check failed - {error_detail}",
