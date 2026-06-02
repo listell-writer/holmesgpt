@@ -2574,3 +2574,206 @@ class TestJenkinsMCPConfig:
 
         assert ok is False
         assert msg  # error message must be non-empty
+
+
+class TestMCPHealthCheckTool:
+    """Tests for the health_check_tool feature that validates authentication."""
+
+    def test_health_check_tool_success(self, monkeypatch, suppress_migration_warnings):
+        """When health_check_tool succeeds, prerequisites pass."""
+        toolset = RemoteMCPToolset(
+            name="github",
+            description="GitHub MCP",
+            config={"url": "http://localhost:8000", "health_check_tool": "get_me"},
+        )
+
+        # Mock _get_server_tools to return a tool list including get_me
+        async def mock_get_server_tools():
+            return ListToolsResult(
+                tools=[
+                    Tool(
+                        name="get_me",
+                        inputSchema={"type": "object", "properties": {}},
+                        description="Get current user",
+                    ),
+                    Tool(
+                        name="list_repos",
+                        inputSchema={"type": "object", "properties": {}},
+                        description="List repositories",
+                    ),
+                ]
+            )
+
+        monkeypatch.setattr(toolset, "_get_server_tools", mock_get_server_tools)
+
+        # Mock _call_health_check_tool_async to return success
+        async def mock_call_health_check(tool_name):
+            return CallToolResult(content=[TextContent(type="text", text='{"login": "user"}')])
+
+        monkeypatch.setattr(toolset, "_call_health_check_tool_async", mock_call_health_check)
+
+        ok, msg = toolset.prerequisites_callable(config=toolset.config)
+        assert ok is True
+        assert msg == ""
+
+    def test_health_check_tool_auth_failure(self, monkeypatch, suppress_migration_warnings):
+        """When health_check_tool returns an error, prerequisites fail with clear message."""
+        toolset = RemoteMCPToolset(
+            name="github",
+            description="GitHub MCP",
+            config={"url": "http://localhost:8000", "health_check_tool": "get_me"},
+        )
+
+        async def mock_get_server_tools():
+            return ListToolsResult(
+                tools=[
+                    Tool(
+                        name="get_me",
+                        inputSchema={"type": "object", "properties": {}},
+                        description="Get current user",
+                    ),
+                ]
+            )
+
+        monkeypatch.setattr(toolset, "_get_server_tools", mock_get_server_tools)
+
+        # Mock _call_health_check_tool_async to return an error (bad token)
+        async def mock_call_health_check(tool_name):
+            return CallToolResult(
+                isError=True,
+                content=[TextContent(type="text", text="401 Unauthorized: Bad credentials")],
+            )
+
+        monkeypatch.setattr(toolset, "_call_health_check_tool_async", mock_call_health_check)
+
+        ok, msg = toolset.prerequisites_callable(config=toolset.config)
+        assert ok is False
+        assert "health check failed" in msg
+        assert "401 Unauthorized" in msg
+
+    def test_health_check_tool_not_found(self, monkeypatch, suppress_migration_warnings):
+        """When health_check_tool specifies a non-existent tool, prerequisites fail."""
+        toolset = RemoteMCPToolset(
+            name="github",
+            description="GitHub MCP",
+            config={"url": "http://localhost:8000", "health_check_tool": "nonexistent_tool"},
+        )
+
+        async def mock_get_server_tools():
+            return ListToolsResult(
+                tools=[
+                    Tool(
+                        name="get_me",
+                        inputSchema={"type": "object", "properties": {}},
+                        description="Get current user",
+                    ),
+                ]
+            )
+
+        monkeypatch.setattr(toolset, "_get_server_tools", mock_get_server_tools)
+
+        ok, msg = toolset.prerequisites_callable(config=toolset.config)
+        assert ok is False
+        assert "not found" in msg
+        assert "nonexistent_tool" in msg
+        assert "get_me" in msg  # should list available tools
+
+    def test_health_check_tool_exception(self, monkeypatch, suppress_migration_warnings):
+        """When health_check_tool throws an exception, prerequisites fail with clear message."""
+        toolset = RemoteMCPToolset(
+            name="github",
+            description="GitHub MCP",
+            config={"url": "http://localhost:8000", "health_check_tool": "get_me"},
+        )
+
+        async def mock_get_server_tools():
+            return ListToolsResult(
+                tools=[
+                    Tool(
+                        name="get_me",
+                        inputSchema={"type": "object", "properties": {}},
+                        description="Get current user",
+                    ),
+                ]
+            )
+
+        monkeypatch.setattr(toolset, "_get_server_tools", mock_get_server_tools)
+
+        # Mock _call_health_check_tool_async to raise an exception
+        async def mock_call_health_check(tool_name):
+            raise ConnectionRefusedError("Connection refused")
+
+        monkeypatch.setattr(toolset, "_call_health_check_tool_async", mock_call_health_check)
+
+        ok, msg = toolset.prerequisites_callable(config=toolset.config)
+        assert ok is False
+        assert "health check failed" in msg
+        assert "Connection refused" in msg
+
+    def test_no_health_check_tool_skips_check(self, monkeypatch, suppress_migration_warnings):
+        """When health_check_tool is not set, no additional check is performed."""
+        toolset = RemoteMCPToolset(
+            name="github",
+            description="GitHub MCP",
+            config={"url": "http://localhost:8000"},  # no health_check_tool
+        )
+
+        async def mock_get_server_tools():
+            return ListToolsResult(
+                tools=[
+                    Tool(
+                        name="get_me",
+                        inputSchema={"type": "object", "properties": {}},
+                        description="Get current user",
+                    ),
+                ]
+            )
+
+        monkeypatch.setattr(toolset, "_get_server_tools", mock_get_server_tools)
+
+        # Should not call _call_health_check_tool_async at all
+        call_count = {"count": 0}
+
+        async def mock_call_health_check(tool_name):
+            call_count["count"] += 1
+            return CallToolResult(content=[])
+
+        monkeypatch.setattr(toolset, "_call_health_check_tool_async", mock_call_health_check)
+
+        ok, msg = toolset.prerequisites_callable(config=toolset.config)
+        assert ok is True
+        assert call_count["count"] == 0  # health check should not be called
+
+    def test_health_check_tool_in_stdio_mode(self, monkeypatch, suppress_migration_warnings):
+        """Health check tool also works in stdio mode."""
+        toolset = RemoteMCPToolset(
+            name="github",
+            description="GitHub MCP",
+            config={
+                "mode": "stdio",
+                "command": "github-mcp-server",
+                "args": ["stdio"],
+                "health_check_tool": "get_me",
+            },
+        )
+
+        async def mock_get_server_tools():
+            return ListToolsResult(
+                tools=[
+                    Tool(
+                        name="get_me",
+                        inputSchema={"type": "object", "properties": {}},
+                        description="Get current user",
+                    ),
+                ]
+            )
+
+        monkeypatch.setattr(toolset, "_get_server_tools", mock_get_server_tools)
+
+        async def mock_call_health_check(tool_name):
+            return CallToolResult(content=[TextContent(type="text", text='{"login": "user"}')])
+
+        monkeypatch.setattr(toolset, "_call_health_check_tool_async", mock_call_health_check)
+
+        ok, msg = toolset.prerequisites_callable(config=toolset.config)
+        assert ok is True
