@@ -82,28 +82,13 @@ SUBAGENT_SYSTEM_PROMPT = (
 class DispatchAgentTool(Tool):
     name: str = DISPATCH_AGENT_TOOL_NAME
     description: str = (
-        "Launch a focused sub-agent for ONE narrow lookup that would otherwise "
-        "pull noisy data into your context. The sub-agent shares your model "
-        "and tools but has a fresh, isolated context window; you only see its "
-        "1-3 line answer.\n"
-        "\n"
-        "USE WHEN you would otherwise read a noisy result that's much larger "
-        "than the answer you need:\n"
-        "  - A mapping with hundreds of fields and you only need one field name.\n"
-        "  - A large log/trace payload and you only need one error code or count.\n"
-        "  - A long document and you only need one extracted value.\n"
-        "\n"
-        "DO NOT USE when:\n"
-        "  - A single direct tool call already returns a small result — call it.\n"
-        "  - You want to search several similar sources. Prefer ONE direct\n"
-        "    tool call with a broad pattern (e.g. wildcard index) over\n"
-        "    dispatching multiple sub-agents. Per-dispatch overhead beats\n"
-        "    the savings.\n"
-        "  - You already have most of the answer in context.\n"
-        "\n"
-        "PROMPT FORMAT: self-contained (sub-agent does NOT see your history). "
-        "Paste exact IDs, indexes, and a literal answer format: "
-        "\"Return only the field name. Nothing else.\""
+        "Launch a sub-agent in isolated context for ONE narrow lookup that "
+        "would otherwise pull >5k tokens of mostly-irrelevant data into your "
+        "context. You only see the 1-3 line answer. Use only when payoff is "
+        "clear (e.g. extract one field from a huge mapping). For wide "
+        "searches across similar sources, prefer one direct tool call with a "
+        "wildcard. Prompt must be self-contained with the literal answer "
+        "format (e.g. \"Return only the field name. Nothing else.\")."
     )
     parameters: Dict[str, ToolParameter] = {
         "task_description": ToolParameter(
