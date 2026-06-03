@@ -53,7 +53,9 @@ def _build_dal(monkeypatch, ca_env=None):
 
     def fake_httpx_client(*args, **kwargs):
         captured["httpx_kwargs"] = kwargs
-        return MagicMock(name="httpx_client")
+        client = MagicMock(name="httpx_client")
+        captured["created_client"] = client
+        return client
 
     def fake_create_default_context(*args, **kwargs):
         captured["ssl_ctx_kwargs"] = kwargs
@@ -74,7 +76,6 @@ def _build_dal(monkeypatch, ca_env=None):
         dal = SupabaseDal(cluster="test-cluster")
         # create_client(self.url, self.api_key, options) -> options is args[2]
         captured["options"] = mock_create.call_args.args[2]
-        captured["httpx_client_obj"] = captured["options"].httpx_client
     captured["ssl_ctx_sentinel"] = ssl_ctx_sentinel
     return dal, captured
 
@@ -90,10 +91,12 @@ def test_dal_disables_http2(monkeypatch):
 
 def test_dal_passes_our_client_to_postgrest(monkeypatch):
     # The same explicit client must be handed to postgrest via ClientOptions, so
-    # postgrest reuses it instead of building its own http2=True client.
+    # postgrest reuses it instead of building its own http2=True client. Compare
+    # against the instance fake_httpx_client actually created (not a value read
+    # back from options, which would be a tautology).
     _, cap = _build_dal(monkeypatch)
-    assert cap["httpx_client_obj"] is not None
-    assert cap["options"].httpx_client is cap["httpx_client_obj"]
+    assert cap["created_client"] is not None
+    assert cap["options"].httpx_client is cap["created_client"]
 
 
 def test_dal_verify_defaults_to_true_without_ca_env(monkeypatch):
