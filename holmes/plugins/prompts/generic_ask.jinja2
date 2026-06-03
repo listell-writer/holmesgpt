@@ -107,10 +107,8 @@ isolation; you only see its 1-3 line answer.
 
 High-payoff pattern: you need exactly ONE value (a count, a field name, an
 ID, an error code) from a tool whose full output you suspect is huge.
-
-When you need the same kind of value from N truly independent sources,
-issue N `dispatch_agent` calls in a SINGLE assistant message so they run in
-parallel — never serially.
+Prefer ONE dispatch with a wildcard-scoped tool call inside it over
+multiple dispatches across similar sources.
 {% endif %}
 
 {% if todowrite_enabled %}
