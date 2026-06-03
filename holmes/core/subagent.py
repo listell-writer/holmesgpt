@@ -82,6 +82,8 @@ class DispatchAgentTool(Tool):
         "Launch a sub-agent in isolated context for ONE narrow lookup that "
         "would otherwise pull >5k tokens of mostly-irrelevant data into your "
         "context. You only see the 1-3 line answer.\n\n"
+        "Use ONE sub-agent with a WILDCARD-scoped tool call to cover many "
+        "sources at once — do NOT fan out into one dispatch per source.\n\n"
         "GOOD prompts (self-contained, literal output format):\n"
         '  - "Call elasticsearch_get_mapping on index app-X-*. Return only '
         'the field count per index. Format: index=N, one per line."\n'
@@ -89,9 +91,10 @@ class DispatchAgentTool(Tool):
         'service name and error code. Nothing else."\n'
         '  - "Get mapping for app-Y-telemetry and return the exact field '
         'name(s) containing \'transaction\'. One per line."\n\n'
-        "DO NOT dispatch when one direct tool call gives a small result, or "
-        "when searching the same value across similar sources — a single "
-        "wildcard call (e.g. index=\"app-foo-*\") beats N sub-agent dispatches."
+        "DO NOT dispatch when:\n"
+        "  • one direct tool call already gives a small result, OR\n"
+        "  • you would be firing N dispatches for N similar sources — "
+        "instead, fire ONE dispatch with a wildcard tool call inside it."
     )
     parameters: Dict[str, ToolParameter] = {
         "task_description": ToolParameter(
