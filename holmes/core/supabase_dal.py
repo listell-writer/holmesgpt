@@ -10,6 +10,7 @@ from enum import Enum
 from typing import TYPE_CHECKING, Dict, List, Optional, Tuple
 from uuid import uuid4
 
+import httpx
 import sentry_sdk
 import yaml  # type: ignore
 from cachetools import TTLCache  # type: ignore
@@ -143,7 +144,34 @@ class SupabaseDal:
         logging.info(
             f"Initializing Robusta platform connection for account {self.account_id}"
         )
-        options = ClientOptions(postgrest_client_timeout=SUPABASE_TIMEOUT_SECONDS)
+        # Use an explicit HTTP/1.1 httpx client. By default postgrest builds a
+        # single multiplexed HTTP/2 connection, and httpcore's sync HTTP/2
+        # connection is NOT thread-safe — the conversation worker, realtime
+        # callbacks and request threads share this one client, so under
+        # concurrency the framing corrupts and calls fail with
+        # `RemoteProtocolError: Server disconnected` (intermittent HolmesStatus
+        # upserts, dropped conversation claims, etc.). HTTP/1.1 gives each
+        # concurrent request its own pooled, thread-safe connection. The timeout
+        # is set on the client itself because supabase ignores
+        # `postgrest_client_timeout` once an `httpx_client` is provided.
+        # Mirrors the relay-side fix (ROB-4012); see ROB-4017.
+        # Honor the environment's CA bundle (e.g. a corporate / TLS-proxy CA in
+        # SSL_CERT_FILE / REQUESTS_CA_BUNDLE) the way supabase's default client
+        # does — supplying our own httpx client otherwise falls back to certifi
+        # and breaks TLS verification behind an intercepting proxy.
+        ca_bundle = os.environ.get("SSL_CERT_FILE") or os.environ.get(
+            "REQUESTS_CA_BUNDLE"
+        )
+        httpx_client = httpx.Client(
+            http2=False,
+            timeout=SUPABASE_TIMEOUT_SECONDS,
+            follow_redirects=True,
+            verify=ca_bundle if ca_bundle else True,
+        )
+        options = ClientOptions(
+            postgrest_client_timeout=SUPABASE_TIMEOUT_SECONDS,
+            httpx_client=httpx_client,
+        )
         sentry_sdk.set_tag("db_url", self.url)
         self.client = create_client(self.url, self.api_key, options)  # type: ignore
         self.user_id = self.sign_in()
