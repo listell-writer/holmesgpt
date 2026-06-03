@@ -105,6 +105,9 @@ of noisy data into your context. See the tool's own description for when
 to use it and the prompt format. The sub-agent reads the noisy data in
 isolation; you only see its 1-3 line answer.
 
+High-payoff pattern: you need exactly ONE value (a count, a field name, an
+ID, an error code) from a tool whose full output you suspect is huge.
+
 When you need the same kind of value from N truly independent sources,
 issue N `dispatch_agent` calls in a SINGLE assistant message so they run in
 parallel — never serially.
