@@ -31,10 +31,11 @@ DISPATCH_AGENT_TOOL_NAME = "dispatch_agent"
 # Default cap on subagent agentic-loop iterations. Subagents are intended to be
 # narrowly scoped, so we cap them well below the parent's typical max_steps.
 # Lower cap forces the child to converge on a single answer instead of doing
-# its own multi-step investigation that duplicates parent reasoning. iter6:
-# 4 turns is enough for the patterns we want (fetch + analyse + answer);
-# anything beyond is usually drift.
-DEFAULT_SUBAGENT_MAX_STEPS = 4
+# its own multi-step investigation that duplicates parent reasoning. iter13:
+# 3 turns is enough for the patterns we want (fetch + slice + answer);
+# anything beyond is usually drift, and iter7 evidence showed extra turns
+# often produced "NOT FOUND" hallucinations rather than useful exploration.
+DEFAULT_SUBAGENT_MAX_STEPS = 3
 
 # Meta-tools the subagent should never see. TodoWrite plans multi-step
 # investigations; fetch_skill loads investigation playbooks; both are overhead
