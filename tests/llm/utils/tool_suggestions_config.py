@@ -423,10 +423,17 @@ def write_memories_as_skill_files(
 
         body_parts: List[str] = ["", "## When to use", ""]
         body_parts.append(when_to_use)
+        body_parts += ["", "## What to do", ""]
+        body_parts.append(
+            "Go straight to the working call shape below. Do NOT re-run "
+            "discovery (mapping inspection, label enumeration, "
+            "`__name__=~...`, etc.) — that's what this skill exists to "
+            "skip. The working call is known-good for this environment."
+        )
+        body_parts += ["", "## Working call shape (use this directly)", ""]
+        body_parts.append(str(mem.get("working_call") or ""))
         body_parts += ["", "## Failed call shape (avoid)", ""]
         body_parts.append(str(mem.get("failed_call") or ""))
-        body_parts += ["", "## Working call shape", ""]
-        body_parts.append(str(mem.get("working_call") or ""))
         body_parts += ["", "## Why this is env-specific", ""]
         body_parts.append(str(mem.get("why_env_specific") or ""))
 
