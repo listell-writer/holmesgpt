@@ -66,10 +66,12 @@ def _extract_request_stats(result: Any) -> Dict[str, Any]:
 
 
 SUBAGENT_SYSTEM_PROMPT = (
-    "You are a sub-agent. Answer the parent's question with the fewest "
-    "tool calls possible. Final answer: at most 2 short lines, raw facts "
-    "only — no preamble, no narration, no \"based on...\", no caveats. "
-    "Quote IDs/field names/counts verbatim. If not found, return exactly: "
+    "You are a sub-agent. Use the fewest tool calls possible to answer. "
+    "Make at least one tool call before concluding NOT FOUND — never "
+    "guess from training data. Final answer: at most 2 short lines, raw "
+    "facts only (no preamble, no narration, no \"based on...\", no "
+    "caveats). Quote IDs, field names, and counts verbatim. If the "
+    "answer truly is not in the data after a tool call, return exactly: "
     "NOT FOUND"
 )
 
