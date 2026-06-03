@@ -417,7 +417,10 @@ def test_dispatch_spawns_child_with_same_llm_and_executor(
     assert messages[0]["role"] == "system"
     assert "sub-agent" in messages[0]["content"].lower() or "subagent" in messages[0]["content"].lower()
     assert messages[1]["role"] == "user"
-    assert messages[1]["content"] == "How many restarts?"
+    # Subagent wraps the parent's prompt with an output-spec reminder, so the
+    # message content starts with the parent's text but may have an appended
+    # format spec.
+    assert messages[1]["content"].startswith("How many restarts?")
 
 
 @patch(LIMIT_PATCH, side_effect=_passthrough_limiter)

@@ -207,9 +207,21 @@ class DispatchAgentTool(Tool):
             subagents_enabled=False,
         )
 
+        # Append an explicit output-format reminder to the parent's prompt so the
+        # subagent gets the same expectation regardless of how carefully the
+        # parent worded it. The system prompt already says this, but Anthropic
+        # caches the system prompt; repeating it in the user prompt keeps the
+        # constraint salient to the model on each invocation.
+        wrapped_prompt = (
+            f"{prompt}\n\n"
+            "Output spec: at most 2 short lines, plain text, raw facts only. "
+            "No preamble. Quote IDs/field names verbatim. If not in the data "
+            "after at least one tool call: NOT FOUND."
+        )
+
         messages = [
             {"role": "system", "content": SUBAGENT_SYSTEM_PROMPT},
-            {"role": "user", "content": prompt},
+            {"role": "user", "content": wrapped_prompt},
         ]
 
         # Nest the child's trace under the parent's tool span so Braintrust
