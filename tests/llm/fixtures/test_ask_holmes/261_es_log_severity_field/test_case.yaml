@@ -17,7 +17,7 @@
 # the agent has to read the mapping and re-query with `severity:"ERROR"`
 # to recover. THAT correction is the durable env-specific lesson the
 # suggest_runbooks tool should capture.
-user_prompt: "In the elasticsearch index 'app-261-logs-trk8m2p9', how many log entries have level=ERROR?"
+user_prompt: 'In the elasticsearch index ''app-261-logs-trk8m2p9'', run a `term: { level: "ERROR" }` query and tell me how many hits come back. If that returns zero, find the right field for log level and re-run the query.'
 
 expected_output:
   - "There are 10 entries with ERROR severity / level in app-261-logs-trk8m2p9"

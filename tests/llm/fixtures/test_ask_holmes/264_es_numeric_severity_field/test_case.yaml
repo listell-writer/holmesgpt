@@ -13,7 +13,7 @@
 # must read the mapping and re-query. THAT correction is the durable
 # env-specific lesson the suggest_runbooks tool should capture.
 
-user_prompt: "In the elasticsearch index 'app-264-logs-9j2k4p7m', how many entries have level=ERROR or level=FATAL?"
+user_prompt: 'In the elasticsearch index ''app-264-logs-9j2k4p7m'', run a `terms: { level: ["ERROR", "FATAL"] }` query and tell me how many hits come back. If that returns zero, find the right field for log severity and re-run the query.'
 
 expected_output:
   - "There are 8 entries with ERROR or FATAL severity (severity_num >= 5) in app-264-logs-9j2k4p7m"

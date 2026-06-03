@@ -22,7 +22,7 @@
 # @timestamp field" caused the agent to obey literally and report 0,
 # instead of discovering the real timestamp and answering with 7.
 
-user_prompt: "In the elasticsearch index 'app-265-logs-7h9k4f2p', how many ERROR-level log entries are there from today?"
+user_prompt: 'In the elasticsearch index ''app-265-logs-7h9k4f2p'', run a `range: { "@timestamp": { gte: "2026-06-03T00:00:00" } }` query filtered to level=ERROR and tell me the count. If the @timestamp filter returns zero or errors, find the right timestamp field and re-run.'
 
 expected_output:
   - "There are 7 ERROR-level log entries from today in app-265-logs-7h9k4f2p (timestamp stored under the custom `ingest_ts` keyword field, not the standard `@timestamp` date field)"
