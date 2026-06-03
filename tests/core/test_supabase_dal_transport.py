@@ -12,9 +12,9 @@ one.
 
 These tests are deterministic (no network) and pin that wiring so it can't
 silently regress. The behavioural proof — a 32-thread x 60-req x 3-round stress
-against a live Supabase endpoint, where ``http2=True`` produced ~41%
-``RemoteProtocolError`` and ``http2=False`` produced zero — is documented in the
-PR; it isn't run here because it needs network + credentials.
+against a live Supabase endpoint sharing one client, where ``http2=True``
+produced ~41% ``RemoteProtocolError`` and ``http2=False`` produced zero — is
+documented in the PR; it isn't run here because it needs network + credentials.
 """
 
 import base64
@@ -39,7 +39,8 @@ def _ui_token() -> str:
 
 def _build_dal(monkeypatch, ca_env=None):
     """Construct a SupabaseDal with network mocked, capturing the kwargs passed
-    to ``httpx.Client`` and the ``ClientOptions`` handed to ``create_client``."""
+    to ``httpx.Client``, the ``ssl.create_default_context`` call (if any), and
+    the ``ClientOptions`` handed to ``create_client``."""
     monkeypatch.setenv("ROBUSTA_UI_TOKEN", _ui_token())
     # Start from a clean CA-env slate; the test harness/sandbox may set these.
     monkeypatch.delenv("SSL_CERT_FILE", raising=False)
@@ -48,14 +49,23 @@ def _build_dal(monkeypatch, ca_env=None):
         monkeypatch.setenv(k, v)
 
     captured: dict = {}
+    ssl_ctx_sentinel = MagicMock(name="ssl_context")
 
     def fake_httpx_client(*args, **kwargs):
         captured["httpx_kwargs"] = kwargs
         return MagicMock(name="httpx_client")
 
+    def fake_create_default_context(*args, **kwargs):
+        captured["ssl_ctx_kwargs"] = kwargs
+        return ssl_ctx_sentinel
+
     with (
         patch(
             "holmes.core.supabase_dal.httpx.Client", side_effect=fake_httpx_client
+        ),
+        patch(
+            "holmes.core.supabase_dal.ssl.create_default_context",
+            side_effect=fake_create_default_context,
         ),
         patch("holmes.core.supabase_dal.create_client") as mock_create,
         patch.object(SupabaseDal, "sign_in", return_value="user-1"),
@@ -65,6 +75,7 @@ def _build_dal(monkeypatch, ca_env=None):
         # create_client(self.url, self.api_key, options) -> options is args[2]
         captured["options"] = mock_create.call_args.args[2]
         captured["httpx_client_obj"] = captured["options"].httpx_client
+    captured["ssl_ctx_sentinel"] = ssl_ctx_sentinel
     return dal, captured
 
 
@@ -87,19 +98,29 @@ def test_dal_passes_our_client_to_postgrest(monkeypatch):
 
 def test_dal_verify_defaults_to_true_without_ca_env(monkeypatch):
     _, cap = _build_dal(monkeypatch)
+    # No CA env -> verify=True and no SSLContext is built.
     assert cap["httpx_kwargs"]["verify"] is True
+    assert "ssl_ctx_kwargs" not in cap
 
 
-def test_dal_honors_ssl_cert_file(monkeypatch):
+def test_dal_builds_sslcontext_not_string_for_verify(monkeypatch):
+    # Forward-compatible with httpx: verify must be an SSLContext, never a path
+    # string (httpx deprecated `verify=<str>`).
     _, cap = _build_dal(monkeypatch, ca_env={"SSL_CERT_FILE": "/etc/ssl/custom-ca.pem"})
-    assert cap["httpx_kwargs"]["verify"] == "/etc/ssl/custom-ca.pem"
+    assert cap["httpx_kwargs"]["verify"] is cap["ssl_ctx_sentinel"]
+    assert not isinstance(cap["httpx_kwargs"]["verify"], str)
 
 
-def test_dal_honors_requests_ca_bundle(monkeypatch):
+def test_dal_honors_ssl_cert_file_as_cafile(monkeypatch):
+    _, cap = _build_dal(monkeypatch, ca_env={"SSL_CERT_FILE": "/etc/ssl/custom-ca.pem"})
+    assert cap["ssl_ctx_kwargs"] == {"cafile": "/etc/ssl/custom-ca.pem"}
+
+
+def test_dal_honors_requests_ca_bundle_as_cafile(monkeypatch):
     _, cap = _build_dal(
         monkeypatch, ca_env={"REQUESTS_CA_BUNDLE": "/etc/ssl/proxy-ca.pem"}
     )
-    assert cap["httpx_kwargs"]["verify"] == "/etc/ssl/proxy-ca.pem"
+    assert cap["ssl_ctx_kwargs"] == {"cafile": "/etc/ssl/proxy-ca.pem"}
 
 
 def test_dal_ssl_cert_file_takes_precedence_over_requests_ca_bundle(monkeypatch):
@@ -111,7 +132,13 @@ def test_dal_ssl_cert_file_takes_precedence_over_requests_ca_bundle(monkeypatch)
             "REQUESTS_CA_BUNDLE": "/etc/ssl/proxy-ca.pem",
         },
     )
-    assert cap["httpx_kwargs"]["verify"] == "/etc/ssl/custom-ca.pem"
+    assert cap["ssl_ctx_kwargs"] == {"cafile": "/etc/ssl/custom-ca.pem"}
+
+
+def test_dal_uses_capath_when_bundle_is_a_directory(monkeypatch, tmp_path):
+    # A CA *directory* must be passed as capath, not cafile.
+    _, cap = _build_dal(monkeypatch, ca_env={"SSL_CERT_FILE": str(tmp_path)})
+    assert cap["ssl_ctx_kwargs"] == {"capath": str(tmp_path)}
 
 
 @pytest.mark.parametrize("ca_env", [None, {"SSL_CERT_FILE": "/etc/ssl/custom-ca.pem"}])

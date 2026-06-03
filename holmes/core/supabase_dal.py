@@ -4,6 +4,7 @@ import gzip
 import json
 import logging
 import os
+import ssl
 import threading
 from datetime import datetime, timedelta
 from enum import Enum
@@ -162,11 +163,23 @@ class SupabaseDal:
         ca_bundle = os.environ.get("SSL_CERT_FILE") or os.environ.get(
             "REQUESTS_CA_BUNDLE"
         )
+        # Pass an explicit SSLContext rather than the bundle path as a string:
+        # httpx has deprecated `verify=<str>` (to be removed in a future
+        # release). create_default_context trusts exactly the provided bundle —
+        # matching the previous string behaviour — and we honor both a CA file
+        # (SSL_CERT_FILE convention) and a CA directory.
+        verify: "ssl.SSLContext | bool"
+        if not ca_bundle:
+            verify = True
+        elif os.path.isdir(ca_bundle):
+            verify = ssl.create_default_context(capath=ca_bundle)
+        else:
+            verify = ssl.create_default_context(cafile=ca_bundle)
         httpx_client = httpx.Client(
             http2=False,
             timeout=SUPABASE_TIMEOUT_SECONDS,
             follow_redirects=True,
-            verify=ca_bundle if ca_bundle else True,
+            verify=verify,
         )
         options = ClientOptions(
             postgrest_client_timeout=SUPABASE_TIMEOUT_SECONDS,
