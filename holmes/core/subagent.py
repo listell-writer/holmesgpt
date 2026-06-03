@@ -31,8 +31,10 @@ DISPATCH_AGENT_TOOL_NAME = "dispatch_agent"
 # Default cap on subagent agentic-loop iterations. Subagents are intended to be
 # narrowly scoped, so we cap them well below the parent's typical max_steps.
 # Lower cap forces the child to converge on a single answer instead of doing
-# its own multi-step investigation that duplicates parent reasoning.
-DEFAULT_SUBAGENT_MAX_STEPS = 8
+# its own multi-step investigation that duplicates parent reasoning. iter6:
+# 4 turns is enough for the patterns we want (fetch + analyse + answer);
+# anything beyond is usually drift.
+DEFAULT_SUBAGENT_MAX_STEPS = 4
 
 _REQUEST_STATS_FIELDS = (
     "total_cost",
