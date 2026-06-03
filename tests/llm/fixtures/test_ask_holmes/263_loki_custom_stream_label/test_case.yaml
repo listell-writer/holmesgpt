@@ -36,6 +36,7 @@ tags:
   - kubernetes
   - regression
   - medium
+  - skills
 
 port_forwards:
   - namespace: app-263
