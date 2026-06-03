@@ -13,15 +13,19 @@
 # (keyword) instead of `@timestamp` (date) — date-range queries must be
 # rewritten as string comparisons on `ingest_ts`."
 #
-# Phrasing: the prompt explicitly says "use the @timestamp field" so
-# the agent commits to the standard field name as the first query
-# shape. That call fails because @timestamp does not exist; the agent
-# must discover the renamed timestamp via the mapping.
+# Phrasing: the prompt asks a natural question about today's errors
+# without naming a timestamp field. A fresh LLM reaches for the
+# Elastic-default `@timestamp` range filter as its first attempt, gets
+# nothing back (no `@timestamp` field exists), then has to inspect the
+# mapping and rewrite the filter on `ingest_ts`. Avoid prescribing the
+# field name in the prompt — earlier iterations that wrote "use the
+# @timestamp field" caused the agent to obey literally and report 0,
+# instead of discovering the real timestamp and answering with 7.
 
-user_prompt: "In the elasticsearch index 'app-265-logs-7h9k4f2p', how many ERROR-level log entries were ingested today? Use the @timestamp field for the time filter."
+user_prompt: "In the elasticsearch index 'app-265-logs-7h9k4f2p', how many ERROR-level log entries are there from today?"
 
 expected_output:
-  - "There are 7 ERROR-level log entries ingested today in app-265-logs-7h9k4f2p (timestamp stored under the custom `ingest_ts` keyword field, not `@timestamp`)"
+  - "There are 7 ERROR-level log entries from today in app-265-logs-7h9k4f2p (timestamp stored under the custom `ingest_ts` keyword field, not the standard `@timestamp` date field)"
 
 memories_generated: true
 rerun_with_memory: true
