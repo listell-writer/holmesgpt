@@ -420,5 +420,19 @@ class MultiInstanceToolset(Toolset):
 
 
 def multi_instance(child_cls: Type[Toolset]) -> MultiInstanceToolset:
-    """Wrap a single-instance toolset class to make it multi-instance capable."""
-    return MultiInstanceToolset(child_cls)
+    """Wrap a single-instance toolset class to make it multi-instance capable.
+
+    A per-child subclass surfaces the child's ``config_classes`` so config-driven
+    tooling keeps working — notably the CLI's interactive ``toolset config`` editor,
+    which reads ``toolset.config_classes`` directly to list and build the form.
+    Without this, wrapped toolsets would have empty ``config_classes`` and silently
+    disappear from the editor, breaking single-instance configuration. The editor
+    still edits the flat (single-instance) config; ``instances:`` is YAML-only.
+    ``config_classes`` is a ClassVar, so it must be set on the class, not the instance.
+    """
+    wrapper_cls = type(
+        f"MultiInstance{child_cls.__name__}",
+        (MultiInstanceToolset,),
+        {"config_classes": child_cls.config_classes},
+    )
+    return wrapper_cls(child_cls)

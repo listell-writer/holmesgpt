@@ -299,3 +299,14 @@ class TestInstanceStampAndMeta:
         assert by_name["good"]["api_url"] == "http://good"
         assert by_name["bad"]["healthy"] is False
         assert by_name["bad"]["reason"] == "missing api_url"
+
+
+class TestConfigEditorCompat:
+    def test_wrapper_surfaces_child_config_classes(self):
+        # The CLI `toolset config` editor filters on `toolset.config_classes` and
+        # reads it to build the form. The wrapper must surface the child's classes
+        # so wrapped toolsets stay configurable (the flat single-instance way) and
+        # don't silently disappear from the editor.
+        ts = multi_instance(_FakeToolset)
+        assert ts.config_classes == _FakeToolset.config_classes
+        assert ts.config_classes  # non-empty
