@@ -28,6 +28,22 @@ from holmes.core.tools import (
 
 DISPATCH_AGENT_TOOL_NAME = "dispatch_agent"
 
+# Tool names that almost always return huge payloads and almost always have a
+# narrow answer hiding in them — e.g. one field name out of a 500-field mapping.
+# When the parent agent runs one of these directly (rather than via dispatch_agent)
+# AND subagents are enabled, we automatically wrap the result in a sub-agent
+# extraction so the parent never sees the raw blob. This bypasses the LLM's
+# noisy dispatch decision and gets us deterministic context savings.
+AUTO_SUMMARIZE_TOOLS = frozenset(
+    {
+        "elasticsearch_get_mapping",
+    }
+)
+
+# Token threshold above which we auto-summarize. Below this, the raw result is
+# cheap enough to hand to the parent directly.
+AUTO_SUMMARIZE_TOKEN_THRESHOLD = 3000
+
 # Default cap on subagent agentic-loop iterations. Subagents are intended to be
 # narrowly scoped, so we cap them well below the parent's typical max_steps.
 # Lower cap forces the child to converge on a single answer instead of doing
@@ -280,6 +296,107 @@ class DispatchAgentTool(Tool):
     def get_parameterized_one_liner(self, params: Dict[str, Any]) -> str:
         task = params.get("task_description") or "subtask"
         return f"Dispatch subagent: {task}"
+
+
+def maybe_auto_summarize_tool_result(
+    *,
+    parent_agent: Any,
+    tool_name: str,
+    tool_params: dict,
+    raw_result_text: str,
+    raw_token_count: int,
+    latest_user_message: Optional[str],
+    request_context: Optional[Dict[str, Any]] = None,
+    trace_span: Any = None,
+) -> Optional[str]:
+    """Auto-extract an answer from a noisy tool result via a subagent.
+
+    Returns the subagent's 1-3 line extract, or None if auto-summarize should
+    not apply (subagents disabled, tool not in the auto-summarize list, result
+    small enough to hand to the parent directly, or any error during dispatch).
+
+    The parent agent's raw tool result is passed in as text — the subagent does
+    NOT re-execute the tool. We just hand it the noisy bytes and the user's
+    question and ask it to pluck out the answer.
+    """
+    if not getattr(parent_agent, "subagents_enabled", False):
+        return None
+    if tool_name not in AUTO_SUMMARIZE_TOOLS:
+        return None
+    if raw_token_count < AUTO_SUMMARIZE_TOKEN_THRESHOLD:
+        return None
+    if not latest_user_message:
+        return None
+
+    # Late import to avoid the circular dependency with tool_calling_llm.
+    from holmes.core.tool_calling_llm import ToolCallingLLM
+
+    base_executor = getattr(
+        parent_agent, "_base_tool_executor", parent_agent.tool_executor
+    )
+    clone_fn = getattr(base_executor, "clone_without_tools", None)
+    child_executor = (
+        clone_fn(list(SUBAGENT_EXCLUDED_TOOLS)) if callable(clone_fn) else base_executor
+    )
+    child_max_steps = min(
+        DEFAULT_SUBAGENT_MAX_STEPS,
+        getattr(parent_agent, "max_steps", DEFAULT_SUBAGENT_MAX_STEPS),
+    )
+    child = ToolCallingLLM(
+        tool_executor=child_executor,
+        max_steps=child_max_steps,
+        llm=parent_agent.llm,
+        tool_results_dir=getattr(parent_agent, "tool_results_dir", None),
+        tracer=getattr(parent_agent, "tracer", None),
+        subagents_enabled=False,
+    )
+
+    prompt = (
+        f"Original user question: {latest_user_message}\n\n"
+        f"Tool `{tool_name}` was called with params {tool_params}. Its raw "
+        f"output is below — extract ONLY the values that answer the question. "
+        f"Do NOT call any more tools; the data is already here.\n\n"
+        f"Output spec: at most 2 short lines, plain text, raw facts only "
+        f"(no preamble, no narration, no \"based on...\"). Quote IDs, field "
+        f"names, and counts verbatim. If the answer is not in the data: "
+        f"NOT FOUND\n\n"
+        f"--- RAW TOOL OUTPUT ---\n{raw_result_text}"
+    )
+    messages = [
+        {"role": "system", "content": SUBAGENT_SYSTEM_PROMPT},
+        {"role": "user", "content": prompt},
+    ]
+
+    parent_span = trace_span or DummySpan()
+    try:
+        with parent_span.start_span(
+            name=f"holmesgpt.auto_summarize.{tool_name}",
+            type=SpanType.TASK.value,
+        ) as child_span:
+            child_span.log(
+                input={"tool_name": tool_name, "tool_params": tool_params},
+                metadata={
+                    "auto_summarize": True,
+                    "raw_token_count": raw_token_count,
+                },
+            )
+            result = child.call(
+                messages=messages,
+                request_context=request_context,
+                trace_span=child_span,
+            )
+            child_span.log(output=(result.result or "")[:2000])
+    except Exception:
+        logging.exception(
+            f"[subagent] auto-summarize for '{tool_name}' failed; "
+            "falling back to raw spill"
+        )
+        return None
+
+    answer = (result.result or "").strip()
+    if not answer or answer == "NOT FOUND":
+        return None
+    return answer
 
 
 class DispatchAgentToolset(Toolset):
