@@ -70,6 +70,10 @@ class TestNewRelicMultiInstance:
         with responses.RequestsMock(assert_all_requests_are_fired=False) as rsps:
             ts = self._build(rsps)
             tool = next(t for t in ts.tools if t.name == "newrelic_execute_nrql_query")
+            # _build() ran per-instance prerequisite health-checks; make sure the
+            # routed invoke() actually emits its own request so we don't assert
+            # against a leftover prerequisite call (false green).
+            before = len(rsps.calls)
             tool.invoke(
                 {
                     "query": "SELECT count(*) FROM Transaction",
@@ -79,6 +83,7 @@ class TestNewRelicMultiInstance:
                 },
                 create_mock_tool_invoke_context(),
             )
+            assert len(rsps.calls) == before + 1
             last = rsps.calls[-1].request
             assert last.headers.get("Api-Key") == api_key
             assert f"account(id: {account})" in last.body.decode()
