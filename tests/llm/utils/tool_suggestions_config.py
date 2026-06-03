@@ -393,13 +393,32 @@ def write_memories_as_skill_files(
     written: List[str] = []
     for idx, mem in enumerate(memories):
         title = str(mem.get("title") or f"runbook-{idx + 1}")
+        when_to_use = str(mem.get("when_to_use") or "").strip()
         slug = _slugify(title)
         skill_dir = os.path.join(target_dir, f"{idx + 1:02d}-{slug}")
         os.makedirs(skill_dir, exist_ok=True)
-        description = title
+
+        # The agent on replay only sees `name | description` in the system
+        # prompt when deciding whether to load a skill. The captured
+        # `title` describes the env-specific quirk ("uses 'severity', not
+        # 'level'") — true but it doesn't match the user's symptom-shape
+        # phrasing. The captured `when_to_use` describes the query shape
+        # the skill applies to ("Any Loki query targeting the checkout
+        # service in app-263") — exactly what the user will ask about.
+        # Lead the description with when_to_use so the agent can recognize
+        # relevance from symptoms, then append the title as the durable
+        # lesson. Fall back to title alone if no when_to_use.
+        if when_to_use:
+            # Cap each part so the combined description stays short enough
+            # for the system-prompt listing to remain scannable.
+            when_short = when_to_use.split(".")[0][:120].rstrip()
+            title_short = title[:120]
+            description = f"{when_short} — {title_short}"
+        else:
+            description = title
 
         body_parts: List[str] = ["", "## When to use", ""]
-        body_parts.append(str(mem.get("when_to_use") or ""))
+        body_parts.append(when_to_use)
         body_parts += ["", "## Failed call shape (avoid)", ""]
         body_parts.append(str(mem.get("failed_call") or ""))
         body_parts += ["", "## Working call shape", ""]
@@ -407,15 +426,16 @@ def write_memories_as_skill_files(
         body_parts += ["", "## Why this is env-specific", ""]
         body_parts.append(str(mem.get("why_env_specific") or ""))
 
-        # YAML frontmatter must escape doubled-quote chars carefully — the
-        # title may contain quotes the agent emitted in its memory. Keep
-        # things simple: prefer single quotes and replace embedded singles
-        # with the YAML escape (''). Description is the same as title.
-        safe_title = description.replace("'", "''")
+        # YAML frontmatter must escape embedded single quotes — the agent
+        # may emit quotes inside its title or when_to_use. Pre-escape any
+        # CR/LF too in case the model produced multi-line strings; YAML
+        # block scalars handle that but a plain single-quoted scalar
+        # cannot.
+        safe_description = description.replace("'", "''").replace("\n", " ")
         frontmatter = (
             "---\n"
             f"name: {slug}\n"
-            f"description: '{safe_title}'\n"
+            f"description: '{safe_description}'\n"
             "---\n"
         )
 
