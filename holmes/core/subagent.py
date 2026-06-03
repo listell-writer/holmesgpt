@@ -82,29 +82,13 @@ SUBAGENT_SYSTEM_PROMPT = (
 class DispatchAgentTool(Tool):
     name: str = DISPATCH_AGENT_TOOL_NAME
     description: str = (
-        "Launch a sub-agent in isolated context. You only see its 1-3 line "
-        "answer; intermediate tool output stays in the sub-agent's context. "
-        "Useful ONLY when a single tool call would dump >5k tokens of "
-        "mostly-irrelevant data and you only need a few specific values.\n"
-        "\n"
-        "USE FOR (concrete triggers):\n"
-        "  - Extract one field / a field count from a single ElasticSearch "
-        "mapping known to have hundreds+ fields.\n"
-        "  - Pull one error code / ID / value out of a long log, trace, or "
-        "document payload.\n"
-        "  - Compute a per-source count when each per-source query result "
-        "is big but you only need the count.\n"
-        "\n"
-        "DO NOT USE FOR:\n"
-        "  - Tasks where one direct tool call already returns a small "
-        "result. Call it directly.\n"
-        "  - Searching for the same value across many similar sources. "
-        "Prefer ONE tool call with a wildcard pattern (e.g. "
-        "`index=\"app-foo-*\"`) over multiple sub-agent dispatches.\n"
-        "\n"
-        "PROMPT FORMAT: self-contained (sub-agent doesn't see your "
-        "history). Specify the literal answer format: \"Return only the "
-        "field name. Nothing else.\""
+        "Launch a sub-agent in isolated context for ONE narrow lookup that "
+        "would otherwise pull >5k tokens of mostly-irrelevant data into your "
+        "context. You only see the 1-3 line answer. Use only when payoff is "
+        "clear (e.g. extract one field from a huge mapping). For wide "
+        "searches across similar sources, prefer one direct tool call with a "
+        "wildcard. Prompt must be self-contained with the literal answer "
+        "format (e.g. \"Return only the field name. Nothing else.\")."
     )
     parameters: Dict[str, ToolParameter] = {
         "task_description": ToolParameter(

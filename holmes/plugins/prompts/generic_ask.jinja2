@@ -98,12 +98,28 @@ If during the investigation you encounter a permissions error (e.g., `Error from
 {% endif %}
 
 {% if subagents_enabled %}
-# `dispatch_agent`
+# `dispatch_agent` (sub-agent)
 
-A `dispatch_agent` tool is available. Default: do NOT use it. Only consider
-it when a single direct tool call would dump >5k tokens of mostly noise
-into your context AND you only need 1-3 specific values from that noise.
-See the tool description for the exact use cases.
+Use ONLY when a single direct tool call would pull >5k tokens of mostly-
+irrelevant data into your context and you only need 1-3 values from it.
+The sub-agent reads the noise; you only see its 1-3 line answer.
+
+Concrete triggers — DO dispatch:
+* Fetching a single ElasticSearch mapping that you expect to have many
+  fields, when you only need the field count or one field name.
+* Reading a single large log/trace/document payload to extract a specific
+  error code, ID, or value.
+* Counting items in a per-source query when each source's full result is
+  big but you only need its count.
+
+DO NOT dispatch:
+* Tasks where a single direct tool call already returns a small result.
+* Searching for one value across many similar sources: prefer ONE tool
+  call with a wildcard pattern (e.g. `index="app-foo-*"`) over many
+  sub-agent dispatches.
+
+Sub-agent prompts are self-contained. Always specify the literal answer
+format: `Return only the field name. Nothing else.`
 {% endif %}
 
 {% if todowrite_enabled %}
