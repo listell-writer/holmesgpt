@@ -98,28 +98,36 @@ If during the investigation you encounter a permissions error (e.g., `Error from
 {% endif %}
 
 {% if subagents_enabled %}
-# `dispatch_agent` (sub-agent)
+# `dispatch_agent` — MANDATORY for specific patterns
 
-Use ONLY when a single direct tool call would pull >5k tokens of mostly-
-irrelevant data into your context and you only need 1-3 values from it.
-The sub-agent reads the noise; you only see its 1-3 line answer.
+A `dispatch_agent` tool is available. The sub-agent reads noisy data in
+isolation; you only see its 1-3 line answer.
 
-Concrete triggers — DO dispatch:
-* Fetching a single ElasticSearch mapping that you expect to have many
-  fields, when you only need the field count or one field name.
-* Reading a single large log/trace/document payload to extract a specific
-  error code, ID, or value.
-* Counting items in a per-source query when each source's full result is
-  big but you only need its count.
+REQUIRED — you MUST dispatch_agent (not call directly) for these patterns:
+
+1. **Any ElasticSearch mapping fetch you suspect may have >50 fields.**
+   You don't know upfront — assume it might be huge for any index name
+   suggesting an explosion/many-field scenario, or any production index.
+   Dispatch with: "Call elasticsearch_get_mapping on {index} and return
+   only {the specific value you need}. Nothing else."
+
+2. **Searching for a specific ID/code/value across data sources where
+   each per-source result is big.** If you'd otherwise need to read full
+   tool results to find one value, dispatch one sub-agent per source
+   (in parallel — multiple `dispatch_agent` calls in a single message).
+
+3. **Reading a long log/trace payload to extract one specific value.**
+   Dispatch with the prompt: "Search {index} for trace_id={X} and return
+   only the error code. Nothing else."
 
 DO NOT dispatch:
-* Tasks where a single direct tool call already returns a small result.
-* Searching for one value across many similar sources: prefer ONE tool
-  call with a wildcard pattern (e.g. `index="app-foo-*"`) over many
-  sub-agent dispatches.
+* When one direct tool call gives a small result.
+* When searching the same value across similar sources where one
+  wildcard query would do — use the wildcard.
+* For investigation reasoning, summarization, or planning.
 
-Sub-agent prompts are self-contained. Always specify the literal answer
-format: `Return only the field name. Nothing else.`
+Sub-agent prompts MUST be self-contained and specify literal answer
+format: `Return only X. Nothing else.`
 {% endif %}
 
 {% if todowrite_enabled %}
