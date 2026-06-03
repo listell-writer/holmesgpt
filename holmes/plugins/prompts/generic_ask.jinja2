@@ -100,27 +100,29 @@ If during the investigation you encounter a permissions error (e.g., `Error from
 {% if subagents_enabled %}
 # Sub-agent dispatch (`dispatch_agent`)
 
-The `dispatch_agent` tool spawns a focused sub-agent that uses the same model
-and has access to the same tools as you, but with a fresh, isolated context
-window. Use it AGGRESSIVELY for the following patterns — it will save you
-turns and tokens versus doing the work yourself:
+The `dispatch_agent` tool spawns a focused sub-agent in an isolated context
+window. The sub-agent reads noisy data, you get back a 1-3 line answer.
+Net savings only happen when **the noisy data you would otherwise read is
+much bigger than the sub-agent's overhead**. Cost of one dispatch is roughly
+2 LLM calls + the sub-agent's tool output.
 
-* **Wide multi-source searches** — when a single trace ID, request ID, or
-  pod name needs to be searched across 3+ indexes / namespaces / log
-  streams, dispatch one sub-agent per source IN PARALLEL (multiple
-  `dispatch_agent` calls in the same message). Do NOT run those searches
-  serially in your own loop.
-* **Deep dives into noisy single sources** — when you need a specific
-  field, error code, or value buried in a large mapping, log file, or
-  trace payload, dispatch a sub-agent with the precise question. The
-  sub-agent reads the noisy data; you only see its 1-2 line answer.
-* **Exploratory lookups** — when checking "is anything weird happening
-  with X right now", let a sub-agent do the discovery so its intermediate
-  tool output never enters your context.
+USE A SUB-AGENT WHEN you would otherwise read into your context:
+* A mapping with hundreds of fields and you only need one field name.
+* A long log/trace payload and you only need one error code.
+* A large file/page and you only need a small extracted value.
 
-Only skip `dispatch_agent` when a single direct tool call would already
-answer the user's question. Sub-agent prompts MUST be self-contained: paste
-in any IDs, names, time windows, and the exact form of answer you want back.
+DO NOT use a sub-agent when:
+* A single direct tool call would already give you the answer in a usable
+  size — call the tool yourself.
+* You want to search many sources of similar data. Prefer **one direct
+  tool call with a broad pattern/wildcard** (e.g. `index="app-190-service-*"`
+  with a single query) over dispatching one sub-agent per source — the
+  per-dispatch overhead beats the savings here.
+* You're already mid-investigation and have most of the answer in context.
+
+Sub-agent prompts MUST be self-contained: include the exact IDs, names,
+indexes, and the literal form of answer you want back (e.g. "Return only
+the field name. Nothing else."). Trust the sub-agent to return raw values.
 {% endif %}
 
 {% if todowrite_enabled %}

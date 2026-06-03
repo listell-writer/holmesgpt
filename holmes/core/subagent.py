@@ -30,7 +30,9 @@ DISPATCH_AGENT_TOOL_NAME = "dispatch_agent"
 
 # Default cap on subagent agentic-loop iterations. Subagents are intended to be
 # narrowly scoped, so we cap them well below the parent's typical max_steps.
-DEFAULT_SUBAGENT_MAX_STEPS = 50
+# Lower cap forces the child to converge on a single answer instead of doing
+# its own multi-step investigation that duplicates parent reasoning.
+DEFAULT_SUBAGENT_MAX_STEPS = 8
 
 _REQUEST_STATS_FIELDS = (
     "total_cost",
@@ -56,53 +58,52 @@ def _extract_request_stats(result: Any) -> Dict[str, Any]:
 
 
 SUBAGENT_SYSTEM_PROMPT = (
-    "You are a focused subagent spawned by a parent investigation agent. "
-    "You have access to the same tools as the parent agent and use the same model, "
-    "but you operate with a fresh, isolated context window — you do NOT see the "
-    "parent's conversation history.\n\n"
-    "Carry out the task described in the user message. Use the available tools to "
-    "gather any data you need. When you are done, produce a single, concise, factual "
-    "final answer that the parent agent can consume directly. Do not include "
-    "intermediate reasoning, raw tool output, or speculative side-discussions in "
-    "your final answer — return only what the parent asked for."
+    "You are a focused subagent. The parent agent dispatched you for ONE "
+    "specific lookup. The parent will read your answer and incorporate it; "
+    "every extra token you write costs the parent tokens too.\n"
+    "\n"
+    "STRICT RULES:\n"
+    "1. Use the minimum tool calls needed (ideally 1-2). Do NOT enumerate, "
+    "do NOT cross-check, do NOT explore. Answer the literal question asked.\n"
+    "2. Final answer MUST be at most 3 short lines of plain text. No "
+    "headings, no bullet lists, no preamble, no caveats, no restating the "
+    "question, no \"based on my search...\" — just the facts.\n"
+    "3. Quote exact values verbatim where the parent might need to use them "
+    "(IDs, field names, error codes, counts). Do not paraphrase.\n"
+    "4. If the data does not contain the answer, return: NOT FOUND. "
+    "(Period, nothing else.)\n"
+    "\n"
+    "Example good answer: \"app-188-index-x has 523 fields.\"\n"
+    "Example bad answer:  \"Based on the mapping API, I found that the "
+    "index app-188-index-x has approximately 523 fields, which is...\"\n"
 )
 
 
 class DispatchAgentTool(Tool):
     name: str = DISPATCH_AGENT_TOOL_NAME
     description: str = (
-        "Launch a focused sub-agent to handle a self-contained sub-task. The "
-        "sub-agent uses the same model and has access to the same tools as you, "
-        "but operates with a fresh, isolated context window — your conversation "
-        "history is NOT visible to it.\n"
+        "Launch a focused sub-agent for ONE narrow lookup that would otherwise "
+        "pull noisy data into your context. The sub-agent shares your model "
+        "and tools but has a fresh, isolated context window; you only see its "
+        "1-3 line answer.\n"
         "\n"
-        "WHEN TO USE THIS TOOL (preferred for the cases below):\n"
-        "  - Wide searches across many data sources (e.g. searching a trace ID "
-        "across 5+ Elasticsearch / Loki / Datadog indexes; querying many "
-        "Kubernetes namespaces; scanning many log streams). Dispatch one "
-        "sub-agent per source and let each return only the relevant findings.\n"
-        "  - Deep dives into a single noisy data source where you only need "
-        "a small distilled answer (e.g. find a specific field name in a "
-        "10,000-field mapping; find the one error in a 50MB log file). The "
-        "sub-agent reads everything; you only see its summary.\n"
-        "  - Exploratory lookups whose intermediate tool output you do not "
-        "need to remember (e.g. \"check if anything weird is happening on "
-        "node X right now\").\n"
-        "  - Parallel independent sub-investigations: dispatch multiple "
-        "sub-agents in a single message when the sub-tasks do not depend on "
-        "each other.\n"
+        "USE WHEN you would otherwise read a noisy result that's much larger "
+        "than the answer you need:\n"
+        "  - A mapping with hundreds of fields and you only need one field name.\n"
+        "  - A large log/trace payload and you only need one error code or count.\n"
+        "  - A long document and you only need one extracted value.\n"
         "\n"
-        "WHEN NOT TO USE:\n"
-        "  - A single tool call would answer the question — call the tool "
-        "directly. Sub-agent dispatch adds latency and tokens.\n"
-        "  - You already have most of the answer in your context and just "
-        "need one more datum.\n"
+        "DO NOT USE when:\n"
+        "  - A single direct tool call already returns a small result — call it.\n"
+        "  - You want to search several similar sources. Prefer ONE direct\n"
+        "    tool call with a broad pattern (e.g. wildcard index) over\n"
+        "    dispatching multiple sub-agents. Per-dispatch overhead beats\n"
+        "    the savings.\n"
+        "  - You already have most of the answer in context.\n"
         "\n"
-        "WRITING THE PROMPT:\n"
-        "Brief the sub-agent like a colleague who has not seen this "
-        "conversation. State the goal, paste any IDs / names / time windows "
-        "it needs, and tell it the exact form of answer you want back "
-        "(e.g. \"return only the field name\" or \"return a 3-line summary\")."
+        "PROMPT FORMAT: self-contained (sub-agent does NOT see your history). "
+        "Paste exact IDs, indexes, and a literal answer format: "
+        "\"Return only the field name. Nothing else.\""
     )
     parameters: Dict[str, ToolParameter] = {
         "task_description": ToolParameter(
