@@ -42,6 +42,7 @@ tags:
   - medium
   - transparency
   - regression
+  - multi-cluster
 
 setup_timeout: 300
 

@@ -22,6 +22,7 @@ tags:
   - elasticsearch
   - medium
   - transparency
+  - multi-cluster
 
 setup_timeout: 300
 

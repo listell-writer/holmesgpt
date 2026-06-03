@@ -21,6 +21,7 @@ tags:
   - datadog
   - medium
   - transparency
+  - multi-cluster
 
 setup_timeout: 60
 

@@ -19,6 +19,7 @@ tags:
   - kubernetes
   - medium
   - transparency
+  - multi-cluster
 
 setup_timeout: 180
 
