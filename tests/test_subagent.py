@@ -396,7 +396,7 @@ def test_dispatch_spawns_child_with_same_llm_and_executor(
     messages = call_args.kwargs.get("messages") or call_args.args[0]
     # System prompt is the subagent system prompt + user prompt is the dispatch prompt
     assert messages[0]["role"] == "system"
-    assert "subagent" in messages[0]["content"].lower()
+    assert "sub-agent" in messages[0]["content"].lower() or "subagent" in messages[0]["content"].lower()
     assert messages[1]["role"] == "user"
     assert messages[1]["content"] == "How many restarts?"
 
