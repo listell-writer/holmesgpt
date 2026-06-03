@@ -241,6 +241,13 @@ def test_ask_holmes(
                 f"Memories:\n{suggested_memories}"
             )
 
+    # The primary pass succeeded — all primary assertions above passed. We
+    # flag it explicitly so the report can show the primary row as ✅ even
+    # if the replay block below fails the test (pytest's overall status
+    # would otherwise paint both rows red). The replay row's own status
+    # comes from replay_correctness + replay_skill_loaded.
+    update_property(request, "primary_passed", True)
+
     # Closed-loop replay: write the memories the first pass emitted as
     # SKILL.md files in a tempdir, run the same prompt again with those
     # skills injected, and check that the agent (a) fetched the skill —

@@ -485,6 +485,16 @@ def generate_markdown_report(
 
         status = TestStatus(result)
 
+        # When a replay was attempted AND the primary pass succeeded, the
+        # primary row should show ✅ regardless of whether the replay
+        # assertion later failed pytest. Without this override the
+        # primary row would inherit pytest's red status and conflate two
+        # independent measurements. The replay row gets its own status
+        # from replay_correctness / replay_skill_loaded below.
+        primary_status_symbol = status.markdown_symbol
+        if result.get("replay_attempted") and result.get("primary_passed"):
+            primary_status_symbol = ":white_check_mark:"
+
         # Format time (plain, no inline comparison)
         exec_time = result.get("holmes_duration")
         time_str = f"{exec_time:.1f}s" if exec_time and exec_time > 0 else "—"
@@ -574,7 +584,7 @@ def generate_markdown_report(
         else:
             memories_str = "n/a"
 
-        markdown += f"| {status.markdown_symbol} | {test_case_name} | {tool_suggestions_str} | {memories_str} | {time_str} | {turns_str} | {tools_str} | {cost_str} | {total_tokens_str} | {input_str} | {max_prompt_str} | {output_str} | {max_completion_str} | {cached_tokens_str} | {non_cached_tokens_str} | {reasoning_str} | {compactions_str} | {source_str} |\n"
+        markdown += f"| {primary_status_symbol} | {test_case_name} | {tool_suggestions_str} | {memories_str} | {time_str} | {turns_str} | {tools_str} | {cost_str} | {total_tokens_str} | {input_str} | {max_prompt_str} | {output_str} | {max_completion_str} | {cached_tokens_str} | {non_cached_tokens_str} | {reasoning_str} | {compactions_str} | {source_str} |\n"
 
         # If this test ran a closed-loop replay (rerun_with_memory: true and
         # a memory was actually captured), emit a second row labeled

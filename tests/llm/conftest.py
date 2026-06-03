@@ -869,6 +869,11 @@ def _collect_test_results_from_stats(terminalreporter):
                 ),
                 "memories_count": user_props.get("memories_count", 0),
                 "suggested_memories": user_props.get("suggested_memories", []),
+                # Whether the primary pass (everything before the replay
+                # block) passed. Used by the GitHub reporter to keep the
+                # primary row ✅ even if the replay assertion fails the
+                # whole test.
+                "primary_passed": user_props.get("primary_passed", False),
                 # Replay-with-memory results (only populated when the test
                 # set rerun_with_memory: true AND a memory was actually
                 # captured on the first pass).
