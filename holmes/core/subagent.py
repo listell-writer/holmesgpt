@@ -36,6 +36,12 @@ DISPATCH_AGENT_TOOL_NAME = "dispatch_agent"
 # anything beyond is usually drift.
 DEFAULT_SUBAGENT_MAX_STEPS = 4
 
+# Meta-tools the subagent should never see. TodoWrite plans multi-step
+# investigations; fetch_skill loads investigation playbooks; both are overhead
+# noise for a one-shot lookup. Removing them from the child executor shrinks
+# the tool menu and discourages the subagent from spinning extra turns.
+SUBAGENT_EXCLUDED_TOOLS = ("TodoWrite", "fetch_skill")
+
 _REQUEST_STATS_FIELDS = (
     "total_cost",
     "total_tokens",
@@ -170,9 +176,14 @@ class DispatchAgentTool(Tool):
         # convention: only the top-level agent has the Task tool.
         # We pass the parent's *base* executor (the original, un-cloned one
         # that does not contain DispatchAgentTool) so the child's LLM cannot
-        # see dispatch_agent in its tool list at all.
-        child_executor = getattr(
+        # see dispatch_agent in its tool list at all. We also strip meta-tools
+        # (TodoWrite, fetch_skill) that only inflate a narrow lookup's turn count.
+        base_executor = getattr(
             parent_agent, "_base_tool_executor", parent_agent.tool_executor
+        )
+        clone_fn = getattr(base_executor, "clone_without_tools", None)
+        child_executor = (
+            clone_fn(list(SUBAGENT_EXCLUDED_TOOLS)) if callable(clone_fn) else base_executor
         )
         child = ToolCallingLLM(
             tool_executor=child_executor,

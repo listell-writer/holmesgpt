@@ -141,6 +141,25 @@ def mock_tool_executor():
 
     # Wrap in MagicMock so tests can assert call/no-call on this attribute.
     te.clone_with_extra_tools = MagicMock(side_effect=_clone_with_extra_tools)
+
+    # Subagent dispatch filters meta-tools via clone_without_tools; the mock
+    # has no real tools to remove, so just hand back the same executor shape.
+    def _clone_without_tools(excluded):
+        clone = MagicMock(spec=ToolExecutor)
+        clone.get_all_tools_openai_format.return_value = []
+        clone.ensure_toolset_initialized.return_value = None
+        clone.oauth_connector = te.oauth_connector
+        clone.toolsets = list(te.toolsets)
+        clone.enabled_toolsets = list(te.enabled_toolsets)
+        clone._tool_to_toolset = dict(te._tool_to_toolset)
+        clone.tools_by_name = {}
+        clone.get_toolset_name.return_value = None
+        clone.get_tool_by_name = lambda name, user_id=None: None
+        clone.clone_with_extra_tools = _clone_with_extra_tools
+        clone.clone_without_tools = _clone_without_tools
+        return clone
+
+    te.clone_without_tools = MagicMock(side_effect=_clone_without_tools)
     return te
 
 
