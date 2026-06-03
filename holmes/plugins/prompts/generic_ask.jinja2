@@ -104,6 +104,10 @@ If during the investigation you encounter a permissions error (e.g., `Error from
 of noisy data into your context. See the tool's own description for when
 to use it and the prompt format. The sub-agent reads the noisy data in
 isolation; you only see its 1-3 line answer.
+
+When you need the same kind of value from N truly independent sources,
+issue N `dispatch_agent` calls in a SINGLE assistant message so they run in
+parallel — never serially.
 {% endif %}
 
 {% if todowrite_enabled %}
