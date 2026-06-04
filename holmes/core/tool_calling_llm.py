@@ -831,7 +831,6 @@ class ToolCallingLLM:
         session_approved_prefixes: Optional[List[str]] = None,
         request_context: Optional[Dict[str, Any]] = None,
         enable_tool_approval: bool = False,
-        latest_user_message: Optional[str] = None,
     ) -> ToolCallResult:
         if trace_span is None:
             trace_span = DummySpan()
@@ -918,30 +917,6 @@ class ToolCallingLLM:
                 if self.tool_results_dir and self._has_bash_for_file_access()
                 else None,
             )
-
-            # iter20: auto-summarize known-huge tool results via subagent. This
-            # bypasses the LLM's noisy dispatch decision for the highest-payoff
-            # pattern (one field from a 500-field mapping).
-            if (
-                self.subagents_enabled
-                and tool_call_result.result.status
-                == StructuredToolResultStatus.SUCCESS
-            ):
-                from holmes.core.subagent import maybe_auto_summarize_tool_result
-
-                raw_text = tool_call_result.result.stringify_data(compact=False)[0]
-                summary = maybe_auto_summarize_tool_result(
-                    parent_agent=self,
-                    tool_name=tool_call_result.tool_name,
-                    tool_params=tool_params,
-                    raw_result_text=raw_text,
-                    raw_token_count=original_token_count,
-                    latest_user_message=latest_user_message,
-                    request_context=request_context,
-                    trace_span=tool_span,
-                )
-                if summary is not None:
-                    tool_call_result.result.data = summary
 
             # Record OTel tool span attributes
             tool_span.log(metadata={
@@ -1268,24 +1243,6 @@ class ToolCallingLLM:
             # Extract session approved prefixes from conversation history
             session_prefixes = extract_bash_session_prefixes(messages)
 
-            # Pluck the latest user message out of the conversation so
-            # auto-summarize subagents know what the parent is actually trying
-            # to answer. None when the run starts with an assistant/tool msg.
-            latest_user_message = None
-            for _msg in reversed(messages):
-                if _msg.get("role") == "user":
-                    _content = _msg.get("content")
-                    if isinstance(_content, str):
-                        latest_user_message = _content
-                    elif isinstance(_content, list):
-                        # OpenAI multimodal: join text parts only
-                        latest_user_message = " ".join(
-                            p.get("text", "")
-                            for p in _content
-                            if isinstance(p, dict) and p.get("type") == "text"
-                        ).strip() or None
-                    break
-
             with concurrent.futures.ThreadPoolExecutor(max_workers=16) as executor:
                 futures = []
                 for tool_index, t in enumerate(tools_to_call, 1):  # type: ignore
@@ -1300,7 +1257,6 @@ class ToolCallingLLM:
                         session_approved_prefixes=session_prefixes,
                         request_context=request_context,
                         enable_tool_approval=enable_tool_approval,
-                        latest_user_message=latest_user_message,
                     )
                     futures.append(future)
                     yield StreamMessage(
