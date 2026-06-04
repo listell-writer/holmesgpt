@@ -24,12 +24,13 @@
 
 user_prompt: 'In the elasticsearch index ''app-265-logs-7h9k4f2p'', run a `range: { "@timestamp": { gte: "2026-06-03T00:00:00" } }` query filtered to level=ERROR and tell me the count. If the @timestamp filter returns zero or errors, find the right timestamp field and re-run.'
 
-# Replay prompt: a natural version. Primary uses the biased phrasing
-# above to force the wrong→right correction; replay simulates the next
-# investigation asking the same question without naming the timestamp
-# field, which is when the captured skill should let the agent skip
-# straight to the working call shape.
-replay_user_prompt: "In the elasticsearch index 'app-265-logs-7h9k4f2p', how many ERROR-level log entries are there from today?"
+# Note: an earlier iteration set a softer replay_user_prompt ("how many
+# ERROR-level entries are there from today?") matching the 261/263
+# pattern, but the data showed it regressed this eval — replay loaded
+# the captured skill but answered wrong (the "from today" phrasing
+# without an explicit date made the agent compute the range wrong, even
+# with the skill loaded). The biased phrasing above is what was working
+# in prior runs, so the replay reuses it.
 
 expected_output:
   - "There are 7 ERROR-level log entries from today in app-265-logs-7h9k4f2p (timestamp stored under the custom `ingest_ts` keyword field, not the standard `@timestamp` date field)"
