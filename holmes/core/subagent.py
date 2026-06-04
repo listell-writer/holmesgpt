@@ -10,9 +10,14 @@ When False, the tool is not registered and the LLM never sees it. When True,
 the parent ToolCallingLLM exposes ``dispatch_agent`` to the model and child
 agents are constructed with ``subagents_enabled=False`` so they cannot
 recursively spawn further subagents.
+
+The subagent model can be overridden via the ``SUBAGENT_MODEL`` env var (e.g.
+set it to a cheaper/faster model like Haiku while the parent runs on Opus).
+When unset, the subagent uses the parent's LLM instance directly.
 """
 
 import logging
+import os
 from typing import Any, Dict, Optional
 
 from holmes.core.tracing import DummySpan, SpanType
@@ -64,6 +69,30 @@ def _extract_request_stats(result: Any) -> Dict[str, Any]:
     in tools.py — keeps the StructuredToolResult model layering clean.
     """
     return {field: getattr(result, field, None) for field in _REQUEST_STATS_FIELDS}
+
+
+def _build_subagent_llm(parent_llm: Any) -> Any:
+    """Return the LLM the subagent should use.
+
+    Reads SUBAGENT_MODEL from env; when set, instantiates a fresh DefaultLLM
+    on that model inheriting the parent's api credentials and tracer. When
+    unset, returns the parent's LLM instance unchanged so the default
+    behavior matches earlier iterations.
+    """
+    subagent_model = os.environ.get("SUBAGENT_MODEL", "").strip()
+    if not subagent_model:
+        return parent_llm
+
+    from holmes.core.llm import DefaultLLM
+
+    return DefaultLLM(
+        model=subagent_model,
+        api_key=getattr(parent_llm, "api_key", None),
+        api_base=getattr(parent_llm, "api_base", None),
+        api_version=getattr(parent_llm, "api_version", None),
+        tracer=getattr(parent_llm, "tracer", None),
+        name=f"subagent({subagent_model})",
+    )
 
 
 SUBAGENT_SYSTEM_PROMPT = (
@@ -198,10 +227,15 @@ class DispatchAgentTool(Tool):
         child_executor = (
             clone_fn(list(SUBAGENT_EXCLUDED_TOOLS)) if callable(clone_fn) else base_executor
         )
+        # Allow the subagent to use a different (typically cheaper/faster) model
+        # via the SUBAGENT_MODEL env var. When unset, the subagent reuses the
+        # parent's LLM instance directly. This keeps the default behavior
+        # unchanged while enabling experiments like parent=Opus, sub=Haiku.
+        child_llm = _build_subagent_llm(parent_agent.llm)
         child = ToolCallingLLM(
             tool_executor=child_executor,
             max_steps=child_max_steps,
-            llm=parent_agent.llm,
+            llm=child_llm,
             tool_results_dir=getattr(parent_agent, "tool_results_dir", None),
             tracer=getattr(parent_agent, "tracer", None),
             subagents_enabled=False,
