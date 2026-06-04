@@ -110,3 +110,30 @@ Options going forward (require user direction):
 
 Raw data: `/tmp/measure-opus-results.tsv`, `/tmp/measure-results.tsv`,
 `/tmp/measure-haikusub-results.tsv` (partial).
+
+## Postscript: iter22 caused a real accuracy regression (reverted)
+
+After writing the above, I tried one more code-level approach — re-applied
+iter20 (`maybe_auto_summarize_tool_result` hook) and expanded the
+`AUTO_SUMMARIZE_TOOLS` frozenset from just `elasticsearch_get_mapping`
+(the original commit's value, which is also a misname — the actual tool
+is called `elasticsearch_mappings`) to include `elasticsearch_search`
+and `grafana_loki_query`. The change was commit `a588f9f4`.
+
+CI on `a588f9f4` produced a clean regression: **245_elasticsearch_trace_large_fields[subagent_on] went from PASS to FAIL**
+on Opus 4.6 (the CI's default model). The matching run on the
+pre-iter22 commit `ad148da` was a PASS at $0.6100 / 236k tokens; the
+post-iter22 run is a FAIL at $0.2656 / 115k tokens. Adding
+`elasticsearch_search` to the auto-summarize set caused the subagent
+to strip information the parent needed to identify the trace, dropping
+accuracy.
+
+Both iter20 and iter22 reverted (commits `cbf5a398`, `dbeed3b7`). The
+branch is back to the design that has 0 accuracy regressions in CI
+but doesn't beat the 30%×5 bar — same place as before, no worse.
+
+This confirms the design tension: the auto-summarize hook either fires
+on already-filtered results (no win — iter22 with mapping tool name
+mismatch + smoke test data), or fires on data the parent genuinely
+needs (accuracy regression — iter22 with the corrected tool name set
+on real CI). There isn't a working middle ground for this codebase.
