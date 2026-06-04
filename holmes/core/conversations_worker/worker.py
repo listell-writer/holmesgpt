@@ -627,13 +627,6 @@ class ConversationWorker:
             ask = self._extract_last_user_ask(task.conversation_history) or "Continue"
 
         if not ask:
-            # Distinguish the orphan case (no events at all — the parent
-            # Conversations row outlived its ConversationEvents, e.g. an
-            # external delete blew the seed event away while leaving the
-            # claim intact) from the malformed-payload case (events
-            # present but no usable `ask`). Both still fail — but the
-            # orphan path is a data-integrity issue worth flagging
-            # separately so log-mining doesn't conflate them.
             if not events:
                 reason = "Conversation has no events; parent row is orphaned (seed user_message missing)"
                 logging.warning(
