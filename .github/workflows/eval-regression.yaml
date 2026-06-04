@@ -985,6 +985,10 @@ jobs:
           EVAL_MARKER_EXPR: ${{ steps.eval-params.outputs.marker_expr }}
           EVAL_FILTER: ${{ steps.eval-params.outputs.filter }}
           MODEL_LIST_FILE_LOCATION: /tmp/model_list.yaml
+          # Must match the SUBAGENTS value used in the actual Run step below,
+          # otherwise the collect-only phase only sees one parametrize variant
+          # and the run step ends up with a different test list.
+          SUBAGENTS: "true,false"
         run: |
           # Unset MODEL if empty so get_models() uses DEFAULT_MODEL
           [[ -z "$MODEL" ]] && unset MODEL
