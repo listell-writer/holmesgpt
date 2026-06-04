@@ -57,6 +57,20 @@ def _parse_custom_skill_paths_env() -> List[str]:
     return [p.strip() for p in raw.split(",") if p.strip()]
 
 
+def _parse_custom_toolsets_env() -> List[str]:
+    """Custom toolset YAML file path(s) for server/env config mode.
+
+    Mirrors the CLI's --custom-toolsets so deployments that build their Config
+    from the environment (LOAD_CONFIG_FROM_ENV=true) can still load custom or
+    built-in-with-config toolsets (e.g. the generic `http` toolset) without a
+    full config.yaml. Comma-separated list of file paths.
+    """
+    raw = os.environ.get("HOLMES_CUSTOM_TOOLSETS")
+    if not raw:
+        return []
+    return [p.strip() for p in raw.split(",") if p.strip()]
+
+
 def _toolset_tool_signature(toolset: Toolset) -> frozenset[tuple[str, str]]:
     """Stable signature of a toolset's tools for change detection.
 
@@ -290,6 +304,9 @@ class Config(RobustaBaseConfig):
         skill_paths = _parse_custom_skill_paths_env()
         if skill_paths:
             kwargs["custom_skill_paths"] = skill_paths
+        toolset_paths = _parse_custom_toolsets_env()
+        if toolset_paths:
+            kwargs["custom_toolsets"] = toolset_paths
         kwargs["cluster_name"] = Config.__get_cluster_name()
         kwargs["should_try_robusta_ai"] = True
         result = cls(**kwargs)
