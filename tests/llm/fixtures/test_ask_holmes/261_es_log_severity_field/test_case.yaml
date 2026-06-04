@@ -10,14 +10,15 @@
 # The LLM should capture this lesson as an env-specific memory
 # ("this index uses 'severity' for log levels, not 'level'").
 
-# Phrasing matters: by saying "where level is ERROR" we describe the
-# question using the conventional log-field terminology, which biases
-# the agent into running `level:"ERROR"` as its first query. That call
-# returns zero hits (this index has only `severity`, no `level`) and
-# the agent has to read the mapping and re-query with `severity:"ERROR"`
-# to recover. THAT correction is the durable env-specific lesson the
-# suggest_runbooks tool should capture.
-user_prompt: 'In the elasticsearch index ''app-261-logs-trk8m2p9'', run a `term: { level: "ERROR" }` query and tell me how many hits come back. If that returns zero, find the right field for log level and re-run the query.'
+# Phrasing matters: the prompt uses the conventional log-field word "ERROR"
+# without naming the index field. A fresh LLM reaches for the standard
+# `level:"ERROR"` shape as its first attempt, gets zero hits (this index
+# has only `severity`, no `level`) and has to read the mapping and
+# re-query with `severity:"ERROR"` to recover. We deliberately do NOT
+# prescribe the failure path in the prompt — that would test the agent's
+# obedience, not its discovery. THAT correction is the durable
+# env-specific lesson the suggest_runbooks tool should capture.
+user_prompt: "In the elasticsearch index 'app-261-logs-trk8m2p9', how many ERROR-level log entries are there for the checkout-261 service?"
 
 expected_output:
   - "There are 10 entries with ERROR severity / level in app-261-logs-trk8m2p9"

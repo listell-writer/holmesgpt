@@ -167,6 +167,14 @@ class HolmesTestCase(BaseModel):
     # still correct. Provides a closed-loop validation that the captured
     # memory actually helps future investigations.
     rerun_with_memory: Optional[bool] = False
+    # Pre-loaded skills directory (relative to the test fixture folder). When
+    # set, the path is added to the SkillsToolset's search paths BEFORE the
+    # primary pass — letting an eval simulate "the customer already has
+    # skill X saved" without going through the suggest_runbooks→replay flow.
+    # Used by evals that test how the agent behaves when handed an
+    # externally-authored skill (e.g. a misleading one, or one captured
+    # from a different investigation).
+    pre_loaded_skills_path: Optional[str] = None
 
 
 class AskHolmesTestCase(HolmesTestCase, BaseModel):

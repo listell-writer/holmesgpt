@@ -113,6 +113,13 @@ def test_ask_holmes(
                 retry_enabled = request.config.getoption(
                     "retry-on-throttle", default=True
                 )
+                # Externally-authored skills the test wants pre-loaded into
+                # the SkillsToolset before the primary pass (e.g. a
+                # deliberately-misleading skill to test resilience).
+                preloaded = getattr(test_case, "pre_loaded_skills_path", None)
+                preloaded_paths = (
+                    [os.path.join(test_case.folder, preloaded)] if preloaded else None
+                )
                 result = retry_on_throttle(
                     ask_holmes,
                     test_case,  # positional arg
@@ -123,6 +130,7 @@ def test_ask_holmes(
                         additional_system_prompt
                     ),
                     inject_suggest_runbooks=True,
+                    additional_skill_paths=preloaded_paths,
                     request=request,
                     retry_enabled=retry_enabled,
                     test_id=test_case.id,

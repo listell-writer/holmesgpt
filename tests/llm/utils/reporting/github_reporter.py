@@ -5,7 +5,7 @@ Rows include closed-loop replay output when an eval has rerun_with_memory.
 
 import logging
 import os
-from typing import Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 from urllib.parse import quote
 
 from tests.llm.utils.braintrust import get_braintrust_url
@@ -83,6 +83,67 @@ def _calc_diff_pct(current: Optional[float], baseline: Optional[float]) -> Optio
     if not current or not baseline or baseline == 0:
         return None
     return (current - baseline) / baseline * 100
+
+
+def _generate_skills_summary(rows: List[Dict[str, Any]]) -> str:
+    """Aggregate primary→replay cost/token deltas across rows that emitted a
+    memory and ran a replay. The bottom-line "is this feature paying for
+    itself" answer.
+
+    Negative deltas mean the replay was cheaper than the primary — i.e. the
+    captured skill let the second run skip the wrong-call recovery.
+    """
+    emitted_rows = [r for r in rows if (r.get("memories_count") or 0) > 0]
+    replay_rows = [r for r in rows if r.get("replay_attempted")]
+    skill_loaded_rows = [r for r in replay_rows if r.get("replay_skill_loaded")]
+    replay_correct_rows = [r for r in replay_rows if r.get("replay_correctness") == 1]
+
+    if not emitted_rows and not replay_rows:
+        return ""
+
+    # Per-row primary→replay delta on rows where both costs and tokens are
+    # available. Average the per-row pct deltas (not weighted by absolute
+    # cost) so one expensive eval doesn't dominate.
+    cost_deltas: List[float] = []
+    token_deltas: List[float] = []
+    for r in replay_rows:
+        primary_cost = r.get("cost") or 0
+        replay_cost = r.get("replay_total_cost") or 0
+        if primary_cost > 0 and replay_cost > 0:
+            cost_deltas.append((replay_cost - primary_cost) / primary_cost * 100)
+        primary_tokens = r.get("total_tokens") or 0
+        replay_tokens = r.get("replay_total_tokens") or 0
+        if primary_tokens > 0 and replay_tokens > 0:
+            token_deltas.append((replay_tokens - primary_tokens) / primary_tokens * 100)
+
+    def _avg_delta(deltas: List[float]) -> str:
+        if not deltas:
+            return "—"
+        avg = sum(deltas) / len(deltas)
+        arrow = "↑" if avg > 0 else "↓"
+        return f"{arrow}{abs(avg):.0f}%"
+
+    lines = [
+        "",
+        "**Skills mechanism — net win summary**",
+        "",
+        f"- **{len(emitted_rows)}** eval(s) emitted at least one memory",
+        f"- **{len(replay_rows)}** replay(s) attempted "
+        f"(`rerun_with_memory: true` + memory captured)",
+        f"- **{len(skill_loaded_rows)}/{len(replay_rows)}** replay(s) where the "
+        f"agent loaded the captured skill",
+        f"- **{len(replay_correct_rows)}/{len(replay_rows)}** replay(s) still "
+        f"answered correctly",
+        f"- **Mean replay vs primary delta (per-row average): "
+        f"{_avg_delta(cost_deltas)} cost, {_avg_delta(token_deltas)} tokens** "
+        f"(n={len(cost_deltas)})",
+        "",
+        "_Negative delta = replay was cheaper, i.e. the captured skill skipped "
+        "the wrong-call recovery. Regression-set baseline vs master is in the "
+        "comparison details below._",
+        "",
+    ]
+    return "\n".join(lines)
 
 
 def _diff_cell(cur, base) -> str:
@@ -676,6 +737,12 @@ def generate_markdown_report(
     )
     memories_total_str = f"**{total_memories_sum}**" if total_memories_sum else "—"
     markdown += f"| | **Total** | {memories_total_str} | **{avg_time_str}** avg | **{avg_turns_str}** avg | **{avg_tools_str}** avg | **{total_cost_str}** | **{total_tokens_total_str}** | **{total_prompt_str}** | **{max_prompt_max_str}** | **{total_completion_str}** | **{max_completion_max_str}** | **{total_cached_tokens_str}** | **{total_non_cached_tokens_str}** | **{total_reasoning_str}** | **{total_compactions_str}** | |\n"
+
+    # Skills mechanism net-win summary. Aggregates the rows where a memory
+    # was emitted and (when applicable) replayed, so the bottom-line
+    # "is this feature paying for itself" answer is visible without
+    # eyeballing every row.
+    markdown += _generate_skills_summary(sorted_results)
 
     # Add footer explaining when no baseline available
     if not benchmark and not master:

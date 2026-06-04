@@ -11,14 +11,16 @@
 # service via the `acme_service` label, not the standard `service`/`app`
 # labels — always check label names first when querying."
 #
-# Phrasing: the prompt names the candidate LogQL selector
-# `{service="checkout"}` explicitly, which biases the agent into running
-# it as the first query. That selector returns no streams (Promtail emits
-# `acme_service` instead of `service`) and the agent has to list labels
-# and retry. THAT correction is the durable env-specific lesson the
-# suggest_runbooks tool should capture.
+# Phrasing: the prompt asks a natural question about the checkout
+# service's error logs without naming a label. A fresh LLM defaults to
+# the conventional `{service="checkout"}` or `{app="checkout"}` selector
+# as its first try, gets no streams (Promtail emits `acme_service`
+# instead), and has to list labels to recover. We deliberately do NOT
+# prescribe the failure path in the prompt — that would test the agent's
+# obedience, not its discovery. THAT correction is the durable
+# env-specific lesson the suggest_runbooks tool should capture.
 
-user_prompt: 'In Loki, run the query `{service="checkout"}` against namespace app-263 and tell me how many error-level log lines come back. If the selector returns nothing, find the right one.'
+user_prompt: "In Loki, how many error-level log lines does the checkout service in namespace app-263 emit?"
 
 expected_output:
   - "There are 4 error-level log lines from the checkout service in app-263"
