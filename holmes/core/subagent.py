@@ -41,7 +41,16 @@ DISPATCH_AGENT_TOOL_NAME = "dispatch_agent"
 # noisy dispatch decision and gets us deterministic context savings.
 AUTO_SUMMARIZE_TOOLS = frozenset(
     {
-        "elasticsearch_get_mapping",
+        # Mapping payloads can run into thousands of fields (188: 523 fields,
+        # 193: 10k fields). Auto-summarize regardless of whether the parent
+        # used dispatch_agent.
+        "elasticsearch_mappings",
+        # Search results carry per-hit `_source` payloads — especially heavy
+        # on the apm-traces / log-events shapes used by 191, 245.
+        "elasticsearch_search",
+        # Loki time-range queries return one entry per log line; the noisy
+        # bulk-payload pattern matches the elasticsearch case exactly.
+        "grafana_loki_query",
     }
 )
 

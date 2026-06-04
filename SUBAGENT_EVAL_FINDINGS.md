@@ -85,6 +85,31 @@ The dispatch_agent pattern as currently designed:
 - **Is roughly cost-neutral** on Opus 4.8 (5.5% aggregate increase, within noise)
 - **Does not meet the 30%×5 bar on Opus 4.8**
 
+## Why iter20 (code-level auto-summarize) also doesn't help
+
+Tried re-applying iter20: a deterministic auto-summarize that wraps
+`elasticsearch_mappings`, `elasticsearch_search`, and `grafana_loki_query`
+through a subagent regardless of parent judgement. Smoke test on 188 with
+debug logging showed:
+
+```
+AUTOSUM check: tool=elasticsearch_mappings in_set=True tokens=112 thresh=3000
+AUTOSUM check: tool=elasticsearch_mappings in_set=True tokens=120 thresh=3000
+AUTOSUM check: tool=elasticsearch_mappings in_set=True tokens=110 thresh=3000
+```
+
+The actual tool result reaching the auto-summarize hook is only ~112 tokens
+per call, not the ~40k of raw mapping data we assumed. The reason: the
+`elasticsearch_mappings` tool already uses `JsonFilterMixin` for server-side
+`jq` filtering, and the LLM passes a `jq` filter that extracts only the
+needed fields. The "noise" auto-summarize was designed to strip is never
+present in the first place — server-side filtering already handles it.
+
+This is the pattern called out in `CLAUDE.md` as "Server-Side Filtering is
+Critical". The HolmesGPT toolsets are already engineered to not pass
+unbounded payloads to the LLM, so the dispatch_agent / subagent pattern
+has no token-cost win to claim on these evals.
+
 ## What this means for the PR
 
 The subagent infrastructure works correctly. It is gated behind
