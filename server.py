@@ -27,7 +27,6 @@ import uvicorn
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import JSONResponse, StreamingResponse
 from litellm.exceptions import AuthenticationError
-
 from holmes import get_version, is_official_release
 from holmes.common.env_vars import (
     DEVELOPMENT_MODE,
@@ -65,9 +64,17 @@ from holmes.utils.auth import AUTH_EXEMPT_PATHS, extract_api_key
 from holmes.utils.log import EndpointFilter
 from holmes.checks.checks_api import init_checks_app
 from holmes.core.tools_utils.filesystem_result_storage import tool_result_storage
-from holmes.core.models import FrontendToolMode
-from holmes.core.tools_utils.frontend_tools import build_frontend_noop_tool, build_frontend_pause_tool
+from holmes.core.tools_utils.frontend_tools import (
+    FrontendToolCollisionError,
+    inject_frontend_tools,
+)
 from holmes.core.tracing import TracingFactory
+from holmes.core.usage_recorder import (
+    build_chat_recorder_state,
+    record_error,
+    record_from_llm_result,
+    stream_with_usage_recording,
+)
 from holmes.utils.stream import stream_chat_formatter
 
 
@@ -116,7 +123,7 @@ def init_config():
         tuple: (config, dal) - The initialized Config object and its DAL instance
     """
     default_config_path = Path(DEFAULT_CONFIG_LOCATION)
-    if default_config_path.exists():
+    if default_config_path.exists() and os.environ.get("LOAD_CONFIG_FROM_ENV", "false").lower() == "false":
         logging.info(f"Loading config from file: {default_config_path}")
         config = Config.load_from_file(default_config_path)
     else:
@@ -271,7 +278,11 @@ if HOLMES_API_KEY:
     @app.middleware("http")
     async def api_key_auth(request: Request, call_next):
         """Reject requests missing a valid API key (X-API-Key or Bearer token)."""
-        if request.url.path in AUTH_EXEMPT_PATHS:
+        # Use the raw ASGI scope path, not request.url.path. The latter is
+        # reconstructed from the (attacker-controlled) Host header and can be
+        # spoofed via a malformed Host to bypass this exemption check
+        # (CVE-2026-48710 / GHSA-86qp-5c8j-p5mr).
+        if request.scope.get("path", "") in AUTH_EXEMPT_PATHS:
             return await call_next(request)
 
         key = extract_api_key(request)
@@ -444,6 +455,14 @@ def chat(chat_request: ChatRequest, http_request: Request):
         if chat_request.user_id:
             request_context.setdefault("headers", {})
             request_context["user_id"] = chat_request.user_id
+        # Surface conversation_id and cluster_name to toolsets that need
+        # to hardwire them into outbound requests (e.g. platform-mcp adds
+        # them as X-Robusta-* headers so tool handlers don't have to trust
+        # the LLM-supplied arguments).
+        if chat_request.conversation_id:
+            request_context["conversation_id"] = chat_request.conversation_id
+        if config.cluster_name:
+            request_context["cluster_name"] = config.cluster_name
 
         storage = tool_result_storage()
         tool_results_dir = storage.__enter__()
@@ -460,59 +479,48 @@ def chat(chat_request: ChatRequest, http_request: Request):
         )
 
         global_instructions = dal.get_global_instructions_for_account()
-        messages = build_chat_messages(
-            chat_request.ask,
-            chat_request.conversation_history,
-            ai=ai,
-            config=config,
-            global_instructions=global_instructions,
-            additional_system_prompt=chat_request.additional_system_prompt,
-            skills=skills,
-            images=chat_request.images,
-            prompt_component_overrides=prompt_component_overrides,
+
+        # A follow-up may carry only tool_decisions / frontend_tool_results
+        # (no new user question). In that case, resume from the existing
+        # conversation_history without appending an empty user message —
+        # otherwise the LLM sees a content-less user turn and responds with
+        # something like "looks like your question is empty, how can I help?".
+        resume_only = bool(
+            not chat_request.ask
+            and chat_request.conversation_history
+            and (chat_request.tool_decisions or chat_request.frontend_tool_results)
         )
+        if resume_only:
+            messages = list(chat_request.conversation_history)
+        else:
+            messages = build_chat_messages(
+                chat_request.ask,
+                chat_request.conversation_history,
+                ai=ai,
+                config=config,
+                global_instructions=global_instructions,
+                additional_system_prompt=chat_request.additional_system_prompt,
+                skills=skills,
+                images=chat_request.images,
+                prompt_component_overrides=prompt_component_overrides,
+            )
 
-        # Build a per-request AI instance with frontend tools injected into the executor
-        request_ai = ai
-        has_pause_tools = False
-        if chat_request.frontend_tools:
-            # Validate no name collisions with backend tools
-            backend_tool_names = set(ai.tool_executor.tools_by_name.keys())
-            frontend_tool_instances = []
-            for ft in chat_request.frontend_tools:
-                if ft.name in backend_tool_names:
-                    raise HTTPException(
-                        status_code=400,
-                        detail=f"Frontend tool name '{ft.name}' conflicts with a built-in Holmes tool. Use a different name.",
-                    )
-                if ft.mode == FrontendToolMode.NOOP:
-                    frontend_tool_instances.append(
-                        build_frontend_noop_tool(
-                            name=ft.name,
-                            description=ft.description,
-                            parameters=ft.parameters,
-                            canned_response=ft.noop_response,
-                        )
-                    )
-                else:
-                    has_pause_tools = True
-                    frontend_tool_instances.append(
-                        build_frontend_pause_tool(
-                            name=ft.name,
-                            description=ft.description,
-                            parameters=ft.parameters,
-                        )
-                    )
+        try:
+            request_ai, has_pause_tools = inject_frontend_tools(
+                ai, chat_request.frontend_tools
+            )
+        except FrontendToolCollisionError as e:
+            # Storage was opened above; the streaming/non-streaming branches
+            # below own its cleanup, but early validation failures bypass them.
+            storage.__exit__(None, None, None)
+            raise HTTPException(status_code=400, detail=str(e))
 
-            # Pause-mode tools require streaming (the pause/resume flow needs SSE)
-            if has_pause_tools and not chat_request.stream:
-                raise HTTPException(
-                    status_code=400,
-                    detail="frontend_tools with mode='pause' requires stream=true (the pause/resume flow needs SSE)",
-                )
-
-            cloned_executor = ai.tool_executor.clone_with_extra_tools(frontend_tool_instances)
-            request_ai = ai.with_executor(cloned_executor)
+        if has_pause_tools and not chat_request.stream:
+            storage.__exit__(None, None, None)
+            raise HTTPException(
+                status_code=400,
+                detail="frontend_tools with mode='pause' requires stream=true (the pause/resume flow needs SSE)",
+            )
 
         if chat_request.stream:
             # Create root investigation span for streaming (same as non-streaming)
@@ -526,7 +534,12 @@ def chat(chat_request: ChatRequest, http_request: Request):
                 inv_attrs = {"gen_ai_request_model": chat_request.model or config.model or "unknown"}
                 otel_metrics.investigation_count.add(1, inv_attrs)
 
-            stream = stream_chat_formatter(
+            # Build the usage recorder state and wrap the raw stream BEFORE the
+            # SSE formatter so the wrapper sees Holmes' native StreamMessage events.
+            recorder_state = build_chat_recorder_state(
+                chat_request, request_ai, dal=dal, is_streaming=True
+            )
+            recorded_stream = stream_with_usage_recording(
                 request_ai.call_stream(
                     msgs=messages,
                     enable_tool_approval=chat_request.enable_tool_approval or False,
@@ -536,6 +549,10 @@ def chat(chat_request: ChatRequest, http_request: Request):
                     request_context=request_context,
                     trace_span=trace_span,
                 ),
+                recorder_state,
+            )
+            stream = stream_chat_formatter(
+                recorded_stream,
                 [f.model_dump() for f in follow_up_actions],
                 model=chat_request.model or config.model,
             )
@@ -544,6 +561,9 @@ def chat(chat_request: ChatRequest, http_request: Request):
                 media_type="text/event-stream",
             )
         else:
+            recorder_state = build_chat_recorder_state(
+                chat_request, request_ai, dal=dal, is_streaming=False
+            )
             try:
                 # Use provided trace_span or create a root investigation span
                 trace_span = chat_request.trace_span
@@ -556,12 +576,15 @@ def chat(chat_request: ChatRequest, http_request: Request):
                     })
 
                 _inv_start = time.time()
-                llm_call = ai.call(
+                llm_call = request_ai.call(
                     messages=messages,
                     trace_span=trace_span,
                     response_format=chat_request.response_format,
                     request_context=request_context,
                 )
+
+                # Record usage event for non-streaming path (fire-and-forget).
+                record_from_llm_result(recorder_state, llm_call)
 
                 # Record investigation metrics
                 otel_metrics = TracingFactory.get_metrics()
@@ -581,18 +604,32 @@ def chat(chat_request: ChatRequest, http_request: Request):
                     )
                 else:
                     logging.info(f"Completed {req_info}")
+                # Surface request_id in the response metadata so the FE has a
+                # handle for the public.record_feedback() RPC later. Streaming
+                # path does the same via _inject_request_id in the stream wrapper.
+                response_metadata = dict(llm_call.metadata or {})
+                response_metadata["request_id"] = recorder_state.request_id
                 response = ChatResponse(
                     analysis=llm_call.result,
                     tool_calls=llm_call.tool_calls,
                     conversation_history=llm_call.messages,
                     follow_up_actions=follow_up_actions,
-                    metadata=llm_call.metadata,
+                    metadata=response_metadata,
                 )
                 return response
+            except Exception as e:
+                # Non-streaming path: record the failed event so it shows up in dashboards
+                # with status='error' / 'rate_limited'. Streaming path records via the
+                # wrapper's `finally` automatically.
+                record_error(recorder_state, e)
+                raise
             finally:
                 if trace_span is not None:
                     trace_span.end()
                 storage.__exit__(None, None, None)
+    except HTTPException:
+        # The generic ``except Exception`` below would otherwise rewrite these as 500.
+        raise
     except AuthenticationError as e:
         raise HTTPException(status_code=401, detail=e.message)
     except litellm.exceptions.RateLimitError as e:

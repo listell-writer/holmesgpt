@@ -63,7 +63,21 @@ SENTRY_TRACES_SAMPLE_RATE = float(os.environ.get("SENTRY_TRACES_SAMPLE_RATE", "0
 EXTRA_HEADERS = os.environ.get("EXTRA_HEADERS", "")
 THINKING = os.environ.get("THINKING", "")
 REASONING_EFFORT = os.environ.get("REASONING_EFFORT", "").strip().lower()
-TEMPERATURE = float(os.environ.get("TEMPERATURE", "0.00000001"))
+
+
+def _load_temperature() -> Optional[float]:
+    # Set TEMPERATURE to an empty string / "none" / "null" to send NO temperature at
+    # all. Required for models that reject the parameter (e.g. Anthropic Opus 4.7+:
+    # "temperature is deprecated for this model"); LiteLLM's drop_params can't strip
+    # it because the deprecation isn't in its static param metadata, so it must be
+    # omitted at the source.
+    raw = os.environ.get("TEMPERATURE", "0.00000001").strip()
+    if raw.lower() in ("", "none", "null"):
+        return None
+    return float(raw)
+
+
+TEMPERATURE = _load_temperature()
 
 # Set default memory limit based on CPU architecture
 # ARM architectures typically need more memory
@@ -193,7 +207,7 @@ HOLMES_TOOL_RESULT_STORAGE_PATH = os.environ.get(
 )
 
 # Conversation Worker (M2)
-ENABLE_CONVERSATION_WORKER = load_bool("ENABLE_CONVERSATION_WORKER", False)
+ENABLE_CONVERSATION_WORKER = load_bool("ENABLE_CONVERSATION_WORKER", True)
 CONVERSATION_WORKER_MAX_CONCURRENT = int(
     os.environ.get("CONVERSATION_WORKER_MAX_CONCURRENT", 5)
 )
@@ -221,6 +235,14 @@ CONVERSATION_WORKER_REALTIME_ENABLED = load_bool(
 CONVERSATION_WORKER_AUTH_REFRESH_INTERVAL_SECONDS = float(
     os.environ.get("CONVERSATION_WORKER_AUTH_REFRESH_INTERVAL_SECONDS", 60)
 )
+# Upper bound on how long a silently-dead realtime WebSocket can go undetected.
+# The realtime library can leave a stale connection in place when the server
+# closes the socket cleanly (ConnectionClosedOK) — _listen_task exits, no
+# auto-reconnect fires, and is_connected still reports True. We re-evaluate
+# liveness every tick and trigger a full reconnect on any failure signal.
+CONVERSATION_WORKER_REALTIME_HEALTH_TICK_SECONDS = float(
+    os.environ.get("CONVERSATION_WORKER_REALTIME_HEALTH_TICK_SECONDS", 5)
+)
 # When True (default), Holmes subscribes to a Broadcast channel
 # (holmes:submit:{account_id}:{cluster_id}) to detect new pending
 # conversations — the initiator (Frontend/Relay) must send a broadcast
@@ -229,4 +251,15 @@ CONVERSATION_WORKER_AUTH_REFRESH_INTERVAL_SECONDS = float(
 # Conversations table instead (no initiator action needed beyond the RPC).
 CONVERSATION_WORKER_USE_REALTIME_BROADCAST = load_bool(
     "CONVERSATION_WORKER_USE_REALTIME_BROADCAST", True
+)
+# Initial backoff (seconds) when checking is_realtime_enabled() RPC fails
+# due to connectivity issues. The verifier doubles this on each retry up
+# to CONVERSATION_WORKER_REALTIME_VERIFY_MAX_BACKOFF_SECONDS.
+CONVERSATION_WORKER_REALTIME_VERIFY_INITIAL_BACKOFF_SECONDS = float(
+    os.environ.get(
+        "CONVERSATION_WORKER_REALTIME_VERIFY_INITIAL_BACKOFF_SECONDS", 5.0
+    )
+)
+CONVERSATION_WORKER_REALTIME_VERIFY_MAX_BACKOFF_SECONDS = float(
+    os.environ.get("CONVERSATION_WORKER_REALTIME_VERIFY_MAX_BACKOFF_SECONDS", 120.0)
 )

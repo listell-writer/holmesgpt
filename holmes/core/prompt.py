@@ -18,7 +18,6 @@ class PromptComponent(str, Enum):
     INTRO = "intro"
     ASK_USER = "ask_user"
     TODOWRITE_INSTRUCTIONS = "todowrite_instructions"
-    AI_SAFETY = "ai_safety"
     TOOLSET_INSTRUCTIONS = "toolset_instructions"
     PERMISSION_ERRORS = "permission_errors"
     GENERAL_INSTRUCTIONS = "general_instructions"
@@ -28,7 +27,7 @@ class PromptComponent(str, Enum):
 
 
 # Components that are disabled by default (can be explicitly enabled via overrides or env var)
-DISABLED_BY_DEFAULT = {PromptComponent.AI_SAFETY}
+DISABLED_BY_DEFAULT: set = set()
 
 
 class InvalidImageDictError(ValueError):
@@ -82,7 +81,7 @@ def is_prompt_allowed_by_env(component: PromptComponent) -> bool:
     Environment variable: ENABLED_PROMPTS
     - If not set: all prompts are ENABLED (production default)
     - If set to "none": all prompts are disabled
-    - Comma-separated names (e.g., "files,ai_safety,time_skills")
+    - Comma-separated names (e.g., "files,time_skills")
     """
     enabled_prompts = os.environ.get("ENABLED_PROMPTS", "")
 
@@ -182,7 +181,6 @@ def build_system_prompt(
     cluster_name: Optional[str],
     ask_user_enabled: bool,
     prompt_component_overrides: Dict[PromptComponent, bool],
-    subagents_enabled: bool = False,
 ) -> Optional[str]:
     """
     Build the system prompt for both CLI and server modes.
@@ -199,7 +197,6 @@ def build_system_prompt(
         "intro_enabled": is_enabled(PromptComponent.INTRO),
         "ask_user_enabled": ask_user_enabled and is_enabled(PromptComponent.ASK_USER),
         "todowrite_enabled": is_enabled(PromptComponent.TODOWRITE_INSTRUCTIONS),
-        "ai_safety_enabled": is_enabled(PromptComponent.AI_SAFETY),
         "toolset_instructions_enabled": toolset_instructions_enabled,
         "permission_errors_enabled": is_enabled(PromptComponent.PERMISSION_ERRORS),
         "general_instructions_enabled": is_enabled(
@@ -215,7 +212,6 @@ def build_system_prompt(
         "system_prompt_additions": system_prompt_additions
         if is_enabled(PromptComponent.SYSTEM_PROMPT_ADDITIONS)
         else "",
-        "subagents_enabled": subagents_enabled,
     }
 
     result = load_and_render_prompt("builtin://generic_ask.jinja2", template_context)
@@ -273,7 +269,6 @@ def build_prompts(
     include_todowrite_reminder: bool,
     images: Optional[List[Union[str, Dict[str, Any]]]],
     prompt_component_overrides: Optional[Dict[PromptComponent, bool]] = None,
-    subagents_enabled: bool = False,
 ) -> Tuple[Optional[str], UserPromptContent]:
     """Build both system and user prompts."""
     if prompt_component_overrides is None:
@@ -286,7 +281,6 @@ def build_prompts(
         cluster_name=cluster_name,
         ask_user_enabled=ask_user_enabled,
         prompt_component_overrides=prompt_component_overrides,
-        subagents_enabled=subagents_enabled,
     )
     user_content = build_user_prompt(
         user_prompt=user_prompt,
@@ -311,17 +305,6 @@ def build_initial_ask_messages(
     prompt_component_overrides: Optional[Dict[PromptComponent, bool]] = None,
 ) -> List[Dict]:
     """Build the initial messages for the CLI ask command."""
-    # Auto-detect whether dispatch_agent is registered on this executor —
-    # ToolCallingLLM adds it via clone_with_extra_tools when subagents are
-    # enabled, so its presence in tools_by_name is the source of truth.
-    # Guard against test mocks (tool_executor.tools_by_name is a Mock when
-    # the executor itself is a MagicMock) — only treat real dicts as
-    # authoritative; everything else means "no dispatch_agent registered".
-    tools_by_name = getattr(tool_executor, "tools_by_name", None)
-    subagents_enabled = (
-        isinstance(tools_by_name, dict) and "dispatch_agent" in tools_by_name
-    )
-
     system_prompt, user_prompt = build_prompts(
         toolsets=tool_executor.toolsets,
         user_prompt=initial_user_prompt,
@@ -334,7 +317,6 @@ def build_initial_ask_messages(
         include_todowrite_reminder=True,
         images=None,
         prompt_component_overrides=prompt_component_overrides,
-        subagents_enabled=subagents_enabled,
     )
 
     messages = []
