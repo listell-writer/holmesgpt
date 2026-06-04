@@ -158,7 +158,7 @@ before_test: |
     exit 1
   fi
 
-  echo "Test data ready: $DOC_COUNT log records (no cluster/region field — plain app logs)"
+  echo "Test data ready: $DOC_COUNT log records (all tagged cluster=production-eu-west-2, region=eu-west-2)"
 
 after_test: |
   echo "Skipping index cleanup (reentrant - before_test handles idempotent setup)"

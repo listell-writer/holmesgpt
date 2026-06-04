@@ -30,23 +30,37 @@ before_test: |
   kubectl apply -f staging.yaml -n app-270-staging
 
   # Wait for prod's bad-image pod to enter ImagePullBackOff
+  PROD_READY=false
   for i in $(seq 1 60); do
     STATUS=$(kubectl get pod -l app=checkout-service -n app-270-prod -o jsonpath='{.items[0].status.containerStatuses[0].state.waiting.reason}' 2>/dev/null || true)
     if [[ "$STATUS" == "ImagePullBackOff" || "$STATUS" == "ErrImagePull" ]]; then
       echo "prod checkout-service in $STATUS"
+      PROD_READY=true
       break
     fi
     sleep 2
   done
+  if [ "$PROD_READY" != "true" ]; then
+    echo "prod checkout-service did not reach ImagePullBackOff/ErrImagePull in time (app=checkout-service, namespace app-270-prod)"
+    kubectl get pods -l app=checkout-service -n app-270-prod -o wide || true
+    exit 1
+  fi
 
   # Wait for staging's healthy pod
+  STAGING_READY=false
   for i in $(seq 1 60); do
     if kubectl wait --for=condition=ready pod -l app=checkout-service -n app-270-staging --timeout=5s 2>/dev/null; then
       echo "staging checkout-service ready"
+      STAGING_READY=true
       break
     fi
     sleep 1
   done
+  if [ "$STAGING_READY" != "true" ]; then
+    echo "staging checkout-service did not become ready in time (app=checkout-service, namespace app-270-staging)"
+    kubectl get pods -l app=checkout-service -n app-270-staging -o wide || true
+    exit 1
+  fi
 
 after_test: |
   kubectl delete namespace app-270-prod --ignore-not-found

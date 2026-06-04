@@ -36,12 +36,19 @@ before_test: |
   # ----- Set up KIND-local checkout-service (healthy) ------
   kubectl create namespace app-269 --save-config --dry-run=client -o yaml | kubectl apply -f -
   kubectl apply -f manifest.yaml -n app-269
+  READY=false
   for i in $(seq 1 60); do
     if kubectl wait --for=condition=ready pod -l app=checkout-service -n app-269 --timeout=5s 2>/dev/null; then
+      READY=true
       break
     fi
     sleep 1
   done
+  if [ "$READY" != "true" ]; then
+    echo "checkout-service did not become ready in namespace app-269"
+    kubectl get pods -n app-269 -o wide || true
+    exit 1
+  fi
 
   # ----- Set up multi-cluster ES data ------
   LOGS_INDEX="app-269-prod-logs"
@@ -74,10 +81,15 @@ before_test: |
   {"timestamp":"${T_30M}","service":"payment-service","cluster":"production-eu-west-2","level":"INFO","message":"Adyen-eu healthy"}
   BULK_EOF
   sed 's/^  //' "$BULK_FILE" > "${BULK_FILE}.tmp" && mv "${BULK_FILE}.tmp" "$BULK_FILE"
-  curl -sf -X POST "${ELASTICSEARCH_URL}/${LOGS_INDEX}/_bulk" \
+  BULK_RESPONSE=$(curl -sf -X POST "${ELASTICSEARCH_URL}/${LOGS_INDEX}/_bulk" \
     -H "Content-Type: application/x-ndjson" \
     -H "Authorization: ApiKey ${ELASTICSEARCH_API_KEY}" \
-    --data-binary @"$BULK_FILE" > /dev/null
+    --data-binary @"$BULK_FILE")
+  if echo "$BULK_RESPONSE" | grep -q '"errors":true'; then
+    echo "Bulk insert had errors: $BULK_RESPONSE"
+    rm -f "$BULK_FILE"
+    exit 1
+  fi
   rm -f "$BULK_FILE"
   curl -sf -X POST "${ELASTICSEARCH_URL}/${LOGS_INDEX}/_refresh" \
     -H "Authorization: ApiKey ${ELASTICSEARCH_API_KEY}" > /dev/null

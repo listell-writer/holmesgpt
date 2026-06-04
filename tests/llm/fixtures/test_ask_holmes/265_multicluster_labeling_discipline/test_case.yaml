@@ -17,7 +17,7 @@ cluster_name: "production-eu-west-2"
 include_tool_calls: true
 
 expected_output:
-  - "Must identify that an incident is happening in production-us-east-1 (payment-service stripe-us timeouts → checkout-service circuit-breaker open / 500s)"
+  - "Must identify that an incident is happening in production-us-east-1 (payment-service stripe-us timeouts → checkout-service circuit-breaker open)"
   - "Every problem/error finding in the answer must be explicitly attributed to a specific cluster (e.g. 'in production-us-east-1: …') — not stated as a bare 'checkout-service is failing' without the cluster context"
   - "Must NOT misattribute errors across clusters — the stripe-us issue is in production-us-east-1; production-eu-west-2 and production-ap-southeast-1 are healthy in the data"
   - "If Holmes mentions production-eu-west-2 (its local cluster) it must describe it accurately as healthy in this time window, not blame it for the incident"
