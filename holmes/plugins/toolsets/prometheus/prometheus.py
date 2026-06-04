@@ -38,6 +38,7 @@ from holmes.plugins.toolsets.json_filter_mixin import JsonFilterMixin
 from holmes.plugins.toolsets.logging_utils.logging_api import (
     DEFAULT_GRAPH_TIME_SPAN_SECONDS,
 )
+from holmes.plugins.toolsets.prometheus.graph_rendering import attach_graph_image
 from holmes.plugins.toolsets.prometheus.utils import parse_duration_to_seconds
 from holmes.plugins.toolsets.service_discovery import PrometheusDiscovery
 from holmes.plugins.toolsets.utils import (
@@ -137,6 +138,17 @@ class PrometheusConfig(ToolsetConfig):
         default=DEFAULT_METADATA_TIME_WINDOW_HRS,
         title="Discovery Window",
         description="Only discover metrics with data in this time window (hours)",
+    )
+
+    render_graphs: bool = Field(
+        default=False,
+        title="Render Graphs",
+        description=(
+            "Render range-query results into PNG charts inside Holmes "
+            "(attached to the tool result's images), instead of leaving "
+            "rendering to the runner. Requires the optional 'pygal' and "
+            "'cairosvg' dependencies."
+        ),
     )
 
     query_timeout_seconds_default: int = Field(
@@ -1956,6 +1968,17 @@ class ExecuteRangeQuery(BasePrometheusTool):
                 structured_tool_result = create_structured_tool_result(
                     params=params, response=response_data
                 )
+
+                # Optionally render the range result into a PNG chart inside
+                # Holmes (decoupling graph rendering from the runner). Guarded
+                # by config and safe-by-design: any render failure is a no-op.
+                if self.toolset.config.render_graphs and status == "success":
+                    structured_tool_result.images = attach_graph_image(
+                        structured_tool_result.images,
+                        prometheus_data=data.get("data", {}),
+                        description=description,
+                        output_type=output_type,
+                    )
 
                 return structured_tool_result
 
