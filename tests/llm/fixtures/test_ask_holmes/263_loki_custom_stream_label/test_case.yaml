@@ -7,9 +7,9 @@
 #   - discover that the service identity lives on `acme_service`
 #   - retry with `{acme_service="checkout"}` to get the data
 #
-# On suggest=on the LLM should capture: "in this cluster, Loki streams
-# identify the service via the `acme_service` label, not the standard
-# `service`/`app` labels — always check label names first when querying."
+# The LLM should capture: "in this cluster, Loki streams identify the
+# service via the `acme_service` label, not the standard `service`/`app`
+# labels — always check label names first when querying."
 #
 # Phrasing: the prompt names the candidate LogQL selector
 # `{service="checkout"}` explicitly, which biases the agent into running

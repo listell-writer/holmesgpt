@@ -9,9 +9,9 @@
 #   - inspect the mapping → see only `ingest_ts: keyword`
 #   - retry filtering on `ingest_ts` as a string prefix comparison
 #
-# On suggest=on the LLM should capture: "this index uses `ingest_ts`
-# (keyword) instead of `@timestamp` (date) — date-range queries must be
-# rewritten as string comparisons on `ingest_ts`."
+# The LLM should capture: "this index uses `ingest_ts` (keyword) instead
+# of `@timestamp` (date) — date-range queries must be rewritten as string
+# comparisons on `ingest_ts`."
 #
 # Phrasing: the prompt asks a natural question about today's errors
 # without naming a timestamp field. A fresh LLM reaches for the

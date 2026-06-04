@@ -1,10 +1,8 @@
-"""Unit tests for the tool_suggestions matrix wiring used by LLM evals."""
+"""Unit tests for the SUGGEST_RUNBOOKS wiring used by LLM evals."""
 
 from __future__ import annotations
 
 import json
-
-import pytest
 
 from holmes.core.models import ToolCallResult
 from holmes.core.tools import StructuredToolResult, StructuredToolResultStatus
@@ -12,54 +10,17 @@ from tests.llm.utils.tool_suggestions_config import (
     SUGGEST_RUNBOOKS_NOOP_RESPONSE,
     SUGGEST_RUNBOOKS_SYSTEM_PROMPT,
     SUGGEST_RUNBOOKS_TOOL_NAME,
-    ToolSuggestionsConfig,
     append_suggest_runbooks_system_prompt,
     extract_suggested_memories,
-    get_tool_suggestions_configs,
-    parse_tool_suggestions_configs,
 )
 
 
-def test_default_matrix_runs_both_variants(monkeypatch):
-    monkeypatch.delenv("TOOL_SUGGESTIONS_CONFIGS", raising=False)
-    configs = get_tool_suggestions_configs()
-    names = [c.name for c in configs]
-    assert names == ["on", "off"]
-    assert [c.enabled for c in configs] == [True, False]
+def test_append_system_prompt_standalone():
+    assert append_suggest_runbooks_system_prompt(None) == SUGGEST_RUNBOOKS_SYSTEM_PROMPT
 
 
-@pytest.mark.parametrize(
-    "raw, expected",
-    [
-        ("", ["on", "off"]),
-        ("on", ["on"]),
-        ("off", ["off"]),
-        ("off,on", ["off", "on"]),
-        # Whitespace and duplicates collapse to a single ordered run.
-        ("  on , on , off ", ["on", "off"]),
-    ],
-)
-def test_parse_tool_suggestions_configs(raw, expected):
-    configs = parse_tool_suggestions_configs(raw)
-    assert [c.name for c in configs] == expected
-
-
-def test_parse_tool_suggestions_configs_rejects_unknown():
-    with pytest.raises(ValueError, match="Unknown tool_suggestions variant"):
-        parse_tool_suggestions_configs("garbage")
-
-
-def test_append_system_prompt_only_when_enabled():
-    on = ToolSuggestionsConfig(name="on", enabled=True)
-    off = ToolSuggestionsConfig(name="off", enabled=False)
-
-    assert append_suggest_runbooks_system_prompt(None, off) is None
-    assert append_suggest_runbooks_system_prompt("EXISTING", off) == "EXISTING"
-
-    only = append_suggest_runbooks_system_prompt(None, on)
-    assert only == SUGGEST_RUNBOOKS_SYSTEM_PROMPT
-
-    appended = append_suggest_runbooks_system_prompt("EXISTING", on)
+def test_append_system_prompt_extends_existing():
+    appended = append_suggest_runbooks_system_prompt("EXISTING")
     assert appended.startswith("EXISTING")
     assert SUGGEST_RUNBOOKS_SYSTEM_PROMPT in appended
 

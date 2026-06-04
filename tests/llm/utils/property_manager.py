@@ -8,7 +8,6 @@ from tests.llm.utils.test_case_utils import (  # type: ignore[attr-defined]
 
 if TYPE_CHECKING:
     from tests.llm.utils.env_config import EnvConfig
-    from tests.llm.utils.tool_suggestions_config import ToolSuggestionsConfig
 
 
 def set_initial_properties(
@@ -16,7 +15,6 @@ def set_initial_properties(
     test_case: HolmesTestCase,
     model: str,
     env_config: Optional["EnvConfig"] = None,
-    tool_suggestions: Optional["ToolSuggestionsConfig"] = None,
 ) -> None:
     """Set initial properties at the beginning of a test so they're available even if test fails early.
 
@@ -25,7 +23,6 @@ def set_initial_properties(
         test_case: The test case being executed
         model: The model being used for this test run
         env_config: Optional environment configuration being used for this test run
-        tool_suggestions: Optional tool_suggestions matrix variant for this run
     """
     expected = test_case.expected_output
     if not isinstance(expected, list):
@@ -70,18 +67,6 @@ def set_initial_properties(
     config_name = env_config.name if env_config else "default"
     request.node.user_properties.append(("env_config", config_name))
 
-    # Add tool_suggestions matrix tracking. Default to "off" so reports built
-    # from runs that pre-date the matrix still produce a sensible value.
-    if tool_suggestions is not None:
-        request.node.user_properties.append(
-            ("tool_suggestions", tool_suggestions.name)
-        )
-        request.node.user_properties.append(
-            ("tool_suggestions_enabled", tool_suggestions.enabled)
-        )
-    else:
-        request.node.user_properties.append(("tool_suggestions", "off"))
-        request.node.user_properties.append(("tool_suggestions_enabled", False))
     # Will be overwritten if any memories are generated during the run.
     request.node.user_properties.append(("memories_count", 0))
     request.node.user_properties.append(("suggested_memories", []))
@@ -141,14 +126,11 @@ def update_test_results(
         test_case: Optional test case for score calculation
         eval_span: Optional Braintrust span for evaluation
         caplog: Optional caplog for evaluation
-        suggested_memories: Optional list of suggest_runbooks memories captured
-            on the suggest=on matrix variant. When provided alongside
-            ``test_case.expected_memories``, the memories and the eval's
-            ``must_include`` expectations are surfaced to the LLM judge so it
-            can score whether the captured memory covers the env-specific
-            call-shape the eval is designed to teach. Pass ``None`` (the
-            default) to skip memory-aware judging — used on the suggest=off
-            variant and on evals without an ``expected_memories`` field.
+        suggested_memories: Optional list of suggest_runbooks memories
+            captured during this run. When provided, the memories are
+            surfaced to the LLM judge alongside ``expected_output`` so memory
+            content quality is scored against the eval's expectations. Pass
+            ``None`` to skip memory-aware judging.
 
     Returns:
         dict: The scores dictionary (either passed in or calculated)
@@ -202,9 +184,7 @@ def update_test_results(
 
         # Surface the suggest_runbooks memories the LLM emitted (if any) to
         # the judge, so memory content quality is scored against the eval's
-        # ``expected_output`` exactly like the final answer. Only applied
-        # when ``suggested_memories`` is provided (suggest=on variant) —
-        # passing ``None`` keeps off-variant and legacy evals untouched.
+        # ``expected_output`` exactly like the final answer.
         if suggested_memories is not None:
             memory_block = "\n\n# Suggested Memories\n\n"
             if suggested_memories:

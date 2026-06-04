@@ -788,8 +788,6 @@ def _collect_test_results_from_stats(terminalreporter):
                     "braintrust_root_span_id": None,
                     "clean_test_case_id": None,  # Not available for skipped tests
                     "env_config": "default",  # Not available for skipped tests
-                    "tool_suggestions": "off",  # Not available for skipped tests
-                    "tool_suggestions_enabled": False,
                     "memories_count": 0,
                     "suggested_memories": [],
                 }
@@ -863,10 +861,6 @@ def _collect_test_results_from_stats(terminalreporter):
                 ),  # Any throttling during execution
                 "model": user_props.get("model", "Unknown"),
                 "env_config": user_props.get("env_config", "default"),
-                "tool_suggestions": user_props.get("tool_suggestions", "off"),
-                "tool_suggestions_enabled": user_props.get(
-                    "tool_suggestions_enabled", False
-                ),
                 "memories_count": user_props.get("memories_count", 0),
                 "suggested_memories": user_props.get("suggested_memories", []),
                 # Whether the primary pass (everything before the replay

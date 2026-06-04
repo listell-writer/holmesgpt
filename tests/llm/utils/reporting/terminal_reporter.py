@@ -238,13 +238,6 @@ def handle_console_output(sorted_results: List[dict], terminalreporter=None) -> 
         if len(unique_env_configs) > 1:
             parts.append(env_config)
 
-        # Only show tool_suggestions when both variants are present in the run.
-        unique_tool_suggestions = {
-            r.get("tool_suggestions", "off") for r in sorted_results
-        }
-        if len(unique_tool_suggestions) > 1:
-            parts.append(f"suggest={result.get('tool_suggestions', 'off')}")
-
         combined_test_name = f"{test_case_name} ({', '.join(parts)})"
         # Wrap test name to fit column (increased width to accommodate env_config)
         test_name_wrapped = "\n".join(textwrap.wrap(combined_test_name, width=18))

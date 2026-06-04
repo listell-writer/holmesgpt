@@ -7,8 +7,8 @@
 # zero hits; the only way to find the data is to inspect the mapping or
 # a sample doc, then re-query with severity:"ERROR".
 #
-# On suggest=on the LLM should capture this lesson as an env-specific
-# memory ("this index uses 'severity' for log levels, not 'level'").
+# The LLM should capture this lesson as an env-specific memory
+# ("this index uses 'severity' for log levels, not 'level'").
 
 # Phrasing matters: by saying "where level is ERROR" we describe the
 # question using the conventional log-field terminology, which biases

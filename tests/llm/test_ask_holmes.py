@@ -39,11 +39,9 @@ from tests.llm.utils.test_case_utils import (
     get_models,
 )
 from tests.llm.utils.tool_suggestions_config import (
-    ToolSuggestionsConfig,
     append_suggest_runbooks_system_prompt,
     extract_suggested_memories,
-    get_tool_suggestions_configs,
-    maybe_inject_suggest_runbooks_tool,
+    inject_suggest_runbooks_tool,
     write_memories_as_skill_files,
 )
 
@@ -61,17 +59,7 @@ def _get_env_config_ids():
     return [ec.name for ec in get_env_configs()]
 
 
-def _get_tool_suggestions_ids():
-    """Generate ids for tool_suggestions parameterization (e.g. ``suggest=on``)."""
-    return [f"suggest={c.name}" for c in get_tool_suggestions_configs()]
-
-
 @pytest.mark.llm
-@pytest.mark.parametrize(
-    "tool_suggestions",
-    get_tool_suggestions_configs(),
-    ids=_get_tool_suggestions_ids(),
-)
 @pytest.mark.parametrize("env_config", get_env_configs(), ids=_get_env_config_ids())
 @pytest.mark.parametrize("model", get_models())
 @pytest.mark.parametrize("test_case", get_ask_holmes_test_cases())
@@ -79,22 +67,18 @@ def test_ask_holmes(
     env_config: EnvConfig,
     model: str,
     test_case: AskHolmesTestCase,
-    tool_suggestions: ToolSuggestionsConfig,
     caplog,
     request,
     additional_system_prompt,
     shared_test_infrastructure,  # type: ignore
 ):
     # Set initial properties early so they're available even if test fails
-    set_initial_properties(
-        request, test_case, model, env_config, tool_suggestions=tool_suggestions
-    )
+    set_initial_properties(request, test_case, model, env_config)
 
     tracer = TracingFactory.create_tracer("braintrust")
     metadata = {
         "model": model,
         "env_config": env_config.name,
-        "tool_suggestions": tool_suggestions.name,
     }
     tracer.start_experiment(additional_metadata=metadata)
 
@@ -102,10 +86,7 @@ def test_ask_holmes(
 
     try:
         with tracer.start_trace(
-            name=(
-                f"{test_case.id}[{model}][{env_config.name}]"
-                f"[suggest={tool_suggestions.name}]"
-            ),
+            name=f"{test_case.id}[{model}][{env_config.name}]",
             span_type=SpanType.EVAL,
         ) as eval_span:
             set_trace_properties(request, eval_span)
@@ -139,9 +120,9 @@ def test_ask_holmes(
                     tracer,  # positional arg
                     eval_span,  # positional arg
                     additional_system_prompt=append_suggest_runbooks_system_prompt(
-                        additional_system_prompt, tool_suggestions
+                        additional_system_prompt
                     ),
-                    tool_suggestions=tool_suggestions,
+                    inject_suggest_runbooks=True,
                     request=request,
                     retry_enabled=retry_enabled,
                     test_id=test_case.id,
@@ -165,9 +146,6 @@ def test_ask_holmes(
     update_property(request, "suggested_memories", suggested_memories)
     update_property(request, "memories_count", len(suggested_memories))
 
-    # Pass memories into the judge only on the suggest=on variant — on the
-    # off variant the tool isn't injected so there's nothing to score.
-    suggest_on = tool_suggestions is not None and tool_suggestions.enabled
     scores = update_test_results(
         request=request,
         output=output,
@@ -179,7 +157,7 @@ def test_ask_holmes(
         test_case=test_case,
         eval_span=eval_span,
         caplog=caplog,
-        suggested_memories=suggested_memories if suggest_on else None,
+        suggested_memories=suggested_memories,
     )
 
     if eval_span:
@@ -189,7 +167,6 @@ def test_ask_holmes(
             model=model,
             result=result,
             scores=scores,
-            tool_suggestions=tool_suggestions,
             suggested_memories=suggested_memories,
         )
 
@@ -210,13 +187,12 @@ def test_ask_holmes(
             f"used {actual_tokens} tokens, max allowed is {test_case.max_tokens}"
         )
 
-    # Hard yes/no memory check on the suggest=on variant. Content quality is
-    # scored by the LLM judge via update_test_results above (the judge sees
-    # the emitted memories and the eval's expected_output together). The
-    # correctness score is reset to 0 BEFORE the assertion fires so the
-    # GitHub markdown report reflects the failure even though the judge
-    # already wrote a 1.
-    if suggest_on and test_case.memories_generated is not None:
+    # Hard yes/no memory check. Content quality is scored by the LLM judge
+    # via update_test_results above (the judge sees the emitted memories and
+    # the eval's expected_output together). The correctness score is reset
+    # to 0 BEFORE the assertion fires so the GitHub markdown report reflects
+    # the failure even though the judge already wrote a 1.
+    if test_case.memories_generated is not None:
         actual = len(suggested_memories)
         memory_check_failed = (
             (test_case.memories_generated and actual < 1)
@@ -227,17 +203,17 @@ def test_ask_holmes(
             scores["correctness"] = 0
         if test_case.memories_generated:
             assert actual >= 1, (
-                f"Test {test_case.id} expected at least one memory on "
-                f"suggest=on but the LLM emitted zero. The eval is designed "
-                f"to teach an env-specific tool-call correction; if Holmes "
-                f"isn't capturing it the suggest_runbooks prompt/tool needs "
+                f"Test {test_case.id} expected at least one memory but the "
+                f"LLM emitted zero. The eval is designed to teach an "
+                f"env-specific tool-call correction; if Holmes isn't "
+                f"capturing it the suggest_runbooks prompt/tool needs "
                 f"tightening."
             )
         else:
             assert actual == 0, (
-                f"Test {test_case.id} expected NO memories on suggest=on but "
-                f"the LLM emitted {actual}. This usually means the "
-                f"suggest_runbooks tool/prompt is being too eager. "
+                f"Test {test_case.id} expected NO memories but the LLM "
+                f"emitted {actual}. This usually means the suggest_runbooks "
+                f"tool/prompt is being too eager. "
                 f"Memories:\n{suggested_memories}"
             )
 
@@ -252,11 +228,10 @@ def test_ask_holmes(
     # SKILL.md files in a tempdir, run the same prompt again with those
     # skills injected, and check that the agent (a) fetched the skill —
     # proving it judged the memory relevant — and (b) still produces the
-    # correct answer. Skips when not applicable (suggest=off, no memories
-    # emitted, or rerun_with_memory not set).
+    # correct answer. Skips when no memories were emitted or
+    # rerun_with_memory is not set.
     replay_eligible = (
-        suggest_on
-        and test_case.memories_generated
+        test_case.memories_generated
         and getattr(test_case, "rerun_with_memory", False)
         and suggested_memories
     )
@@ -280,7 +255,7 @@ def test_ask_holmes(
                         tracer=tracer,
                         eval_span=replay_span,
                         additional_system_prompt=additional_system_prompt,
-                        tool_suggestions=None,  # no suggest_runbooks on replay
+                        inject_suggest_runbooks=False,  # skip on replay
                         additional_skill_paths=[skills_dir],
                         request=request,
                     )
@@ -364,7 +339,7 @@ def ask_holmes(
     tracer,
     eval_span,
     additional_system_prompt,
-    tool_suggestions: Optional[ToolSuggestionsConfig] = None,
+    inject_suggest_runbooks: bool = True,
     additional_skill_paths: Optional[list] = None,
     request=None,
 ) -> LLMResult:
@@ -395,8 +370,8 @@ def ask_holmes(
             tool_results_dir=tool_results_dir,
         )
 
-        if tool_suggestions is not None:
-            ai, _injected = maybe_inject_suggest_runbooks_tool(ai, tool_suggestions)
+        if inject_suggest_runbooks:
+            ai = inject_suggest_runbooks_tool(ai)
 
         test_type = (
             test_case.test_type

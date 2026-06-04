@@ -8,10 +8,10 @@
 # `{__name__=~".*kafka.*"}` or `label_values(__name__)`) to discover
 # the real prefix `acme_kafka_*`.
 #
-# On suggest=on the LLM should capture this lesson: "Kafka metrics in
-# this cluster live under the `acme_kafka_*` prefix, not the upstream
-# `kafka_*` names — always discover the real metric name via label
-# enumeration before querying."
+# The LLM should capture this lesson: "Kafka metrics in this cluster
+# live under the `acme_kafka_*` prefix, not the upstream `kafka_*`
+# names — always discover the real metric name via label enumeration
+# before querying."
 
 user_prompt: "How many messages have been consumed in total on the 'payments' Kafka topic in the app-262 cluster?"
 

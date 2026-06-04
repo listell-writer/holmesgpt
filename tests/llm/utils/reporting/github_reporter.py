@@ -444,8 +444,8 @@ def generate_markdown_report(
             markdown += f", {ask_holmes_mock_failures} mock failures"
         markdown += "\n"
     # Generate detailed table
-    markdown += "\n\n| Status | Test case | Suggest | Memories | Time | Turns | Tools | Cost | Total tokens | Input | Max input | Output | Max output | Cached | Non-cached | Reasoning | Compactions | Src |\n"
-    markdown += "| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |\n"
+    markdown += "\n\n| Status | Test case | Memories | Time | Turns | Tools | Cost | Total tokens | Input | Max input | Output | Max output | Cached | Non-cached | Reasoning | Compactions | Src |\n"
+    markdown += "| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |\n"
 
     # Track totals for summary row
     total_time = 0.0
@@ -572,19 +572,12 @@ def generate_markdown_report(
         max_prompt_str = _fmt_tokens(max_prompt)
         compactions_str = str(num_compactions) if num_compactions > 0 else "—"
 
-        # Tool-suggestions matrix dimension: which variant produced this row
-        # and whether the LLM emitted any memories. When the variant is "off"
-        # the LLM never had access to the SUGGEST_RUNBOOKS tool, so the
-        # memory count is shown as "n/a" rather than 0 to make that obvious.
-        tool_suggestions_variant = result.get("tool_suggestions", "off")
-        tool_suggestions_str = tool_suggestions_variant
+        # SUGGEST_RUNBOOKS is always injected; the count is how many
+        # env-specific corrections the LLM judged worth capturing this run.
         memories_count = result.get("memories_count", 0) or 0
-        if result.get("tool_suggestions_enabled"):
-            memories_str = f"{memories_count}" if memories_count else "0"
-        else:
-            memories_str = "n/a"
+        memories_str = str(memories_count)
 
-        markdown += f"| {primary_status_symbol} | {test_case_name} | {tool_suggestions_str} | {memories_str} | {time_str} | {turns_str} | {tools_str} | {cost_str} | {total_tokens_str} | {input_str} | {max_prompt_str} | {output_str} | {max_completion_str} | {cached_tokens_str} | {non_cached_tokens_str} | {reasoning_str} | {compactions_str} | {source_str} |\n"
+        markdown += f"| {primary_status_symbol} | {test_case_name} | {memories_str} | {time_str} | {turns_str} | {tools_str} | {cost_str} | {total_tokens_str} | {input_str} | {max_prompt_str} | {output_str} | {max_completion_str} | {cached_tokens_str} | {non_cached_tokens_str} | {reasoning_str} | {compactions_str} | {source_str} |\n"
 
         # If this test ran a closed-loop replay (rerun_with_memory: true and
         # a memory was actually captured), emit a second row labeled
@@ -654,7 +647,7 @@ def generate_markdown_report(
 
             # Replay shares the parent row's Src link — same test_case.yaml.
             markdown += (
-                f"| {replay_status} | {replay_name} | — | {replay_mem_str} | "
+                f"| {replay_status} | {replay_name} | {replay_mem_str} | "
                 f"{r_time_str} | {r_turns_str} | {r_tools_str} | {r_cost_str} | "
                 f"{r_total_tokens_str} | {r_input_str} | {r_max_prompt_str} | "
                 f"{r_output_str} | {r_max_completion_str} | {r_cached_str} | "
@@ -676,24 +669,13 @@ def generate_markdown_report(
     max_completion_max_str = _fmt_tokens(max_completion_per_call_max)
     max_prompt_max_str = _fmt_tokens(max_prompt_per_call_max)
     total_compactions_str = str(total_compactions) if total_compactions > 0 else "—"
-    # Aggregate memories across the suggest=on rows so the totals row mirrors
-    # the per-row column: count of rows where the matrix injected the tool,
-    # and the total number of suggestions those rows produced.
-    rows_with_suggest_on = sum(
-        1 for r in sorted_results if r.get("tool_suggestions_enabled")
-    )
+    # Total memories captured across all rows (SUGGEST_RUNBOOKS is always
+    # injected, so any row may emit memories).
     total_memories_sum = sum(
-        (r.get("memories_count") or 0)
-        for r in sorted_results
-        if r.get("tool_suggestions_enabled")
+        (r.get("memories_count") or 0) for r in sorted_results
     )
-    suggest_total_str = (
-        f"{rows_with_suggest_on}/{len(sorted_results)} on" if rows_with_suggest_on else "—"
-    )
-    memories_total_str = (
-        f"**{total_memories_sum}**" if rows_with_suggest_on else "—"
-    )
-    markdown += f"| | **Total** | {suggest_total_str} | {memories_total_str} | **{avg_time_str}** avg | **{avg_turns_str}** avg | **{avg_tools_str}** avg | **{total_cost_str}** | **{total_tokens_total_str}** | **{total_prompt_str}** | **{max_prompt_max_str}** | **{total_completion_str}** | **{max_completion_max_str}** | **{total_cached_tokens_str}** | **{total_non_cached_tokens_str}** | **{total_reasoning_str}** | **{total_compactions_str}** | |\n"
+    memories_total_str = f"**{total_memories_sum}**" if total_memories_sum else "—"
+    markdown += f"| | **Total** | {memories_total_str} | **{avg_time_str}** avg | **{avg_turns_str}** avg | **{avg_tools_str}** avg | **{total_cost_str}** | **{total_tokens_total_str}** | **{total_prompt_str}** | **{max_prompt_max_str}** | **{total_completion_str}** | **{max_completion_max_str}** | **{total_cached_tokens_str}** | **{total_non_cached_tokens_str}** | **{total_reasoning_str}** | **{total_compactions_str}** | |\n"
 
     # Add footer explaining when no baseline available
     if not benchmark and not master:

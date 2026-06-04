@@ -190,7 +190,6 @@ def log_to_braintrust(
     result: Optional[Union[LLMResult, CompactionResult]] = None,
     scores: Optional[dict] = None,
     error: Optional[Exception] = None,
-    tool_suggestions: Optional[Any] = None,
     suggested_memories: Optional[List[Any]] = None,
 ) -> None:
     """Log evaluation data to Braintrust.
@@ -210,8 +209,6 @@ def log_to_braintrust(
     # Prepare tags
     tags = (test_case.tags or []).copy()
     tags.append(f"model:{model}")
-    if tool_suggestions is not None:
-        tags.append(f"tool_suggestions:{tool_suggestions.name}")
 
     # Determine output based on test type and error state
     if error:
@@ -251,12 +248,6 @@ def log_to_braintrust(
         "test_id": test_case.id,  # Full test case ID with variant suffix if present
     }
 
-    # Tool-suggestions matrix dimension. When this variant is "on" the
-    # SUGGEST_RUNBOOKS tool was available to the LLM and any memories it
-    # generated are logged below so they're visible in Braintrust traces.
-    if tool_suggestions is not None:
-        metadata["tool_suggestions"] = tool_suggestions.name
-        metadata["tool_suggestions_enabled"] = bool(tool_suggestions.enabled)
     if suggested_memories is not None:
         metadata["memories_count"] = len(suggested_memories)
         if suggested_memories:

@@ -150,13 +150,14 @@ class HolmesTestCase(BaseModel):
     max_tokens: Optional[int] = (
         None  # Maximum total tokens allowed; test fails if exceeded
     )
-    # On the tool_suggestions=on matrix variant only:
-    # - True  → the test fails if the LLM emits zero memories via suggest_runbooks
+    # SUGGEST_RUNBOOKS is injected on every run, so memory emission can occur
+    # on any eval. This field controls the assertion:
+    # - True  → the test fails if the LLM emits zero memories
     # - False → the test fails if the LLM emits any memories
     # - None  → no count enforcement (legacy / unspecified)
-    # Either way, when the suggest=on variant runs, the emitted memories are
-    # surfaced to the LLM judge alongside `expected_output`, so memory content
-    # quality is scored by the judge — no extra wrapper fields are needed here.
+    # The emitted memories are surfaced to the LLM judge alongside
+    # `expected_output`, so memory content quality is scored by the judge —
+    # no extra wrapper fields are needed here.
     memories_generated: Optional[bool] = None
     # When memories_generated=True and the first pass actually emitted
     # memories, also run the same prompt a SECOND time with those memories

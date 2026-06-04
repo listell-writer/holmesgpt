@@ -1,22 +1,17 @@
-"""Tool suggestions matrix configuration for parameterized eval runs.
+"""Tool suggestions wiring for LLM eval runs.
 
-This module defines a "tool_suggestions" matrix that runs each eval twice
-by default — once with the SUGGEST_RUNBOOKS frontend tool (and matching
-system prompt addition) injected, and once without — so we can compare
-results in CI / regression reports and see which "skills/memories" the
-LLM would have generated for each eval via Braintrust traces.
-
-Format: TOOL_SUGGESTIONS_CONFIGS='on,off' (comma-separated list of
-configuration names; defaults to running both variants).
+Always injects the SUGGEST_RUNBOOKS frontend noop tool and its system-prompt
+block so every eval has access to the "capture an env-specific tool-call
+correction" skill. Memory emission is recorded on the run for the GitHub
+report and (for evals that opt in via ``rerun_with_memory``) replayed
+through the SkillsToolset.
 """
 
 from __future__ import annotations
 
 import json
 import logging
-import os
-from dataclasses import dataclass
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional
 
 from holmes.core.tools_utils.frontend_tools import build_frontend_noop_tool
 
@@ -277,74 +272,11 @@ SUGGEST_RUNBOOKS_SYSTEM_PROMPT = (
 )
 
 
-@dataclass
-class ToolSuggestionsConfig:
-    """A single variant in the tool_suggestions matrix."""
-
-    name: str
-    enabled: bool
-
-    def __repr__(self) -> str:  # pragma: no cover - debugging aid
-        return f"ToolSuggestionsConfig({self.name}, enabled={self.enabled})"
-
-
-_KNOWN_CONFIGS: Dict[str, ToolSuggestionsConfig] = {
-    "on": ToolSuggestionsConfig(name="on", enabled=True),
-    "off": ToolSuggestionsConfig(name="off", enabled=False),
-}
-
-
-def parse_tool_suggestions_configs(raw: str) -> List[ToolSuggestionsConfig]:
-    """Parse a comma-separated string of variant names into configs.
-
-    Returns the default matrix (both ``on`` and ``off``) when ``raw`` is
-    empty. Raises ``ValueError`` for unknown variant names so typos in CI
-    fail loudly rather than silently dropping a column from the matrix.
+def inject_suggest_runbooks_tool(ai: Any) -> Any:
+    """Return a clone of ``ai`` with the SUGGEST_RUNBOOKS frontend noop tool
+    injected. Always injects — callers that don't want the tool (e.g. the
+    closed-loop replay pass) should simply skip this call.
     """
-    if not raw or not raw.strip():
-        return [_KNOWN_CONFIGS["on"], _KNOWN_CONFIGS["off"]]
-
-    seen: List[str] = []
-    configs: List[ToolSuggestionsConfig] = []
-    for name in raw.split(","):
-        name = name.strip().lower()
-        if not name:
-            continue
-        if name not in _KNOWN_CONFIGS:
-            raise ValueError(
-                f"Unknown tool_suggestions variant: '{name}'. "
-                f"Allowed: {sorted(_KNOWN_CONFIGS)}"
-            )
-        if name in seen:
-            continue
-        seen.append(name)
-        configs.append(_KNOWN_CONFIGS[name])
-
-    return configs or [_KNOWN_CONFIGS["on"], _KNOWN_CONFIGS["off"]]
-
-
-def get_tool_suggestions_configs() -> List[ToolSuggestionsConfig]:
-    """Return the active tool_suggestions matrix.
-
-    By default the matrix is both ``on`` and ``off`` so regression eval
-    reports show results with and without the SUGGEST_RUNBOOKS tool. The
-    set can be overridden with the ``TOOL_SUGGESTIONS_CONFIGS`` env var,
-    e.g. ``TOOL_SUGGESTIONS_CONFIGS=off`` to skip the on variant locally.
-    """
-    return parse_tool_suggestions_configs(os.environ.get("TOOL_SUGGESTIONS_CONFIGS", ""))
-
-
-def maybe_inject_suggest_runbooks_tool(
-    ai: Any, config: ToolSuggestionsConfig
-) -> Tuple[Any, bool]:
-    """If ``config.enabled``, return a clone of ``ai`` with the SUGGEST_RUNBOOKS
-    frontend noop tool injected, plus a flag indicating injection happened.
-
-    Otherwise return ``ai`` unchanged.
-    """
-    if not config.enabled:
-        return ai, False
-
     tool = build_frontend_noop_tool(
         name=SUGGEST_RUNBOOKS_TOOL_NAME,
         description=SUGGEST_RUNBOOKS_TOOL_DESCRIPTION,
@@ -352,15 +284,15 @@ def maybe_inject_suggest_runbooks_tool(
         canned_response=SUGGEST_RUNBOOKS_NOOP_RESPONSE,
     )
     cloned_executor = ai.tool_executor.clone_with_extra_tools([tool])
-    return ai.with_executor(cloned_executor), True
+    return ai.with_executor(cloned_executor)
 
 
 def append_suggest_runbooks_system_prompt(
-    additional_system_prompt: Optional[str], config: ToolSuggestionsConfig
-) -> Optional[str]:
-    """Append the SUGGEST_RUNBOOKS system prompt block when enabled."""
-    if not config.enabled:
-        return additional_system_prompt
+    additional_system_prompt: Optional[str],
+) -> str:
+    """Append the SUGGEST_RUNBOOKS system prompt block to the caller's
+    existing system prompt (or return it standalone if there isn't one).
+    """
     if additional_system_prompt:
         return f"{additional_system_prompt}\n\n{SUGGEST_RUNBOOKS_SYSTEM_PROMPT}"
     return SUGGEST_RUNBOOKS_SYSTEM_PROMPT
