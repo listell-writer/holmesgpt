@@ -5,7 +5,7 @@ from contextlib import ExitStack
 from datetime import datetime
 from os import path
 from pathlib import Path
-from typing import Optional
+from typing import List, Optional, Union
 from unittest.mock import patch
 
 import pytest
@@ -265,6 +265,13 @@ def test_ask_holmes(
                         additional_system_prompt=additional_system_prompt,
                         inject_suggest_runbooks=False,  # skip on replay
                         additional_skill_paths=[skills_dir],
+                        # Use the softer replay-only prompt when set, so the
+                        # agent has to actually decide to use a skill
+                        # instead of following the failure-path instructions
+                        # baked into the primary prompt.
+                        override_user_prompt=getattr(
+                            test_case, "replay_user_prompt", None
+                        ),
                         request=request,
                     )
                     replay_duration = time.time() - replay_start
@@ -349,8 +356,16 @@ def ask_holmes(
     additional_system_prompt,
     inject_suggest_runbooks: bool = True,
     additional_skill_paths: Optional[list] = None,
+    override_user_prompt: Optional[Union[str, List[str]]] = None,
     request=None,
 ) -> LLMResult:
+    # When the caller wants to ask the agent a different question than the
+    # one declared on the test case (used by the closed-loop replay to
+    # simulate a "future investigation" with a softer phrasing), substitute
+    # the prompt at the seams where it's read below.
+    user_prompt = (
+        override_user_prompt if override_user_prompt is not None else test_case.user_prompt
+    )
     with eval_span.start_span(
         "Initialize Toolsets",
         type=SpanType.TASK.value,
@@ -405,7 +420,7 @@ def ask_holmes(
                             f"Expected format: {{'skills': [...]}}, got: {test_case.skills}"
                         ) from e
                 messages = build_initial_ask_messages(
-                    initial_user_prompt=test_case.user_prompt,
+                    initial_user_prompt=user_prompt,
                     file_paths=None,
                     tool_executor=ai.tool_executor,
                     skills=skills,
@@ -413,7 +428,7 @@ def ask_holmes(
                 )
         else:
             chat_request = ChatRequest(
-                ask=test_case.user_prompt,
+                ask=user_prompt,
                 additional_system_prompt=additional_system_prompt,
             )
             config = Config()

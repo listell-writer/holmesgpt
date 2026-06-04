@@ -26,6 +26,12 @@
 
 user_prompt: 'In Loki, run the query `{service="checkout"}` against namespace app-263 and tell me how many error-level log lines come back. If the selector returns nothing, find the right one.'
 
+# Replay prompt: a natural version of the same question. Primary uses the
+# biased phrasing to force the wrong→right correction (so a memory is
+# emitted). Replay simulates a future investigation asking the question
+# naturally — which is when the captured skill should pay off.
+replay_user_prompt: "In Loki, how many error-level log lines does the checkout service in namespace app-263 emit?"
+
 expected_output:
   - "There are 4 error-level log lines from the checkout service in app-263"
 
