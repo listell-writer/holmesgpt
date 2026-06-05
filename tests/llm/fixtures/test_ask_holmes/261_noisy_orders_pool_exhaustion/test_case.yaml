@@ -5,10 +5,16 @@
 # recent signal (a fresh deploy, a crashing pod, scary DB log lines) and blames
 # the wrong thing, instead of tracing the actual failure to its real cause.
 #
-# Scenario: orders-api fails ~30% of order writes. The REAL cause is discoverable:
-# its DB connection pool max is misconfigured to 2 in the orders-config ConfigMap,
-# so the pool is exhausted under normal load (logs: "pool exhausted: active=2
-# max=2 ... err=ORD_POOL_7k3m9x"). The database itself is healthy.
+# Scenario: orders-api fails ~22% of order writes with connection-pool acquire
+# timeouts (ORD_POOL_7k3m9x). The OBVIOUS answer — "the pool is too small, raise
+# connection-pool-max" — is WRONG: the pool max (50) is reasonable. It saturates
+# only because every order transaction is abnormally slow (~2s), which the
+# successful-save logs show as "commit_ms=~2000 (audit_sync=on)". The real root
+# cause is audit-sync-writes=true in orders-config forcing a synchronous fsync per
+# audit row inside each transaction. The fix is to make audit writes async, not to
+# grow the pool. This is a cascade where the proximate symptom (pool saturation)
+# masks the true cause, and is exactly the kind of trap that leads to a confident
+# but wrong/band-aid root cause. The database itself is healthy.
 #
 # Surrounding noise (all unrelated to the order failures):
 #   - recommendations-api was just deployed (rollout) AND is OOMKilled/restarting.
@@ -38,12 +44,11 @@ user_prompt: |
 include_tool_calls: true
 
 expected_output:
-  - "Identifies the root cause: orders-api order saves fail because its database connection pool is starved/too small — the pool max is misconfigured to 2 in the orders-config ConfigMap (key connection-pool-max), so requests time out waiting to acquire a connection"
-  - "Cites the concrete evidence: the misconfigured pool max value of 2 read from the orders-config ConfigMap, AND the ORD_POOL_7k3m9x connection-acquire-timeout errors in the orders-api logs (this proves the ConfigMap and logs were actually read)"
-  - "Gives the specific fix: raise connection-pool-max in the orders-config ConfigMap to a realistic value — not a vague 'investigate further'"
-  - "Does NOT attribute the order failures to the recent orders-api deployment/rollout or the new pgx db driver — the rollout did not change the pool size, so the recent deploy is not the cause even though it is temporally correlated"
-  - "Does NOT blame the failed kafka event publishing (KAFKA_PUBLISH_8c1f / broker not available) — those log lines explicitly say the order was already saved, so they are a post-commit side effect, not the cause of orders failing to save"
-  - "Does NOT blame the orders-db database (it is healthy; the 'connection reset by peer' / 'unexpected EOF' / checkpoint log lines are benign), nor any of the other unrelated noisy services as the cause of the order-save failures — e.g. the session-store 'redis connection pool nearing limit' warning (a different, healthy pool), the recommendations-api or inventory-api deploy/OOMKills, the crashlooping cache-exporter or notification-worker, the billing-api tax-service timeouts, the search-api slow-query/circuit-breaker warnings, the api-gateway 502/504 lines, or the payments-api retry warnings"
+  - "Identifies the REAL (root) cause as a cascade: orders fail to save because the DB connection pool is saturated, and the pool saturates only because every order transaction is abnormally slow (~2 seconds) due to synchronous per-row audit writes (audit-sync-writes=true in the orders-config ConfigMap) holding connections open. The connection pool max (50) is itself reasonable, not the root problem"
+  - "Cites the concrete evidence connecting the cascade: the ORD_POOL_7k3m9x connection-acquire-timeout errors AND the ~2000ms commit times logged with audit_sync=on, AND the audit-sync-writes=true setting in orders-config (proves the logs and ConfigMap were actually read)"
+  - "Gives a fix that addresses the slow transactions: disable/relax synchronous audit writes (set audit-sync-writes=false) or make the audit writes asynchronous/batched so connections are released quickly"
+  - "Does NOT present 'the connection pool is too small' or 'increase connection-pool-max' as the root cause or the primary fix — the pool (50) is adequately sized for normal-speed transactions, and raising it only masks the underlying slow-transaction problem"
+  - "Does NOT attribute the order failures to: the recent orders-api deploy / new pgx driver (the rollout did not change the audit setting); the failed kafka event publishing (KAFKA_PUBLISH_8c1f — those lines say the order was already saved); the orders-db database (it is healthy; the 'connection reset by peer' / 'unexpected EOF' / checkpoint lines are benign); or any other noisy service (session-store's benign 'redis pool nearing limit' warning, recommendations-api/inventory-api deploy/OOMKills, the crashlooping cache-exporter or notification-worker, billing-api tax-service timeouts, search-api slow-query/circuit-breaker warnings, api-gateway 502/504 lines, or payments-api retry warnings)"
 
 tags:
   - kubernetes
@@ -88,10 +93,18 @@ before_test: |
     exit 1
   fi
 
-  # Confirm the misconfigured value is readable in the ConfigMap (the fix target).
+  # Confirm the real culprit flag is readable in the ConfigMap (the fix target),
+  # and that the pool is NOT the small-misconfig trap from earlier versions.
+  AUDIT=$(kubectl get configmap orders-config -n app-261 -o jsonpath='{.data.audit-sync-writes}' 2>/dev/null || true)
   POOL_MAX=$(kubectl get configmap orders-config -n app-261 -o jsonpath='{.data.connection-pool-max}' 2>/dev/null || true)
-  if [ "$POOL_MAX" != "2" ]; then
-    echo "ERROR: expected orders-config connection-pool-max=2 but got '$POOL_MAX'"
+  if [ "$AUDIT" != "true" ] || [ "$POOL_MAX" != "50" ]; then
+    echo "ERROR: expected orders-config audit-sync-writes=true and connection-pool-max=50 but got audit='$AUDIT' pool='$POOL_MAX'"
+    exit 1
+  fi
+
+  # Confirm the slow-commit evidence (the real cause) is visible in the logs.
+  if ! kubectl logs -l app=orders-api -n app-261 --tail=200 2>/dev/null | grep -q "audit_sync=on"; then
+    echo "ERROR: slow-commit audit_sync evidence not seen in orders-api logs"
     exit 1
   fi
 

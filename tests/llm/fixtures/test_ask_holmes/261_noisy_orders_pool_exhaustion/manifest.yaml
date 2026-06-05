@@ -3,20 +3,25 @@ kind: Namespace
 metadata:
   name: app-261
 ---
-# TRUE ROOT CAUSE lives here: the DB connection pool max is misconfigured to 2.
-# orders-api reads this value and exhausts its pool under normal load, failing a
-# fraction of requests. The database itself is healthy and underutilized.
+# TRUE ROOT CAUSE lives here, but it is a CASCADE and the obvious answer is wrong.
+# The pool max (50) is reasonable. The pool saturates because every order
+# transaction is abnormally slow (~2s) — audit-sync-writes=true forces a
+# synchronous fsync per audit row inside each order transaction, holding DB
+# connections open far too long. The real fix is to make audit writes async, NOT
+# to keep growing the pool (which only masks the slow-transaction problem).
 apiVersion: v1
 kind: ConfigMap
 metadata:
   name: orders-config
   namespace: app-261
 data:
-  # Intended to be ~50; a bad edit left it at 2. This is the real problem.
-  connection-pool-max: "2"
+  connection-pool-max: "50"
   connection-acquire-timeout-ms: "250"
   db-host: "orders-db.app-261.svc"
   db-port: "5432"
+  # When true, each audited write fsyncs every audit row synchronously inside the
+  # order transaction, making each transaction take ~2 seconds.
+  audit-sync-writes: "true"
   feature-async-fulfilment: "true"
 ---
 apiVersion: v1
@@ -30,29 +35,31 @@ stringData:
 
     MAXC = os.environ.get("CONNECTION_POOL_MAX", "?")
     ACQ = os.environ.get("CONNECTION_ACQUIRE_TIMEOUT_MS", "?")
+    AUDIT = os.environ.get("AUDIT_SYNC_WRITES", "?")
 
     def log(level, msg):
         ts = datetime.datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%S.%fZ")
         print(f"{ts} {level} {msg}", flush=True)
 
     VERSION = os.environ.get("APP_VERSION", "unknown")
-    log("INFO", f"orders-api v{VERSION} starting; initialising db connection pool (driver=pgx)")
+    log("INFO", f"orders-api v{VERSION} starting; db pool initialised max={MAXC} (driver=pgx); audit_sync_writes={AUDIT}")
     log("INFO", "connected to orders-db.app-261.svc:5432 (db reachable, handshake ok)")
 
     oid = 80500
     while True:
         oid += 1
-        # Whether the order is SAVED is independent of the kafka publish below.
-        # The save failure (the real problem) reports only the symptom — a timeout
-        # acquiring a db connection with a growing wait queue — NOT the pool size.
-        # The misconfigured max=2 must be discovered by reading orders-config.
+        # CASCADE: the pool (max=50) saturates only because each transaction is
+        # abnormally slow. Successful saves log ~2s commit times with audit_sync=on
+        # — that is the real cause. The failures report just the proximate symptom
+        # (cannot acquire a connection in time). Reporting "pool too small / raise
+        # the pool" as the root cause is the trap; the pool is adequately sized for
+        # normal-speed transactions.
         saved = random.random() >= 0.22
         if saved:
-            log("INFO", f"order persisted order=ORD-{oid} db_latency_ms={random.randint(3,21)}")
-            # RED HERRING: a loud, frequent post-commit event publish that fails
-            # because no kafka broker is deployed. The order is ALREADY saved, so
-            # this does not cause order failures — but it names a down dependency
-            # and is tempting to blame.
+            log("INFO", f"order persisted order=ORD-{oid} commit_ms={random.randint(1900,2400)} (audit_sync=on: fsync per audit row)")
+            # RED HERRING: a loud post-commit event publish that fails because no
+            # kafka broker is deployed. The order is ALREADY saved, so this does
+            # not cause order failures, but it names a down dependency.
             if random.random() < 0.55:
                 log("ERROR", f"order ORD-{oid} saved, but failed to publish order-created event to kafka topic orders.v1: broker orders-kafka.app-261.svc:9092 not available (code=KAFKA_PUBLISH_8c1f) — will retry asynchronously")
         else:
@@ -93,6 +100,11 @@ spec:
                 configMapKeyRef:
                   name: orders-config
                   key: connection-acquire-timeout-ms
+            - name: AUDIT_SYNC_WRITES
+              valueFrom:
+                configMapKeyRef:
+                  name: orders-config
+                  key: audit-sync-writes
           volumeMounts:
             - name: app
               mountPath: /app
