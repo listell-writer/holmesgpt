@@ -147,19 +147,24 @@ before_test: |
       }
     }' > /dev/null
 
-  # 1=trace 2=debug 3=info 4=warn 5=error 6=fatal — same as 264
+  # Convention: 1=trace 2=debug 3=info 4=warn 5=error 6=fatal (winston/
+  # bunyan style — higher = more severe). syslog goes the OTHER way
+  # (0=emerg ... 7=debug), so the bare integers are ambiguous. We embed
+  # the level name in the message text itself so any agent that samples
+  # a single doc can disambiguate — that mirrors how a real customer
+  # would discover the mapping when reading logs.
   BULK_B=""
   for i in $(seq 1 6); do
     TS=$(printf '2026-06-03T08:00:%02dZ' "$i")
-    BULK_B="${BULK_B}{\"index\":{}}\n{\"severity_num\":5,\"svc\":\"order-268\",\"msg\":\"DB timeout $i\",\"@timestamp\":\"${TS}\"}\n"
+    BULK_B="${BULK_B}{\"index\":{}}\n{\"severity_num\":5,\"svc\":\"order-268\",\"msg\":\"[ERROR] DB timeout $i\",\"@timestamp\":\"${TS}\"}\n"
   done
   for i in $(seq 1 2); do
     TS=$(printf '2026-06-03T08:01:%02dZ' "$i")
-    BULK_B="${BULK_B}{\"index\":{}}\n{\"severity_num\":6,\"svc\":\"order-268\",\"msg\":\"Disk full $i\",\"@timestamp\":\"${TS}\"}\n"
+    BULK_B="${BULK_B}{\"index\":{}}\n{\"severity_num\":6,\"svc\":\"order-268\",\"msg\":\"[FATAL] Disk full $i\",\"@timestamp\":\"${TS}\"}\n"
   done
   for i in $(seq 1 5); do
     TS=$(printf '2026-06-03T08:02:%02dZ' "$i")
-    BULK_B="${BULK_B}{\"index\":{}}\n{\"severity_num\":3,\"svc\":\"order-268\",\"msg\":\"Info $i\",\"@timestamp\":\"${TS}\"}\n"
+    BULK_B="${BULK_B}{\"index\":{}}\n{\"severity_num\":3,\"svc\":\"order-268\",\"msg\":\"[INFO] healthcheck $i\",\"@timestamp\":\"${TS}\"}\n"
   done
   echo -e "$BULK_B" | curl -sf -X POST "${ELASTICSEARCH_URL}/${IDX_B}/_bulk" \
     -H "Content-Type: application/x-ndjson" \
