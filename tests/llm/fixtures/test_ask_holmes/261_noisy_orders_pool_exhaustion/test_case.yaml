@@ -66,8 +66,8 @@ before_test: |
   # implies the recent change touched DB connection handling. This is temporally
   # correlated with the incident and is exactly the kind of "it broke right after
   # the deploy" signal that lures a root-causer away from the standing misconfig.
-  # The rollout does NOT change connection-pool-max (still 2), so the deploy is a
-  # red herring — the pool starvation predates and is independent of it.
+  # The rollout does NOT change the audit setting, so the deploy is a red herring
+  # — the slow transactions / pool saturation are independent of it.
   kubectl annotate deployment/orders-api -n app-261 \
     kubernetes.io/change-cause="bump orders-api v2.6.0 -> v2.7.0: migrate to pgx db driver v5 (connection pooling rewrite)" --overwrite >/dev/null
   kubectl set env deployment/orders-api -n app-261 APP_VERSION=2.7.0 >/dev/null
@@ -75,36 +75,33 @@ before_test: |
   # Additional unrelated recent deploy for noise.
   kubectl set env deployment/recommendations-api -n app-261 APP_VERSION=3.4.1 >/dev/null
 
-  # Verify the needle: orders-api must be emitting the pool-exhaustion error.
-  POOL_SEEN=false
+  # Verify BOTH needles in one loop (avoids a race where the failure lines appear
+  # before the slow-commit success lines): the pool-acquire-timeout error
+  # (ORD_POOL_7k3m9x) AND the ~2s slow-commit evidence (audit_sync=on) that points
+  # to the real root cause.
+  NEEDLES_SEEN=false
   for i in $(seq 1 90); do
-    LOGS=$(kubectl logs -l app=orders-api -n app-261 --tail=200 2>/dev/null || true)
-    if echo "$LOGS" | grep -q "ORD_POOL_7k3m9x"; then
-      echo "Setup verified - pool exhaustion error present in orders-api logs"
-      POOL_SEEN=true
+    LOGS=$(kubectl logs -l app=orders-api -n app-261 --tail=300 2>/dev/null || true)
+    if echo "$LOGS" | grep -q "ORD_POOL_7k3m9x" && echo "$LOGS" | grep -q "audit_sync=on"; then
+      echo "Setup verified - pool-acquire timeouts AND slow-commit (audit_sync) evidence present"
+      NEEDLES_SEEN=true
       break
     fi
     sleep 2
   done
-  if [ "$POOL_SEEN" = false ]; then
-    echo "ERROR: pool exhaustion error (ORD_POOL_7k3m9x) not seen in orders-api logs after 180s"
+  if [ "$NEEDLES_SEEN" = false ]; then
+    echo "ERROR: expected both ORD_POOL_7k3m9x and audit_sync=on in orders-api logs after 180s"
     kubectl get pods -n app-261
     kubectl logs -l app=orders-api -n app-261 --tail=50 || true
     exit 1
   fi
 
-  # Confirm the real culprit flag is readable in the ConfigMap (the fix target),
-  # and that the pool is NOT the small-misconfig trap from earlier versions.
+  # Confirm the real culprit flag and the (reasonable) pool size are readable in
+  # the ConfigMap — the audit flag is the fix target, the pool=50 is NOT the trap.
   AUDIT=$(kubectl get configmap orders-config -n app-261 -o jsonpath='{.data.audit-sync-writes}' 2>/dev/null || true)
   POOL_MAX=$(kubectl get configmap orders-config -n app-261 -o jsonpath='{.data.connection-pool-max}' 2>/dev/null || true)
   if [ "$AUDIT" != "true" ] || [ "$POOL_MAX" != "50" ]; then
     echo "ERROR: expected orders-config audit-sync-writes=true and connection-pool-max=50 but got audit='$AUDIT' pool='$POOL_MAX'"
-    exit 1
-  fi
-
-  # Confirm the slow-commit evidence (the real cause) is visible in the logs.
-  if ! kubectl logs -l app=orders-api -n app-261 --tail=200 2>/dev/null | grep -q "audit_sync=on"; then
-    echo "ERROR: slow-commit audit_sync evidence not seen in orders-api logs"
     exit 1
   fi
 
