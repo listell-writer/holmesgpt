@@ -53,6 +53,22 @@ class TestWarns:
             v.record(prompt_tokens=LARGE, cached_tokens=None)
         assert len(_warnings(caplog)) == 1
 
+    def test_warns_for_opaque_deployment_name_hiding_anthropic(self, caplog):
+        """The real-world case: an Azure AI / Bedrock deployment whose name gives
+        no hint it's Anthropic underneath, with caching misconfigured. The warning
+        must still fire because the gate is non-Gemini, not 'is anthropic'.
+        """
+        llm = _make_llm("azure/my-company-prod-deployment")
+        v = PromptCachingValidator(
+            model=llm.model, caching_enabled=llm.is_prompt_caching_enabled()
+        )
+        with caplog.at_level(logging.WARNING):
+            v.record(prompt_tokens=LARGE, cached_tokens=0)
+            v.record(prompt_tokens=LARGE, cached_tokens=0)
+        warnings = _warnings(caplog)
+        assert len(warnings) == 1
+        assert "azure/my-company-prod-deployment" in warnings[0]
+
     def test_warns_only_once_per_investigation(self, caplog):
         v = PromptCachingValidator(model="openai/gpt-4o", caching_enabled=True)
         with caplog.at_level(logging.WARNING):
@@ -115,6 +131,19 @@ class TestIsPromptCachingEnabled:
             "azure/gpt-4.1",
             "bedrock/anthropic.claude-sonnet-4-20250514-v1:0",
             "vertex_ai/claude-3-5-sonnet",
+        ]:
+            assert _make_llm(model).is_prompt_caching_enabled() is True, model
+
+    def test_opaque_custom_deployment_names_enabled(self):
+        """Azure AI / Bedrock deployments often have custom names that hide the
+        underlying Anthropic model. Detection is negative (non-Gemini), not based
+        on recognizing the model as Anthropic, so these still get the warning.
+        """
+        for model in [
+            "azure/my-company-prod-deployment",  # custom Azure AI deployment name
+            "azure_ai/team-llm-v2",
+            "bedrock/arn:aws:bedrock:us-east-1:123456789:provisioned-model/abc123",
+            "some-internal-gateway-model",  # opaque proxy/gateway name
         ]:
             assert _make_llm(model).is_prompt_caching_enabled() is True, model
 
