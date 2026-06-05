@@ -1,0 +1,7 @@
+# kubernetes/core gives Holmes everything it needs to solve this: pod logs,
+# events, and the orders-config ConfigMap that holds the misconfigured pool size.
+# The root cause IS discoverable here — the difficulty is separating it from the
+# surrounding noise (unrelated deploy, OOMKill, crashloop, benign DB log spam).
+toolsets:
+  kubernetes/core:
+    enabled: true

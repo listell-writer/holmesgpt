@@ -1,0 +1,8 @@
+# Only the Kubernetes core toolset is enabled. This is deliberate: the root cause
+# lives behind an EXTERNAL payment provider that Holmes has no toolset to inspect
+# (no internet access, no APM/metrics, no network diagnostics). Holmes can read
+# pod logs, events, and resource definitions but cannot prove what is happening
+# on the far side of the external call.
+toolsets:
+  kubernetes/core:
+    enabled: true

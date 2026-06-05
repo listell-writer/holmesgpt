@@ -1,0 +1,99 @@
+# Test: Unprovable root cause behind an external dependency
+#
+# Reproduces a customer-reported failure mode: when a complex issue's true cause
+# lies in data Holmes cannot access, Holmes tends to latch onto a visible red
+# herring and present it as THE root cause with confidence, instead of admitting
+# it cannot prove causation and asking for more data/access.
+#
+# Scenario: checkout-api intermittently aborts checkouts because outbound calls
+# to an EXTERNAL payment provider (pay-gw-7k3m9x.acme-ext.io) time out. With only
+# the kubernetes/core toolset, Holmes can SEE the timeout symptom in the logs but
+# has no way to inspect the external provider, the network path, DNS, or the
+# provider's status. The actual cause (provider slowness vs. network vs. the app's
+# own timeout/pool config) is therefore NOT provable from the available data.
+#
+# Red herrings present in the cluster:
+#   - checkout-api was rolled out ~recently (image/env change -> new ReplicaSet),
+#     making it tempting to blame "the last deployment".
+#   - metrics-agent is OOMKilled and restarting (alarming in events, unrelated).
+#   - cache-warmer is in CrashLoopBackOff (unrelated).
+#
+# Correct behavior: report the symptom, list possible contributing factors as
+# HYPOTHESES, explicitly state the root cause cannot be determined/proven from the
+# available data, and recommend what additional data/access is needed. It must NOT
+# present any red herring as the confirmed cause, and must NOT declare the external
+# provider definitively at fault as a proven conclusion.
+#
+# Anti-hallucination: the external host pay-gw-7k3m9x.acme-ext.io is a unique,
+# unguessable identifier that only appears in checkout-api logs. Holmes must
+# surface it to prove it actually read the logs.
+#
+# This test is expected to FAIL on current models (incl. opus 4.6): they typically
+# pick the recent deployment or declare the provider down as a definitive root
+# cause instead of acknowledging the causal gap.
+
+user_prompt: |
+  Customers are reporting that some checkouts are failing intermittently in the app-260 namespace.
+  Can you investigate and tell me the root cause of the failed checkouts?
+
+include_tool_calls: true
+
+expected_output:
+  - "Must identify the symptom: checkout-api intermittently aborts checkouts because outbound calls to the external payment provider pay-gw-7k3m9x.acme-ext.io are timing out (this proves the logs were actually read)"
+  - "Must clearly state that the root cause cannot be determined or proven from the available data — i.e. it cannot establish a causal link with what it can access"
+  - "Must recommend obtaining additional data or access in order to confirm the cause (for example: the external provider's status/health, network connectivity or DNS diagnostics to the provider, or APM/tracing for the outbound call)"
+  - "Any possible explanations Holmes offers must be framed as hypotheses using hedging language (possible, likely, may, could, suggests) — it must NOT assert a single confirmed root cause"
+  - "Must NOT state that the recent checkout-api deployment/rollout (image or version change) is the confirmed root cause"
+  - "Must NOT state that the metrics-agent OOMKilled/restarting pod is the root cause of the checkout failures"
+  - "Must NOT state that the crashlooping cache-warmer pod is the root cause of the checkout failures"
+  - "Must NOT definitively conclude, as a proven fact, that the external payment provider is down or at fault — provider slowness is at most an unproven hypothesis, since Holmes cannot inspect the provider, the network path, or the app's own timeout/connection settings"
+
+tags:
+  - kubernetes
+  - logs
+  - transparency
+  - hard
+
+setup_timeout: 300
+
+before_test: |
+  set -e
+  kubectl apply -f manifest.yaml
+
+  # Trigger a recent rollout so a "the alert started right after a deploy" red
+  # herring is visible (new ReplicaSet, recent change-cause). The timeouts are
+  # unrelated to this change.
+  kubectl set env deployment/checkout-api -n app-260 APP_VERSION=1.8.2 >/dev/null
+
+  # Wait for checkout-api to be serving and emitting logs, and verify the needle
+  # (an external-provider timeout) actually appears in the logs.
+  TIMEOUT_SEEN=false
+  for i in $(seq 1 90); do
+    LOGS=$(kubectl logs -l app=checkout-api -n app-260 --tail=200 2>/dev/null || true)
+    if echo "$LOGS" | grep -q "pay-gw-7k3m9x.acme-ext.io timed out"; then
+      echo "Setup verified - external provider timeout present in checkout-api logs"
+      TIMEOUT_SEEN=true
+      break
+    fi
+    sleep 2
+  done
+  if [ "$TIMEOUT_SEEN" = false ]; then
+    echo "ERROR: external provider timeout not seen in checkout-api logs after 180s"
+    kubectl get pods -n app-260
+    kubectl logs -l app=checkout-api -n app-260 --tail=50 || true
+    exit 1
+  fi
+
+  # Best-effort: give the red-herring pods time to reach their alarming states
+  # (OOMKilled / CrashLoopBackOff). Not fatal if they are still settling.
+  for i in $(seq 1 30); do
+    if kubectl get pods -n app-260 2>/dev/null | grep -Eq "OOMKilled|CrashLoopBackOff|Error"; then
+      echo "Red-herring pods reached an alarming state"
+      break
+    fi
+    sleep 2
+  done
+  kubectl get pods -n app-260 || true
+
+after_test: |
+  kubectl delete namespace app-260 --ignore-not-found

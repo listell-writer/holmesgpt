@@ -1,0 +1,102 @@
+# Test: Findable root cause buried in a noisy microservice environment
+#
+# Reproduces a customer-reported failure mode: in a busy environment with many
+# unrelated problems firing at once, Holmes gets distracted by the loudest/most
+# recent signal (a fresh deploy, a crashing pod, scary DB log lines) and blames
+# the wrong thing, instead of tracing the actual failure to its real cause.
+#
+# Scenario: orders-api fails ~30% of order writes. The REAL cause is discoverable:
+# its DB connection pool max is misconfigured to 2 in the orders-config ConfigMap,
+# so the pool is exhausted under normal load (logs: "pool exhausted: active=2
+# max=2 ... err=ORD_POOL_7k3m9x"). The database itself is healthy.
+#
+# Surrounding noise (all unrelated to the order failures):
+#   - recommendations-api was just deployed (rollout) AND is OOMKilled/restarting.
+#   - orders-db logs benign "connection reset by peer" lines + routine checkpoints
+#     (tempting to blame the database).
+#   - payments-api logs frequent transient retry WARNs that succeed.
+#   - cache-exporter is in CrashLoopBackOff (can't reach a cache that isn't there).
+#
+# Correct behavior: trace the order failures to pool exhaustion caused by the
+# misconfigured connection-pool-max=2 in orders-config, and explicitly rule out
+# (or at least NOT blame) the database, the recommendations-api deploy/OOM, and
+# the crashlooping cache-exporter.
+#
+# Anti-hallucination: the unique error code ORD_POOL_7k3m9x and the pool value 2
+# only exist in the logs/ConfigMap and cannot be guessed. Holmes must surface them
+# to prove it actually investigated rather than pattern-matched on the noise.
+#
+# This test is expected to FAIL on current models (incl. opus 4.6): they tend to
+# either blame the recent recommendations-api deploy/OOM, blame the database
+# because of the connection-reset noise, or miss that the pool size is the cause.
+
+user_prompt: |
+  Orders are intermittently failing to save in the app-261 namespace and customers are complaining.
+  There's a lot going on in this namespace right now. Can you find the actual root cause of the failing
+  orders and tell me specifically what to fix?
+
+include_tool_calls: true
+
+expected_output:
+  - "Must identify that orders-api is failing because its database connection pool is exhausted — the pool max is misconfigured to 2 in the orders-config ConfigMap (key connection-pool-max), so requests cannot acquire a connection"
+  - "Must reference the concrete evidence: the pool max value of 2 and/or the unique error code ORD_POOL_7k3m9x found in the orders-api logs (this proves the logs/ConfigMap were actually read)"
+  - "Must give the specific fix: increase connection-pool-max in the orders-config ConfigMap (e.g. to a realistic value like 50) — not a vague 'investigate further'"
+  - "Must NOT conclude that the orders-db database is the cause / is down / is overloaded — the 'connection reset by peer' and checkpoint log lines are benign and the database is healthy"
+  - "Must NOT attribute the order failures to the recommendations-api deployment/rollout"
+  - "Must NOT attribute the order failures to the recommendations-api OOMKilled/restarting pod"
+  - "Must NOT attribute the order failures to the crashlooping cache-exporter pod or a missing redis cache"
+  - "Must NOT attribute the order failures to the payments-api retry warnings"
+
+tags:
+  - kubernetes
+  - logs
+  - chain-of-causation
+  - hard
+
+setup_timeout: 300
+
+before_test: |
+  set -e
+  kubectl apply -f manifest.yaml
+
+  # Trigger a recent rollout of the UNRELATED recommendations-api so a "it broke
+  # right after a deploy" red herring is present and timestamped recently.
+  kubectl set env deployment/recommendations-api -n app-261 APP_VERSION=3.4.1 >/dev/null
+
+  # Verify the needle: orders-api must be emitting the pool-exhaustion error.
+  POOL_SEEN=false
+  for i in $(seq 1 90); do
+    LOGS=$(kubectl logs -l app=orders-api -n app-261 --tail=200 2>/dev/null || true)
+    if echo "$LOGS" | grep -q "ORD_POOL_7k3m9x"; then
+      echo "Setup verified - pool exhaustion error present in orders-api logs"
+      POOL_SEEN=true
+      break
+    fi
+    sleep 2
+  done
+  if [ "$POOL_SEEN" = false ]; then
+    echo "ERROR: pool exhaustion error (ORD_POOL_7k3m9x) not seen in orders-api logs after 180s"
+    kubectl get pods -n app-261
+    kubectl logs -l app=orders-api -n app-261 --tail=50 || true
+    exit 1
+  fi
+
+  # Confirm the misconfigured value is readable in the ConfigMap (the fix target).
+  POOL_MAX=$(kubectl get configmap orders-config -n app-261 -o jsonpath='{.data.connection-pool-max}' 2>/dev/null || true)
+  if [ "$POOL_MAX" != "2" ]; then
+    echo "ERROR: expected orders-config connection-pool-max=2 but got '$POOL_MAX'"
+    exit 1
+  fi
+
+  # Best-effort: let the noisy red-herring pods reach their alarming states.
+  for i in $(seq 1 30); do
+    if kubectl get pods -n app-261 2>/dev/null | grep -Eq "OOMKilled|CrashLoopBackOff|Error"; then
+      echo "Red-herring pods reached an alarming state"
+      break
+    fi
+    sleep 2
+  done
+  kubectl get pods -n app-261 || true
+
+after_test: |
+  kubectl delete namespace app-261 --ignore-not-found

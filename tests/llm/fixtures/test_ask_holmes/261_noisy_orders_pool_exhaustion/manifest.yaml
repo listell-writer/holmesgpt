@@ -1,0 +1,343 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: app-261
+---
+# TRUE ROOT CAUSE lives here: the DB connection pool max is misconfigured to 2.
+# orders-api reads this value and exhausts its pool under normal load, failing a
+# fraction of requests. The database itself is healthy and underutilized.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: orders-config
+  namespace: app-261
+data:
+  # Intended to be ~50; a bad edit left it at 2. This is the real problem.
+  connection-pool-max: "2"
+  connection-acquire-timeout-ms: "250"
+  db-host: "orders-db.app-261.svc"
+  db-port: "5432"
+  feature-async-fulfilment: "true"
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: orders-api-app
+  namespace: app-261
+stringData:
+  app.py: |
+    import os, time, random, datetime
+
+    MAXC = os.environ.get("CONNECTION_POOL_MAX", "?")
+    ACQ = os.environ.get("CONNECTION_ACQUIRE_TIMEOUT_MS", "?")
+
+    def log(level, msg):
+        ts = datetime.datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%S.%fZ")
+        print(f"{ts} {level} {msg}", flush=True)
+
+    log("INFO", f"orders-api starting; db pool initialised max={MAXC} acquire_timeout_ms={ACQ}")
+    log("INFO", "connected to orders-db.app-261.svc:5432 (db reachable, handshake ok)")
+
+    oid = 80500
+    while True:
+        oid += 1
+        if random.random() < 0.30:
+            log("ERROR", f"could not obtain connection from pool within {ACQ}ms (pool exhausted: active={MAXC} max={MAXC}) order=ORD-{oid} err=ORD_POOL_7k3m9x")
+        else:
+            log("INFO", f"order persisted order=ORD-{oid} db_latency_ms={random.randint(3,21)}")
+        time.sleep(0.5)
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: orders-api
+  namespace: app-261
+  labels:
+    app: orders-api
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: orders-api
+  template:
+    metadata:
+      labels:
+        app: orders-api
+    spec:
+      containers:
+        - name: orders-api
+          image: python:3.11-slim
+          command: ["python", "/app/app.py"]
+          env:
+            - name: CONNECTION_POOL_MAX
+              valueFrom:
+                configMapKeyRef:
+                  name: orders-config
+                  key: connection-pool-max
+            - name: CONNECTION_ACQUIRE_TIMEOUT_MS
+              valueFrom:
+                configMapKeyRef:
+                  name: orders-config
+                  key: connection-acquire-timeout-ms
+          volumeMounts:
+            - name: app
+              mountPath: /app
+          resources:
+            requests:
+              cpu: 10m
+              memory: 32Mi
+            limits:
+              cpu: 200m
+              memory: 96Mi
+      volumes:
+        - name: app
+          secret:
+            secretName: orders-api-app
+---
+# RED HERRING: the database is HEALTHY but logs benign "connection reset by peer"
+# lines (idle clients disconnecting) and routine checkpoints. Tempting to blame
+# the DB, but it is not the cause.
+apiVersion: v1
+kind: Secret
+metadata:
+  name: orders-db-app
+  namespace: app-261
+stringData:
+  app.py: |
+    import time, random, datetime
+
+    def log(msg):
+        ts = datetime.datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S.%f UTC")
+        print(f"{ts} [postgres] {msg}", flush=True)
+
+    log("LOG:  database system is ready to accept connections")
+    log("LOG:  autovacuum launcher started")
+    while True:
+        r = random.random()
+        if r < 0.25:
+            log("LOG:  could not receive data from client: Connection reset by peer")
+        elif r < 0.35:
+            log("LOG:  checkpoint complete: wrote 37 buffers (0.2%); 0 WAL file(s) added")
+        else:
+            log("LOG:  statement: COMMIT")
+        time.sleep(0.8)
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: orders-db
+  namespace: app-261
+  labels:
+    app: orders-db
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: orders-db
+  template:
+    metadata:
+      labels:
+        app: orders-db
+    spec:
+      containers:
+        - name: orders-db
+          image: python:3.11-slim
+          command: ["python", "/app/app.py"]
+          volumeMounts:
+            - name: app
+              mountPath: /app
+          resources:
+            requests:
+              cpu: 10m
+              memory: 32Mi
+            limits:
+              cpu: 200m
+              memory: 128Mi
+      volumes:
+        - name: app
+          secret:
+            secretName: orders-db-app
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: orders-db
+  namespace: app-261
+spec:
+  selector:
+    app: orders-db
+  ports:
+    - port: 5432
+      targetPort: 5432
+---
+# RED HERRING: recommendations-api was deployed recently (rollout triggered in
+# before_test) AND is OOMKilled/restarting. A classic "it broke right after a
+# deploy" + "look, a crashing pod" distraction. Unrelated to order failures.
+apiVersion: v1
+kind: Secret
+metadata:
+  name: recommendations-api-app
+  namespace: app-261
+stringData:
+  app.py: |
+    import time, datetime
+    ts = datetime.datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%S.%fZ")
+    print(f"{ts} INFO recommendations-api starting; loading model into memory", flush=True)
+    blocks = []
+    while True:
+        blocks.append(bytearray(3 * 1024 * 1024))
+        time.sleep(0.1)
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: recommendations-api
+  namespace: app-261
+  labels:
+    app: recommendations-api
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: recommendations-api
+  template:
+    metadata:
+      labels:
+        app: recommendations-api
+    spec:
+      containers:
+        - name: recommendations-api
+          image: python:3.11-slim
+          command: ["python", "/app/app.py"]
+          env:
+            - name: APP_VERSION
+              value: "3.4.0"
+          volumeMounts:
+            - name: app
+              mountPath: /app
+          resources:
+            requests:
+              cpu: 10m
+              memory: 16Mi
+            limits:
+              cpu: 100m
+              memory: 48Mi
+      volumes:
+        - name: app
+          secret:
+            secretName: recommendations-api-app
+---
+# RED HERRING: payments-api emits lots of transient retry WARNs that ultimately
+# succeed. Noise, not a failure.
+apiVersion: v1
+kind: Secret
+metadata:
+  name: payments-api-app
+  namespace: app-261
+stringData:
+  app.py: |
+    import time, random, datetime
+
+    def log(level, msg):
+        ts = datetime.datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%S.%fZ")
+        print(f"{ts} {level} {msg}", flush=True)
+
+    log("INFO", "payments-api starting listen=:8080")
+    pid = 5000
+    while True:
+        pid += 1
+        if random.random() < 0.4:
+            log("WARN", f"upstream ledger call slow, retrying (attempt 2/3) pay=PAY-{pid}")
+            log("INFO", f"payment captured on retry pay=PAY-{pid} latency_ms={random.randint(400,900)}")
+        else:
+            log("INFO", f"payment captured pay=PAY-{pid} latency_ms={random.randint(40,120)}")
+        time.sleep(0.6)
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: payments-api
+  namespace: app-261
+  labels:
+    app: payments-api
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: payments-api
+  template:
+    metadata:
+      labels:
+        app: payments-api
+    spec:
+      containers:
+        - name: payments-api
+          image: python:3.11-slim
+          command: ["python", "/app/app.py"]
+          volumeMounts:
+            - name: app
+              mountPath: /app
+          resources:
+            requests:
+              cpu: 10m
+              memory: 32Mi
+            limits:
+              cpu: 200m
+              memory: 96Mi
+      volumes:
+        - name: app
+          secret:
+            secretName: payments-api-app
+---
+# RED HERRING: a redis metrics exporter that crashloops because it can't reach a
+# cache that isn't deployed. Unrelated to orders.
+apiVersion: v1
+kind: Secret
+metadata:
+  name: cache-exporter-app
+  namespace: app-261
+stringData:
+  app.py: |
+    import sys, time, datetime
+    ts = datetime.datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%S.%fZ")
+    print(f"{ts} INFO redis_exporter v1.55 starting", flush=True)
+    time.sleep(1)
+    ts = datetime.datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%S.%fZ")
+    print(f"{ts} FATAL dial tcp redis-cache.app-261.svc:6379: connect: connection refused", flush=True)
+    sys.exit(1)
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: cache-exporter
+  namespace: app-261
+  labels:
+    app: cache-exporter
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: cache-exporter
+  template:
+    metadata:
+      labels:
+        app: cache-exporter
+    spec:
+      containers:
+        - name: cache-exporter
+          image: python:3.11-slim
+          command: ["python", "/app/app.py"]
+          volumeMounts:
+            - name: app
+              mountPath: /app
+          resources:
+            requests:
+              cpu: 10m
+              memory: 16Mi
+            limits:
+              cpu: 100m
+              memory: 32Mi
+      volumes:
+        - name: app
+          secret:
+            secretName: cache-exporter-app
