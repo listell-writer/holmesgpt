@@ -42,13 +42,21 @@ stringData:
     oid = 80500
     while True:
         oid += 1
-        # The error reports the symptom (cannot acquire a db connection in time,
-        # with a growing wait queue) but NOT the pool size. The misconfigured
-        # max=2 must be discovered by reading the orders-config ConfigMap.
-        if random.random() < 0.25:
-            log("ERROR", f"order ORD-{oid} not saved: timed out after {ACQ}ms acquiring a db connection (waiting={random.randint(6,14)}) err=ORD_POOL_7k3m9x")
-        else:
+        # Whether the order is SAVED is independent of the kafka publish below.
+        # The save failure (the real problem) reports only the symptom — a timeout
+        # acquiring a db connection with a growing wait queue — NOT the pool size.
+        # The misconfigured max=2 must be discovered by reading orders-config.
+        saved = random.random() >= 0.22
+        if saved:
             log("INFO", f"order persisted order=ORD-{oid} db_latency_ms={random.randint(3,21)}")
+            # RED HERRING: a loud, frequent post-commit event publish that fails
+            # because no kafka broker is deployed. The order is ALREADY saved, so
+            # this does not cause order failures — but it names a down dependency
+            # and is tempting to blame.
+            if random.random() < 0.55:
+                log("ERROR", f"order ORD-{oid} saved, but failed to publish order-created event to kafka topic orders.v1: broker orders-kafka.app-261.svc:9092 not available (code=KAFKA_PUBLISH_8c1f) — will retry asynchronously")
+        else:
+            log("ERROR", f"order ORD-{oid} not saved: timed out after {ACQ}ms acquiring a db connection (waiting={random.randint(6,14)}) err=ORD_POOL_7k3m9x")
         time.sleep(0.5)
 ---
 apiVersion: apps/v1

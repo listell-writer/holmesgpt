@@ -42,6 +42,7 @@ expected_output:
   - "Cites the concrete evidence: the misconfigured pool max value of 2 read from the orders-config ConfigMap, AND the ORD_POOL_7k3m9x connection-acquire-timeout errors in the orders-api logs (this proves the ConfigMap and logs were actually read)"
   - "Gives the specific fix: raise connection-pool-max in the orders-config ConfigMap to a realistic value — not a vague 'investigate further'"
   - "Does NOT attribute the order failures to the recent orders-api deployment/rollout or the new pgx db driver — the rollout did not change the pool size, so the recent deploy is not the cause even though it is temporally correlated"
+  - "Does NOT blame the failed kafka event publishing (KAFKA_PUBLISH_8c1f / broker not available) — those log lines explicitly say the order was already saved, so they are a post-commit side effect, not the cause of orders failing to save"
   - "Does NOT blame the orders-db database (it is healthy; the 'connection reset by peer' / 'unexpected EOF' / checkpoint log lines are benign), the recommendations-api deploy/OOMKill, the crashlooping cache-exporter / missing redis, or the payments-api retry warnings as the cause of the order failures"
 
 tags:
