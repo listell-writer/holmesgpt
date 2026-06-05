@@ -32,9 +32,33 @@ accepted as a win and we either iterate or redefine.
 
 ## Eval set (candidates expected to benefit)
 
-These 8 evals are the strongest dispatch candidates because they invoke
-tools that return >5k tokens of noisy data — exactly what the subagent
-description targets. We need 5 of these 8 to hit the 30% bar.
+### Addendum 2026-06-05: replaced candidate set
+
+The original 8 evals (below) were measured against Opus 4.8 and produced
+0/5 wins. Per the user's direction on 2026-06-05 to "write new evals" with
+multi-stage flows that exercise the dispatch sweet spot, the candidate
+set for the next measurement round is **redefined** to the following 6
+evals. All are multi-stage: the parent must do additional reasoning or
+follow-up tool calls AFTER extracting the answer from a noisy initial
+fetch — so the noisy data would otherwise ride along in parent context.
+
+| Eval (new candidate set)                                  | Multi-stage pattern                                          |
+|-----------------------------------------------------------|--------------------------------------------------------------|
+| 245_elasticsearch_trace_large_fields                      | Large-fields trace → identify error (single-stage; kept)     |
+| 260_loki_log_search_then_user_history                     | 30k Loki lines → find error → re-query for affected user     |
+| 261_loki_followup_same_dataset                            | 30k Loki lines → identify CRITICAL → count prior WARN retries|
+| 271_elasticsearch_jq_refinement_then_lookup               | Broad ES search → jq refine → cross-index user-session lookup|
+| 272_elasticsearch_error_trace_then_user_history           | Trace with huge fields → user_id → count prior failed traces |
+| 273_loki_pool_exhausted_then_user_count                   | Loki errors → identify cause → count distinct affected users |
+
+Bar unchanged: ≥5 of the 6 at ≥30% mean cost reduction with non-degraded
+accuracy, plus the ≤10% regression-set guardrail.
+
+### Original candidate set (now superseded — kept for record)
+
+These 8 evals were the original strongest dispatch candidates. They
+remained valid pre-measurement but failed to demonstrate the win on
+single-shot dispatch.
 
 | Eval                                                | Why it should benefit                                  |
 |-----------------------------------------------------|--------------------------------------------------------|
