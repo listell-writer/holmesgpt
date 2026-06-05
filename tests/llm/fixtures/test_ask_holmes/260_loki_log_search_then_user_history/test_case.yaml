@@ -30,6 +30,7 @@ tags:
   - logs
   - medium
   - loki
+  - subagent-candidate
 
 setup_timeout: 240
 

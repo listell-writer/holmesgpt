@@ -29,6 +29,7 @@ tags:
   - elasticsearch
   - traces
   - medium
+  - subagent-candidate
 
 setup_timeout: 300
 

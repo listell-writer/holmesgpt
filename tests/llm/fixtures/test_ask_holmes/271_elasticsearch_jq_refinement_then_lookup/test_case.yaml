@@ -42,6 +42,7 @@ include_tool_calls: true
 tags:
   - elasticsearch
   - medium
+  - subagent-candidate
 
 setup_timeout: 300
 
