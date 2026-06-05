@@ -42,6 +42,7 @@ def test_extract_suggested_memories_from_params():
     payload = {
         "suggestions": [
             {
+                "skill_domain": "prometheus",
                 "title": "Querying checkout-service metrics uses non-default label",
                 "when_to_use": "Any PromQL for checkout-service in this cluster",
                 "failed_call": (
@@ -65,6 +66,91 @@ def test_extract_suggested_memories_from_params():
     assert len(memories) == 1
     assert "checkout-service" in memories[0]["title"]
     assert "service.team/component" in memories[0]["working_call"]
+    assert memories[0]["skill_domain"] == "prometheus"
+
+
+def test_write_memories_consolidates_by_skill_domain(tmp_path):
+    """Three quirks across two domains should produce two consolidated
+    SKILL.md files — not three single-quirk files. The elasticsearch one
+    must contain BOTH ES quirks under a single body section.
+    """
+    from tests.llm.utils.tool_suggestions_config import (
+        write_memories_as_skill_files,
+    )
+
+    memories = [
+        {
+            "skill_domain": "elasticsearch",
+            "title": "app-X uses 'severity' not 'level'",
+            "when_to_use": "Any ES level query on app-X",
+            "failed_call": "term level=ERROR",
+            "working_call": "term severity=ERROR",
+            "why_env_specific": "Custom team schema.",
+            "importance": "medium",
+        },
+        {
+            "skill_domain": "elasticsearch",
+            "title": "app-Y uses 'ingest_ts' keyword not '@timestamp'",
+            "when_to_use": "Date-range on app-Y",
+            "failed_call": "range @timestamp",
+            "working_call": "range ingest_ts",
+            "why_env_specific": "No ECS @timestamp; custom keyword.",
+            "importance": "high",
+        },
+        {
+            "skill_domain": "loki",
+            "title": "Streams use 'acme_service' not 'service'",
+            "when_to_use": "Loki query for checkout in app-263",
+            "failed_call": "{service='checkout'}",
+            "working_call": "{acme_service='checkout'}",
+            "why_env_specific": "Promtail emits acme_service.",
+            "importance": "high",
+        },
+    ]
+
+    written = write_memories_as_skill_files(memories, str(tmp_path))
+    assert len(written) == 2, f"expected 2 domain skills, got {len(written)}"
+
+    # Find the elasticsearch and loki dirs by name.
+    es_dir = next(d for d in written if "elasticsearch" in d)
+    loki_dir = next(d for d in written if "loki" in d)
+
+    es_md = (tmp_path / es_dir.split("/")[-1] / "SKILL.md").read_text()
+    loki_md = (tmp_path / loki_dir.split("/")[-1] / "SKILL.md").read_text()
+
+    # ES skill must contain both quirks in one body.
+    assert "name: quirks-for-querying-elasticsearch" in es_md
+    assert "app-X uses 'severity' not 'level'" in es_md
+    assert "app-Y uses 'ingest_ts'" in es_md
+    assert es_md.count("## 1.") == 1
+    assert es_md.count("## 2.") == 1
+
+    # Loki skill has the one Loki quirk.
+    assert "name: quirks-for-querying-loki" in loki_md
+    assert "acme_service" in loki_md
+    assert "## 1." in loki_md and "## 2." not in loki_md
+
+
+def test_write_memories_fallback_domain_when_missing():
+    """Memories without skill_domain fall back to a single ``general``
+    skill rather than crashing or producing N anonymous files."""
+    import tempfile, os
+    from tests.llm.utils.tool_suggestions_config import (
+        write_memories_as_skill_files,
+    )
+
+    memories = [
+        {"title": "Quirk A", "when_to_use": "x", "failed_call": "a",
+         "working_call": "b", "why_env_specific": "y", "importance": "low"},
+        {"title": "Quirk B", "when_to_use": "x", "failed_call": "a",
+         "working_call": "b", "why_env_specific": "y", "importance": "low"},
+    ]
+    with tempfile.TemporaryDirectory() as td:
+        written = write_memories_as_skill_files(memories, td)
+        assert len(written) == 1
+        content = open(os.path.join(written[0], "SKILL.md")).read()
+        assert "quirks-for-querying-general" in content
+        assert "Quirk A" in content and "Quirk B" in content
 
 
 def test_extract_suggested_memories_ignores_other_tools():

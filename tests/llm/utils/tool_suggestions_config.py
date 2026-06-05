@@ -98,16 +98,32 @@ SUGGEST_RUNBOOKS_TOOL_PARAMETERS: Dict[str, Any] = {
             "items": {
                 "type": "object",
                 "properties": {
+                    "skill_domain": {
+                        "type": "string",
+                        "description": (
+                            "The data source / tool family this correction "
+                            "belongs to. Use a stable, coarse identifier "
+                            "like `elasticsearch`, `loki`, `prometheus`, "
+                            "`kubernetes`, `grafana`, `datadog`, "
+                            "`coralogix`, `confluence`, `newrelic`, `aws`, "
+                            "`gcp`, `azure`. All quirks for the same data "
+                            "source MUST share the same `skill_domain` "
+                            "string — the system will merge them into a "
+                            "single \"Known quirks for querying <domain>\" "
+                            "skill rather than create one skill per quirk. "
+                            "Prefer adding to an existing domain over "
+                            "inventing a new one."
+                        ),
+                    },
                     "title": {
                         "type": "string",
                         "description": (
-                            "Short name for the access-pattern correction. "
-                            "Name it by the tool/data being queried and the "
-                            "env-specific quirk, e.g. "
-                            '"Querying checkout-service metrics — uses '
-                            '\'service.team/component\' label, not \'app\'", '
-                            '"Fetching logs for payments — index is '
-                            '\'payments-prod-*\', not \'k8s-*\'". '
+                            "Short one-line name for THIS specific quirk "
+                            "within the domain skill (e.g. \"app-261-logs-* "
+                            "uses `severity` instead of `level`\", "
+                            "\"Kafka metrics renamed to `acme_kafka_*` "
+                            "prefix\"). The full domain skill will list "
+                            "many such quirks; this is the heading of one. "
                             "NOT a root-cause title."
                         ),
                     },
@@ -171,6 +187,7 @@ SUGGEST_RUNBOOKS_TOOL_PARAMETERS: Dict[str, Any] = {
                     },
                 },
                 "required": [
+                    "skill_domain",
                     "title",
                     "when_to_use",
                     "failed_call",
@@ -227,6 +244,22 @@ SUGGEST_RUNBOOKS_SYSTEM_PROMPT = (
     f"wrong vs the parameter that worked). Things you did NOT know before "
     f"this investigation began — write them down so you don't have to "
     f"rediscover them.\n\n"
+    f"CONSOLIDATION — quirks group by data source, not one skill per "
+    f"quirk. Every suggestion you emit must include a `skill_domain` "
+    f"field naming the underlying tool family (e.g. `elasticsearch`, "
+    f"`loki`, `prometheus`, `kubernetes`, `grafana`, `datadog`, "
+    f"`coralogix`, `confluence`, `newrelic`, `aws`). The harness merges "
+    f"all quirks sharing a `skill_domain` into ONE \"Known quirks for "
+    f"querying <domain>\" skill — so a future investigation that uses "
+    f"that data source fetches one skill listing every quirk this team's "
+    f"environment has, instead of having to find and load N separate "
+    f"single-quirk skills. If a single investigation discovers three ES "
+    f"quirks across three indices, emit three suggestions all tagged "
+    f"`skill_domain: \"elasticsearch\"` — do NOT invent three different "
+    f"domain names. Pick the COARSEST, MOST STABLE name for the data "
+    f"source. Cross-domain corrections (e.g. \"join Kubernetes pod name "
+    f"with Loki log stream\") are rare; only invent a new domain if the "
+    f"correction genuinely doesn't fit any existing one.\n\n"
     f"Do NOT call {SUGGEST_RUNBOOKS_TOOL_NAME} for:\n"
     f"- Generic METHODOLOGY a fresh LLM already knows "
     f"(\"check pod status first\", \"use --previous for crashed pods\", "
@@ -308,69 +341,115 @@ def _slugify(text: str) -> str:
     return text[:60] or "skill"
 
 
+def _normalize_skill_domain(raw: Optional[str]) -> str:
+    """Coerce a skill_domain string into a stable, lowercase, hyphenated
+    identifier. Strips surrounding whitespace, lowercases, replaces non-
+    alphanumerics with hyphens. Returns ``"general"`` for empty input so
+    older emissions without a domain still produce a single fallback skill
+    rather than crashing.
+    """
+    if not raw:
+        return "general"
+    text = str(raw).strip().lower()
+    import re
+
+    text = re.sub(r"[^a-z0-9]+", "-", text)
+    text = re.sub(r"^-+|-+$", "", text)
+    return text or "general"
+
+
 def write_memories_as_skill_files(
     memories: List[Dict[str, Any]], target_dir: str
 ) -> List[str]:
-    """Render each captured memory as a SKILL.md file under ``target_dir``,
-    one per memory, so the SkillsToolset can pick them up via its standard
-    file-scanning path. Returns the list of skill directories written.
+    """Render captured memories into ONE consolidated SKILL.md per
+    ``skill_domain`` under ``target_dir``. Each domain skill collects all
+    quirks the agent reported for that data source/tool family into a
+    single \"Known quirks\" body so the SkillsToolset listing stays small
+    (one entry per domain, not per quirk) and a replay agent fetches one
+    skill to see every quirk this team's environment has.
+
+    Returns the list of skill directories written.
 
     Used by the rerun_with_memory replay flow: after the first eval pass
-    captures a memory, we write the memory to disk, point the
-    SkillsToolset at the tempdir, and run the same prompt a second time.
-    The agent — having read the skill description in the system prompt —
-    is expected to call fetch_skill to load the body, see the
-    failed_call/working_call pair, and go straight to the working call
-    shape, skipping the wrong call that the first pass needed to recover
-    from.
+    captures memories, we write the consolidated domain skill(s) to disk,
+    point the SkillsToolset at the tempdir, and run the prompt(s) a
+    second time. The agent — having read the domain skill's description
+    in the system prompt — is expected to call fetch_skill once, see the
+    `## Known quirks` section listing every relevant correction, and use
+    the right working_call shape for each question the prompt asks.
     """
     import os
+    from collections import OrderedDict
+
+    # Group by normalized domain, preserving the order the agent first
+    # emitted each domain so the deterministic disk layout matches the
+    # agent's discovery order.
+    by_domain: "OrderedDict[str, List[Dict[str, Any]]]" = OrderedDict()
+    for mem in memories:
+        domain = _normalize_skill_domain(mem.get("skill_domain"))
+        by_domain.setdefault(domain, []).append(mem)
 
     written: List[str] = []
-    for idx, mem in enumerate(memories):
-        title = str(mem.get("title") or f"runbook-{idx + 1}")
-        when_to_use = str(mem.get("when_to_use") or "").strip()
-        slug = _slugify(title)
-        skill_dir = os.path.join(target_dir, f"{idx + 1:02d}-{slug}")
+    for idx, (domain, domain_memories) in enumerate(by_domain.items(), start=1):
+        skill_name = f"quirks-for-querying-{domain}"
+        skill_dir = os.path.join(target_dir, f"{idx:02d}-{skill_name}")
         os.makedirs(skill_dir, exist_ok=True)
 
         # The agent on replay only sees `name | description` in the system
-        # prompt when deciding whether to load a skill. The captured
-        # `title` describes the env-specific quirk ("uses 'severity', not
-        # 'level'") — true but it doesn't match the user's symptom-shape
-        # phrasing. The captured `when_to_use` describes the query shape
-        # the skill applies to ("Any Loki query targeting the checkout
-        # service in app-263") — exactly what the user will ask about.
-        # Lead the description with when_to_use so the agent can recognize
-        # relevance from symptoms, then append the title as the durable
-        # lesson. Fall back to title alone if no when_to_use.
-        if when_to_use:
-            # Cap each part so the combined description stays short enough
-            # for the system-prompt listing to remain scannable.
-            when_short = when_to_use.split(".")[0][:120].rstrip()
-            title_short = title[:120]
-            description = f"{when_short} — {title_short}"
-        else:
-            description = title
+        # prompt when deciding whether to fetch a skill. The description
+        # is generic per-domain ("known schema/query quirks for this
+        # team's <domain> in this environment") so ANY query against that
+        # data source recognizes the skill as relevant.
+        description = (
+            f"Known schema and query quirks for this team's {domain} "
+            f"in this environment — fetch BEFORE issuing the first query "
+            f"against {domain} to skip wrong-call recovery."
+        )
 
-        body_parts: List[str] = ["", "## When to use", ""]
-        body_parts.append(when_to_use)
-        body_parts += ["", "## Failed call shape (avoid)", ""]
-        body_parts.append(str(mem.get("failed_call") or ""))
-        body_parts += ["", "## Working call shape", ""]
-        body_parts.append(str(mem.get("working_call") or ""))
-        body_parts += ["", "## Why this is env-specific", ""]
-        body_parts.append(str(mem.get("why_env_specific") or ""))
+        body_parts: List[str] = [
+            "",
+            f"# Known quirks for querying {domain}",
+            "",
+            (
+                "This skill collects every env-specific correction this "
+                f"team's investigations have discovered for {domain}. "
+                "Each entry lists the wrong call shape (the default a "
+                "fresh agent would try), the working shape, and why the "
+                "correction is non-obvious. Scan the entries below and "
+                "use the relevant one when you issue your query."
+            ),
+            "",
+        ]
 
-        # YAML frontmatter must escape embedded single quotes — the agent
-        # may emit quotes inside its title or when_to_use. Pre-escape any
-        # CR/LF too in case the model produced multi-line strings; YAML
-        # block scalars handle that but a plain single-quoted scalar
-        # cannot.
+        for entry_idx, mem in enumerate(domain_memories, start=1):
+            title = str(mem.get("title") or f"quirk-{entry_idx}")
+            when_to_use = str(mem.get("when_to_use") or "").strip()
+            body_parts += [
+                "---",
+                "",
+                f"## {entry_idx}. {title}",
+                "",
+                f"**When to use:** {when_to_use}" if when_to_use else "",
+                "",
+                "**Failed call shape (avoid):**",
+                "",
+                str(mem.get("failed_call") or "").strip(),
+                "",
+                "**Working call shape:**",
+                "",
+                str(mem.get("working_call") or "").strip(),
+                "",
+                "**Why this is env-specific:**",
+                "",
+                str(mem.get("why_env_specific") or "").strip(),
+                "",
+            ]
+
+        # YAML frontmatter must escape embedded single quotes and newlines.
         safe_description = description.replace("'", "''").replace("\n", " ")
         frontmatter = (
             "---\n"
-            f"name: {slug}\n"
+            f"name: {skill_name}\n"
             f"description: '{safe_description}'\n"
             "---\n"
         )

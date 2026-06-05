@@ -175,6 +175,12 @@ class HolmesTestCase(BaseModel):
     # externally-authored skill (e.g. a misleading one, or one captured
     # from a different investigation).
     pre_loaded_skills_path: Optional[str] = None
+    # When set, asserts that the number of consolidated SKILL.md files
+    # written from the primary pass's captured memories equals this value.
+    # Used by multi-quirk evals to prove the agent emitted all quirks
+    # under a single `skill_domain` (and thus consolidated into 1 file)
+    # rather than inventing N different domains. None disables the check.
+    expected_skill_count: Optional[int] = None
 
 
 class AskHolmesTestCase(HolmesTestCase, BaseModel):

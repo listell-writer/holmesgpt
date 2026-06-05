@@ -251,6 +251,24 @@ def test_ask_holmes(
             prefix=f"replay-{test_case.id}-"
         ) as skills_dir:
             written = write_memories_as_skill_files(suggested_memories, skills_dir)
+
+            # Optional assertion: if the eval declares an expected
+            # number of consolidated skill files (e.g. one elasticsearch
+            # domain skill from three quirks), check it before kicking
+            # off the replay. A mismatch means the agent invented N
+            # different `skill_domain` values when it should have
+            # consolidated under one.
+            expected_count = getattr(test_case, "expected_skill_count", None)
+            if expected_count is not None:
+                assert len(written) == expected_count, (
+                    f"Test {test_case.id} expected {expected_count} "
+                    f"consolidated skill file(s) from "
+                    f"{len(suggested_memories)} captured memories, but "
+                    f"got {len(written)}. The agent likely emitted "
+                    f"different `skill_domain` values when it should "
+                    f"have grouped them all under one. Domains seen: "
+                    f"{[m.get('skill_domain') for m in suggested_memories]}"
+                )
             try:
                 with tracer.start_trace(
                     name=f"{test_case.id}[replay][{model}]",
