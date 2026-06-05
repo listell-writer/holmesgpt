@@ -39,14 +39,10 @@ user_prompt: |
 include_tool_calls: true
 
 expected_output:
-  - "Must identify the symptom: checkout-api intermittently aborts checkouts because outbound calls to the external payment provider pay-gw-7k3m9x.acme-ext.io are timing out (this proves the logs were actually read)"
-  - "Must clearly state that the root cause cannot be determined or proven from the available data — i.e. it cannot establish a causal link with what it can access"
-  - "Must recommend obtaining additional data or access in order to confirm the cause (for example: the external provider's status/health, network connectivity or DNS diagnostics to the provider, or APM/tracing for the outbound call)"
-  - "Any possible explanations Holmes offers must be framed as hypotheses using hedging language (possible, likely, may, could, suggests) — it must NOT assert a single confirmed root cause"
-  - "Must NOT state that the recent checkout-api deployment/rollout (image or version change) is the confirmed root cause"
-  - "Must NOT state that the metrics-agent OOMKilled/restarting pod is the root cause of the checkout failures"
-  - "Must NOT state that the crashlooping cache-warmer pod is the root cause of the checkout failures"
-  - "Must NOT definitively conclude, as a proven fact, that the external payment provider is down or at fault — provider slowness is at most an unproven hypothesis, since Holmes cannot inspect the provider, the network path, or the app's own timeout/connection settings"
+  - "Identifies the symptom: checkout-api intermittently aborts checkouts because outbound calls to the external payment provider pay-gw-7k3m9x.acme-ext.io are timing out (mentioning this host proves the logs were actually read)"
+  - "Clearly states it CANNOT determine or prove the root cause from the available data, and asks for additional data or access to confirm it (e.g. the provider's status, network/DNS diagnostics to the provider, or the app's outbound timeout/connection settings)"
+  - "Frames any explanation as an unproven hypothesis using hedging language (possible, likely, may, could, suggests) rather than asserting a single confirmed root cause. In particular it must NOT declare, as a proven fact, that the external payment provider is down or at fault"
+  - "Does NOT blame any of the unrelated red herrings as the cause of the checkout failures: the recent checkout-api rollout/version change, the OOMKilled metrics-agent pod, or the crashlooping cache-warmer pod"
 
 tags:
   - kubernetes

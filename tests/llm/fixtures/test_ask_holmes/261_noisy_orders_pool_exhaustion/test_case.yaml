@@ -38,14 +38,10 @@ user_prompt: |
 include_tool_calls: true
 
 expected_output:
-  - "Must identify that orders-api is failing because its database connection pool is exhausted — the pool max is misconfigured to 2 in the orders-config ConfigMap (key connection-pool-max), so requests cannot acquire a connection"
-  - "Must reference the concrete evidence: the pool max value of 2 and/or the unique error code ORD_POOL_7k3m9x found in the orders-api logs (this proves the logs/ConfigMap were actually read)"
-  - "Must give the specific fix: increase connection-pool-max in the orders-config ConfigMap (e.g. to a realistic value like 50) — not a vague 'investigate further'"
-  - "Must NOT conclude that the orders-db database is the cause / is down / is overloaded — the 'connection reset by peer' and checkpoint log lines are benign and the database is healthy"
-  - "Must NOT attribute the order failures to the recommendations-api deployment/rollout"
-  - "Must NOT attribute the order failures to the recommendations-api OOMKilled/restarting pod"
-  - "Must NOT attribute the order failures to the crashlooping cache-exporter pod or a missing redis cache"
-  - "Must NOT attribute the order failures to the payments-api retry warnings"
+  - "Identifies the root cause: orders-api order saves fail because its database connection pool is exhausted — the pool max is misconfigured to 2 in the orders-config ConfigMap (key connection-pool-max), so requests cannot acquire a connection in time"
+  - "Cites the concrete evidence: the pool max value of 2 and/or the unique error code ORD_POOL_7k3m9x from the orders-api logs (this proves the logs/ConfigMap were actually read)"
+  - "Gives the specific fix: raise connection-pool-max in the orders-config ConfigMap to a realistic value — not a vague 'investigate further'"
+  - "Does NOT blame the orders-db database (it is healthy; the 'connection reset by peer' and checkpoint log lines are benign), the recommendations-api deploy/OOMKill, the crashlooping cache-exporter / missing redis, or the payments-api retry warnings as the cause of the order failures"
 
 tags:
   - kubernetes
