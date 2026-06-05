@@ -35,14 +35,18 @@ stringData:
         ts = datetime.datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%S.%fZ")
         print(f"{ts} {level} {msg}", flush=True)
 
-    log("INFO", f"orders-api starting; db pool initialised max={MAXC} acquire_timeout_ms={ACQ}")
+    VERSION = os.environ.get("APP_VERSION", "unknown")
+    log("INFO", f"orders-api v{VERSION} starting; initialising db connection pool (driver=pgx)")
     log("INFO", "connected to orders-db.app-261.svc:5432 (db reachable, handshake ok)")
 
     oid = 80500
     while True:
         oid += 1
-        if random.random() < 0.30:
-            log("ERROR", f"could not obtain connection from pool within {ACQ}ms (pool exhausted: active={MAXC} max={MAXC}) order=ORD-{oid} err=ORD_POOL_7k3m9x")
+        # The error reports the symptom (cannot acquire a db connection in time,
+        # with a growing wait queue) but NOT the pool size. The misconfigured
+        # max=2 must be discovered by reading the orders-config ConfigMap.
+        if random.random() < 0.25:
+            log("ERROR", f"order ORD-{oid} not saved: timed out after {ACQ}ms acquiring a db connection (waiting={random.randint(6,14)}) err=ORD_POOL_7k3m9x")
         else:
             log("INFO", f"order persisted order=ORD-{oid} db_latency_ms={random.randint(3,21)}")
         time.sleep(0.5)
@@ -69,6 +73,8 @@ spec:
           image: python:3.11-slim
           command: ["python", "/app/app.py"]
           env:
+            - name: APP_VERSION
+              value: "2.6.0"
             - name: CONNECTION_POOL_MAX
               valueFrom:
                 configMapKeyRef:
@@ -114,9 +120,11 @@ stringData:
     log("LOG:  autovacuum launcher started")
     while True:
         r = random.random()
-        if r < 0.25:
+        if r < 0.18:
             log("LOG:  could not receive data from client: Connection reset by peer")
-        elif r < 0.35:
+        elif r < 0.30:
+            log("LOG:  unexpected EOF on client connection with an open transaction")
+        elif r < 0.40:
             log("LOG:  checkpoint complete: wrote 37 buffers (0.2%); 0 WAL file(s) added")
         else:
             log("LOG:  statement: COMMIT")

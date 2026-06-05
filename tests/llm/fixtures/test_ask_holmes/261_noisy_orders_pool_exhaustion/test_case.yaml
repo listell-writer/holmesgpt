@@ -38,10 +38,11 @@ user_prompt: |
 include_tool_calls: true
 
 expected_output:
-  - "Identifies the root cause: orders-api order saves fail because its database connection pool is exhausted — the pool max is misconfigured to 2 in the orders-config ConfigMap (key connection-pool-max), so requests cannot acquire a connection in time"
-  - "Cites the concrete evidence: the pool max value of 2 and/or the unique error code ORD_POOL_7k3m9x from the orders-api logs (this proves the logs/ConfigMap were actually read)"
+  - "Identifies the root cause: orders-api order saves fail because its database connection pool is starved/too small — the pool max is misconfigured to 2 in the orders-config ConfigMap (key connection-pool-max), so requests time out waiting to acquire a connection"
+  - "Cites the concrete evidence: the misconfigured pool max value of 2 read from the orders-config ConfigMap, AND the ORD_POOL_7k3m9x connection-acquire-timeout errors in the orders-api logs (this proves the ConfigMap and logs were actually read)"
   - "Gives the specific fix: raise connection-pool-max in the orders-config ConfigMap to a realistic value — not a vague 'investigate further'"
-  - "Does NOT blame the orders-db database (it is healthy; the 'connection reset by peer' and checkpoint log lines are benign), the recommendations-api deploy/OOMKill, the crashlooping cache-exporter / missing redis, or the payments-api retry warnings as the cause of the order failures"
+  - "Does NOT attribute the order failures to the recent orders-api deployment/rollout or the new pgx db driver — the rollout did not change the pool size, so the recent deploy is not the cause even though it is temporally correlated"
+  - "Does NOT blame the orders-db database (it is healthy; the 'connection reset by peer' / 'unexpected EOF' / checkpoint log lines are benign), the recommendations-api deploy/OOMKill, the crashlooping cache-exporter / missing redis, or the payments-api retry warnings as the cause of the order failures"
 
 tags:
   - kubernetes
@@ -55,8 +56,17 @@ before_test: |
   set -e
   kubectl apply -f manifest.yaml
 
-  # Trigger a recent rollout of the UNRELATED recommendations-api so a "it broke
-  # right after a deploy" red herring is present and timestamped recently.
+  # PRIMARY TRAP: roll out orders-api itself with a change-cause that strongly
+  # implies the recent change touched DB connection handling. This is temporally
+  # correlated with the incident and is exactly the kind of "it broke right after
+  # the deploy" signal that lures a root-causer away from the standing misconfig.
+  # The rollout does NOT change connection-pool-max (still 2), so the deploy is a
+  # red herring — the pool starvation predates and is independent of it.
+  kubectl annotate deployment/orders-api -n app-261 \
+    kubernetes.io/change-cause="bump orders-api v2.6.0 -> v2.7.0: migrate to pgx db driver v5 (connection pooling rewrite)" --overwrite >/dev/null
+  kubectl set env deployment/orders-api -n app-261 APP_VERSION=2.7.0 >/dev/null
+
+  # Additional unrelated recent deploy for noise.
   kubectl set env deployment/recommendations-api -n app-261 APP_VERSION=3.4.1 >/dev/null
 
   # Verify the needle: orders-api must be emitting the pool-exhaustion error.
