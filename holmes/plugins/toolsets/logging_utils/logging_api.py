@@ -129,7 +129,9 @@ class PodLoggingTool(Tool):
         description = (
             f"Fetch logs for a Kubernetes pod from {toolset_name}"
             " with support for regex filtering and exclusion patterns"
-            f". Defaults: Fetches last {DEFAULT_TIME_SPAN_SECONDS // SECONDS_PER_DAY} days of logs, limited to {DEFAULT_LOG_LIMIT} most recent entries"
+            f". By default (no 'limit' set) ALL matching logs from the last {DEFAULT_TIME_SPAN_SECONDS // SECONDS_PER_DAY} days are returned."
+            " Avoid setting a 'limit' when investigating a root cause: 'limit' keeps only the MOST RECENT entries and drops the oldest,"
+            " which usually discards the first occurrence of an error where the triggering event (e.g. a config change or deploy) is recorded."
         )
 
         parameters = {
@@ -152,7 +154,10 @@ class PodLoggingTool(Tool):
                 required=False,
             ),
             "limit": ToolParameter(
-                description=f"Maximum number of logs to return. Default: {DEFAULT_LOG_LIMIT}",
+                description="Maximum number of logs to return. If omitted, ALL matching logs are returned (no limit). "
+                "When a limit is applied, only the MOST RECENT entries are kept and the oldest are dropped. "
+                "Prefer leaving this unset when looking for a root cause, since the earliest logs (the first occurrence of an error) "
+                "are usually the most important and would be the ones discarded by a limit.",
                 type="integer",
                 required=False,
             ),

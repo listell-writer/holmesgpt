@@ -651,9 +651,14 @@ def add_metadata(
         metadata_lines.append("")
         metadata_lines.append("⚠️  Hit display limit! Suggestions:")
         metadata_lines.append(
+            "  - Only the MOST RECENT logs are shown; the OLDEST logs (including the FIRST occurrence of any error) were dropped."
+        )
+        metadata_lines.append(
+            "    For root-cause analysis, re-fetch WITHOUT a limit (or with a time range covering the start of the incident) to see what happened just before the first error."
+        )
+        metadata_lines.append(
             "  - Add exclude_filter to remove noise: exclude_filter='<pattern1>|<pattern2>|<pattern3>'"
         )
-        metadata_lines.append("  - Narrow time range to see fewer logs")
         metadata_lines.append(
             "  - Use more specific filter: filter='<term1>.*<term2>|<exact-phrase>'"
         )
