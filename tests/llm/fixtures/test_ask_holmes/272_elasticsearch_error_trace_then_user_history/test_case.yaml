@@ -53,6 +53,10 @@ before_test: |
     -H "Authorization: ApiKey ${ELASTICSEARCH_API_KEY}" \
     -d '{"settings":{"number_of_shards":1,"number_of_replicas":0},"mappings":{"properties":{"@timestamp":{"type":"date"},"trace_id":{"type":"keyword"},"user_id":{"type":"keyword"},"service":{"type":"keyword"},"status_code":{"type":"integer"},"duration_ms":{"type":"integer"}}}}' > /dev/null
 
+  # Wait for both indexes' shards to be active before bulk-inserting
+  curl -sf "${ELASTICSEARCH_URL}/_cluster/health?wait_for_status=yellow&wait_for_active_shards=1&timeout=30s" \
+    -H "Authorization: ApiKey ${ELASTICSEARCH_API_KEY}" > /dev/null
+
   BULK=/tmp/es_272_$$.ndjson
   > "$BULK"
 
@@ -145,15 +149,22 @@ before_test: |
       }))
   PY
 
-  curl -sf -X POST "${ELASTICSEARCH_URL}/_bulk" \
-    -H "Content-Type: application/x-ndjson" \
-    -H "Authorization: ApiKey ${ELASTICSEARCH_API_KEY}" \
-    --data-binary @"$BULK" > /tmp/bulk_resp_$$ || { echo "bulk failed"; cat /tmp/bulk_resp_$$; exit 1; }
-  if grep -q '"errors":true' /tmp/bulk_resp_$$; then
-    echo "Bulk had errors:"
-    head -c 800 /tmp/bulk_resp_$$
-    exit 1
-  fi
+  # Retry bulk insert up to 3 times for transient unavailable_shards_exception
+  for attempt in 1 2 3; do
+    curl -sf -X POST "${ELASTICSEARCH_URL}/_bulk?refresh=false&timeout=30s" \
+      -H "Content-Type: application/x-ndjson" \
+      -H "Authorization: ApiKey ${ELASTICSEARCH_API_KEY}" \
+      --data-binary @"$BULK" > /tmp/bulk_resp_$$ 2>&1 || true
+    if grep -q '"errors":false' /tmp/bulk_resp_$$; then
+      break
+    fi
+    if [ "$attempt" = "3" ]; then
+      echo "Bulk insert failed after 3 attempts:"
+      head -c 800 /tmp/bulk_resp_$$
+      exit 1
+    fi
+    sleep 3
+  done
   rm -f "$BULK" /tmp/bulk_resp_$$
 
   curl -sf -X POST "${ELASTICSEARCH_URL}/app-272-apm-traces/_refresh" \
