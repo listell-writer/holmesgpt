@@ -36,12 +36,17 @@ No Opus model surfaces the temporal trigger from the surrounding ("nearby") log 
 ### `43_current_datetime_from_prompt` — opus-4.8 only, all 3 iterations (3 failures) — **the entire 4.8 deficit**
 The eval mocks "now" to `2025-06-23 11:34 UTC` by patching `holmes.plugins.prompts.datetime`, which renders into the prompt as *"The current UTC date and time are 2025-06-23 11:34…"* — identical text for all three models.
 
-- opus-4.6 / 4.7: answer directly from that prompt line → `June 23rd 2025, 11:34 UTC` ✅ (~2–4s, no tool call)
-- **opus-4.8: returns the real wall-clock time to the second** (e.g. `Friday, June 5, 2026, 06:41:11 UTC`) ❌ (~7–9s)
+- opus-4.6 / 4.7: answer directly from that prompt line → `June 23rd 2025, 11:34 UTC` ✅ (~2s, no tool call)
+- **opus-4.8: sometimes runs the `bash` tool with `date`** and returns the real wall-clock time to the second (e.g. `Friday, June 5, 2026, 07:07:59 UTC`) ❌
 
-`06:41:11` matched the second the run executed, so 4.8 is **fetching live time via a tool** rather than trusting the current-time value already in its context. The eval's mock only patches the prompt-render path, **not** the tool path, so 4.8's more-agentic "verify it myself" behavior reads the unmocked real clock and fails the assertion.
+The mechanism, verified from the tool logs (`INFO holmes.display.tools: Running tool #1 bash: date`): the **`bash` toolset** (`BashExecutorToolset`, enabled by default) lets the model run arbitrary shell. opus-4.8 decides to *verify* the time by shelling out to `date` instead of trusting the timestamp already in its prompt. The eval's mock only patches Python's `holmes.plugins.prompts.datetime`, **not** the shell, so `date` returns the unmocked real clock and the answer fails. There is **no dedicated datetime tool** — it's generic `bash`/`date`.
 
-**This is a behavioral shift / eval-harness artifact, not a reasoning-quality regression.** It is reproducible (failed 3/3 in the matrix + 2/2 on standalone reruns; passed 1× in an earlier isolated run → ~80% tool-reach rate). It would also produce a wrong answer in any real deployment that relies on the injected prompt time instead of a live clock — so it is worth flagging to the eval owners and/or the prompt design (e.g. instruct the model to trust the provided timestamp).
+**Behavioral contrast (measured):**
+
+- opus-4.6 + opus-4.7: 12/12 runs passed, **0** `bash: date` invocations — always answer from the prompt context.
+- opus-4.8: **~1 in 3 runs** shells out to `bash: date` (failed 3/3 in the main matrix, 2/6 in a focused probe; passes the rest).
+
+**This is a behavioral shift, not a reasoning-quality regression** — 4.8 is more inclined to verify via tooling. But note it is *also* a real-world correctness risk: in any deployment where the injected prompt time is authoritative (or where the host clock differs from the intended "investigation time"), 4.8 shelling out to `date` would give a wrong answer. Worth flagging to the eval owners (mock should also cover the shell, or the prompt should instruct the model to trust the provided timestamp).
 
 ### `179_grafana_big_dashboard_query` — opus-4.7, 1 of 3 iterations
 4.7 intermittently **fails to locate the large dashboard** ("could not find a dashboard titled 'E-Commerce Platform Monitoring'") despite many search/tool calls (26 tool calls in the Braintrust baseline where it also failed this test). 4.6 and 4.8 passed all 3 iterations. Indicates mild instability in 4.7's dashboard-search persistence/strategy on big dashboards.
