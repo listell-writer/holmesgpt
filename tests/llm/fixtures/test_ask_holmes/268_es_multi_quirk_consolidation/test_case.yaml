@@ -44,11 +44,10 @@ user_prompt: |
      "FATAL"] }` query and report the count. If that returns zero, find
      the right field for severity and re-run.
 
-  3. In index 'app-268-logs-c-r5x8m3n9', run a
-     `range: { "@timestamp": { gte: "2026-06-03T00:00:00" } }` query
-     filtered to ERROR-level entries and report the count. If the
-     @timestamp filter returns zero or errors, find the right timestamp
-     field and re-run.
+  3. In index 'app-268-logs-c-r5x8m3n9', run a range query on
+     `@timestamp` for today's date and filter to ERROR-level entries,
+     and report the count. If the @timestamp filter returns zero or
+     errors, find the right timestamp field and re-run.
 
 # Replay prompt: a natural version that doesn't prescribe any of the
 # failure paths. With the consolidated skill pre-loaded, the agent
@@ -187,8 +186,11 @@ before_test: |
       }
     }' > /dev/null
 
-  TODAY="2026-06-03"
-  YESTERDAY="2026-06-02"
+  # Use the current UTC date so the replay prompt's "from today" resolves
+  # to the same date as the ingested data — independent of when the test
+  # actually runs.
+  TODAY=$(date -u +%Y-%m-%d)
+  YESTERDAY=$(date -u -d 'yesterday' +%Y-%m-%d)
   BULK_C=""
   for i in $(seq 1 7); do
     BULK_C="${BULK_C}{\"index\":{}}\n{\"ingest_ts\":\"${TODAY}T08:0${i}:00\",\"level\":\"ERROR\",\"message\":\"err today $i\"}\n"
