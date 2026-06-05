@@ -60,15 +60,38 @@ half-baked feeling.
 
 ## Proposed improvements
 
-### 1. `HealthCheckTrigger` CRD — event-driven investigations (headline)
+### 1. `TriggeredHealthCheck` CRD — event-driven investigations (headline)
 
-A CRD that declaratively binds **an event** to **a check**. On fire, it spawns a
-`HealthCheck` (reusing the entire existing execution/history/notification path from
+**Semantics decision: self-contained, mirroring `ScheduledHealthCheck` — not a
+reference to another CRD.**
+
+The existing family has a clear invariant:
+
+| Kind | Role | Self-contained? | Spawns children? |
+|------|------|-----------------|------------------|
+| `HealthCheck` | execution instance (Job) | yes | no |
+| `ScheduledHealthCheck` | cron recurrence (CronJob) | yes | yes → HealthChecks |
+| **`TriggeredHealthCheck`** *(new)* | event recurrence | yes | yes → HealthChecks |
+
+`ScheduledHealthCheck` is literally `HealthCheckSpec + schedule`; on each tick it
+**spawns** a `HealthCheck` child (`job_executor.py`) that becomes the execution
+record. The event-driven kind mirrors this exactly — `HealthCheckSpec + event
+source` — spawning HealthCheck children when the event fires.
+
+A *reference* model (a "trigger" that points at a `HealthCheck`) is the wrong shape:
+a `HealthCheck` **executes the moment it is created** — it is an instance, not a
+dormant template — so there is nothing coherent to point at. A reference only makes
+sense once a separate non-executing `HealthCheckTemplate` kind exists; that is an
+orthogonal reuse concern (see §3), and when added, `templateRef` should be shared by
+**both** `ScheduledHealthCheck` and `TriggeredHealthCheck`.
+
+The CRD declaratively binds **an event** to an inline check. On fire, it spawns a
+`HealthCheck` (reusing the existing execution/history/notification path from
 `job_executor.py`), with event context injected into the query template.
 
 ```yaml
 apiVersion: holmesgpt.dev/v1alpha1
-kind: HealthCheckTrigger
+kind: TriggeredHealthCheck
 metadata:
   name: verify-checkout-rollouts
   namespace: production
@@ -132,7 +155,7 @@ An event-driven LLM trigger without guardrails is a cost/DoS footgun (an alert s
 
 Today, monitoring 50 services means 50 near-identical YAMLs. Two complementary fixes:
 
-- **Selector fan-out**: one `HealthCheckTrigger`/`ScheduledHealthCheck` targets many
+- **Selector fan-out**: one `TriggeredHealthCheck`/`ScheduledHealthCheck` targets many
   resources via label selector, templating per-target context into the query.
 - **`HealthCheckTemplate`** referenced via `templateRef` for shared query + timeout +
   mode + destinations (one "deploy verification" template reused everywhere).
@@ -174,7 +197,7 @@ on every rollout automatically."
 
 ## Phased roadmap
 
-- **Phase 1 — `HealthCheckTrigger` with K8s event sources** (highest leverage,
+- **Phase 1 — `TriggeredHealthCheck` with K8s event sources** (highest leverage,
   smallest surface). DeploymentRollout + PodCrashLoop + JobFailed + generic
   WarningEvent; settle/cooldown/dedupe with state in status; spawn via the existing
   HealthCheck path. Docs with the deploy-rollout flow as the flagship example.
@@ -186,9 +209,10 @@ on every rollout automatically."
 
 ## Open design questions
 
-- **CRD shape**: new `HealthCheckTrigger` (stays in the HealthCheck family, minimal
-  change) vs. a more general `Investigation` + `InvestigationTrigger` rename. This
-  doc assumes the former.
+- **CRD shape**: settled — self-contained `TriggeredHealthCheck`, the event-driven
+  sibling of `ScheduledHealthCheck` (not a reference to another CRD). A more general
+  `Investigation` + `InvestigationTrigger` rename was considered and rejected for v1
+  to keep churn low and stay in the HealthCheck family.
 - **Settle semantics** for non-Deployment kinds (Argo Rollouts, StatefulSets) —
   per-kind readiness predicates.
 - **Budget guard scope** — per-namespace vs. global, and behaviour on breach
