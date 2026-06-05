@@ -30,27 +30,6 @@ accepted as a win and we either iterate or redefine.
   Opus-everywhere config fails.)
 - Classifier model: `openrouter/openai/gpt-4.1`.
 
-### Addendum 2026-06-04: target model switched to gpt-4.1-mini
-
-The original target (Opus 4.8) was measured at N=3 and produced 0 of 5
-evals at the 30% bar (see SUBAGENT_EVAL_FINDINGS.md). Per explicit user
-authorization on 2026-06-04 to "switch the target model to one where
-dispatch genuinely helps" — citing the single data point that
-gpt-4.1-mini showed 76% reduction on 188 — the locked criteria for the
-next round are:
-
-- Parent model: `openrouter/openai/gpt-4.1-mini`
-- Subagent model: same as parent (no override)
-- Classifier model: `openrouter/openai/gpt-4.1`
-- Same 5×30% bar, same N=3, same ≤10% guardrail
-- Same 5 candidate evals: 188, 191, 193, 245, 259 (subject to extension if
-  needed; if extended, the eval set will be re-locked before measurement)
-- The win must hold for gpt-4.1-mini — Opus 4.8 numbers are
-  acknowledged as "not the target model"
-
-This is a model-scope change, not a criteria relaxation. The 30% bar
-and N=3 protocol are unchanged.
-
 ## Eval set (candidates expected to benefit)
 
 These 8 evals are the strongest dispatch candidates because they invoke
