@@ -43,7 +43,7 @@ expected_output:
   - "Gives the specific fix: raise connection-pool-max in the orders-config ConfigMap to a realistic value — not a vague 'investigate further'"
   - "Does NOT attribute the order failures to the recent orders-api deployment/rollout or the new pgx db driver — the rollout did not change the pool size, so the recent deploy is not the cause even though it is temporally correlated"
   - "Does NOT blame the failed kafka event publishing (KAFKA_PUBLISH_8c1f / broker not available) — those log lines explicitly say the order was already saved, so they are a post-commit side effect, not the cause of orders failing to save"
-  - "Does NOT blame the orders-db database (it is healthy; the 'connection reset by peer' / 'unexpected EOF' / checkpoint log lines are benign), the recommendations-api deploy/OOMKill, the crashlooping cache-exporter / missing redis, or the payments-api retry warnings as the cause of the order failures"
+  - "Does NOT blame the orders-db database (it is healthy; the 'connection reset by peer' / 'unexpected EOF' / checkpoint log lines are benign), nor any of the other unrelated noisy services as the cause of the order-save failures — e.g. the session-store 'redis connection pool nearing limit' warning (a different, healthy pool), the recommendations-api or inventory-api deploy/OOMKills, the crashlooping cache-exporter or notification-worker, the billing-api tax-service timeouts, the search-api slow-query/circuit-breaker warnings, the api-gateway 502/504 lines, or the payments-api retry warnings"
 
 tags:
   - kubernetes
@@ -51,7 +51,7 @@ tags:
   - chain-of-causation
   - hard
 
-setup_timeout: 300
+setup_timeout: 480
 
 before_test: |
   set -e
