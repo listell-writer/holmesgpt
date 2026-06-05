@@ -2,6 +2,15 @@
 
 A common pattern is deploying a HealthCheck alongside your application to verify the new version is working correctly. Since HealthChecks run immediately when created, you can include one in the same manifest (or CI/CD step) as your deployment and use the result to gate rollout progression.
 
+!!! tip "Prefer automatic triggering"
+
+    The patterns below attach a check to each deploy manually. If you just want Holmes
+    to investigate **every** rollout of a service automatically — including
+    `kubectl set image`, GitOps syncs, and rollbacks — use a
+    [TriggeredHealthCheck](triggered-health-checks.md) instead. You declare it once and
+    it fires on every matching rollout, no per-deploy wiring required. Use the manual
+    approach below when you specifically need to **gate a CI/CD pipeline** on the result.
+
 ## One-Time Verification with HealthCheck
 
 Include a [HealthCheck](health-checks.md) in the same manifest as your deployment. It runs immediately after `kubectl apply` and reports whether the new version started correctly.
