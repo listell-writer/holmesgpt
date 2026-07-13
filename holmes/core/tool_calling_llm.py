@@ -245,7 +245,11 @@ class ToolCallingLLM:
             if toolset.name == "bash":
                 config = toolset.config
                 if config:
-                    return config.builtin_allowlist != "none"
+                    if isinstance(config, dict):
+                        allowlist = config.get("builtin_allowlist")
+                    else:
+                        allowlist = getattr(config, "builtin_allowlist", None)
+                    return allowlist != "none"
                 return False
         return False
 
