@@ -4,6 +4,7 @@ config.yaml
 checks.yaml
 .claude/skills/dev-skills/
 .claude/worktrees/
+.factory/
 
 # Byte-compiled / optimized / DLL files
 __pycache__/
@@ -173,5 +174,7 @@ config_toolsets.yaml
 **/.claude/settings.local.json
 .claude/settings.json
 .claude/skills/dev-skills/
+.claude/CLAUDE.md
+.codex/
 .claude-trace/
 eval_results.json

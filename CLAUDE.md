@@ -2,6 +2,16 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
+## Multi-Harness Instructions
+
+This repository supports Claude Code, Codex, Factory Droid, and other agents that
+read repository instruction files. `CLAUDE.md` is the shared source of truth and
+`AGENTS.md` must remain a symlink to it so every harness receives identical project
+instructions.
+
+Update `CLAUDE.md` for shared guidance. Do not replace `AGENTS.md` with a separate
+file. Keep harness-specific guidance in the relevant local override file.
+
 ## Repository Overview
 
 HolmesGPT is an AI-powered troubleshooting agent that connects to observability platforms (Kubernetes, Prometheus, Grafana, etc.) to automatically diagnose and analyze infrastructure and application issues. It uses an agentic loop to investigate problems by calling tools to gather data from multiple sources.
@@ -13,6 +23,31 @@ HolmesGPT is an AI-powered troubleshooting agent that connects to observability 
 # Install dependencies with Poetry
 poetry install
 ```
+
+### Local Fork CLI Setup
+
+The active local CLI runs from this checkout's `.venv`. Keep the environment
+inside the checkout so local source changes are available through the editable
+Poetry installation.
+
+```bash
+# Create the environment with Homebrew's stable Python 3.11 path
+uv venv --python /opt/homebrew/opt/python@3.11/bin/python3.11 .venv
+
+# Install the project and exact dependencies from poetry.lock
+uvx poetry install --only main
+
+# Point the global command at this checkout
+mkdir -p "$HOME/.local/bin"
+ln -sfn "$PWD/.venv/bin/holmes" "$HOME/.local/bin/holmes"
+
+# Verify the command and imported source both use this checkout
+holmes version
+.venv/bin/python -c 'import holmes; print(holmes.__file__)'
+```
+
+Run these commands from the repository root. `AGENTS.md` links to this file, so
+this setup applies to both agent instruction files.
 
 ### Testing
 
