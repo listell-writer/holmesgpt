@@ -21,7 +21,11 @@ from mcp.client.streamable_http import streamablehttp_client
 from mcp.types import Tool as MCP_Tool
 from pydantic import AnyUrl, BaseModel, Field, model_validator
 
-from holmes.common.env_vars import MCP_TOOL_CALL_TIMEOUT_SEC, SSE_READ_TIMEOUT
+from holmes.common.env_vars import (
+    DEFAULT_CLI_USER,
+    MCP_TOOL_CALL_TIMEOUT_SEC,
+    SSE_READ_TIMEOUT,
+)
 from holmes.core.oauth_config import (
     MCPOAuthConfig,
     OAuthEndpoints,
@@ -52,6 +56,19 @@ from holmes.utils.header_rendering import render_header_templates
 from holmes.utils.pydantic_utils import ToolsetConfig
 
 logger = logging.getLogger(__name__)
+
+
+def _tm_context(
+    request_context: Optional[Dict[str, Any]],
+) -> Dict[str, Any]:
+    """Context to hand the OAuth token manager, which keys tokens on user_id.
+
+    The CLI invoke path leaves request_context None (that None is also how CLI is
+    detected). The token manager refuses to store or serve a token without a
+    user_id, so map CLI callers to DEFAULT_CLI_USER. Server mode always passes a
+    real authenticated user_id, so a populated context is handed through as-is.
+    """
+    return request_context if request_context is not None else {"user_id": DEFAULT_CLI_USER}
 display_logger = logging.getLogger("holmes.display.mcp_toolset")
 
 
@@ -341,7 +358,9 @@ class RemoteMCPTool(Tool):
 
         # Try to get a token from cache → refresh → DB → disk
         mgr = _get_token_manager()
-        token = mgr.get_access_token(oauth_config, context.request_context, disk_key=disk_key)
+        token = mgr.get_access_token(
+            oauth_config, _tm_context(context.request_context), disk_key=disk_key
+        )
         if token:
             logger.info("OAuth MCP %s: token available via manager", self.toolset.name)
             return None
@@ -365,7 +384,7 @@ class RemoteMCPTool(Tool):
             token_data = cli_oauth_flow(oauth_endpoints, self.toolset.name)
             if token_data:
                 _get_token_manager().store_token(
-                    oauth_config, token_data, context.request_context,
+                    oauth_config, token_data, _tm_context(context.request_context),
                     disk_key=disk_key, store_to_disk=True,
                 )
                 logger.info("OAuth MCP %s: CLI auth successful", self.toolset.name)
@@ -869,7 +888,9 @@ class RemoteMCPToolset(Toolset):
         # known — before discovery it's None and we can't look up a token yet)
         if self.is_oauth_enabled and self._mcp_config.oauth.authorization_url:
             oauth_config = self._mcp_config.oauth
-            cached_token = _get_token_manager().get_access_token(oauth_config, request_context)
+            cached_token = _get_token_manager().get_access_token(
+                oauth_config, _tm_context(request_context)
+            )
             if cached_token:
                 final_headers["Authorization"] = f"Bearer {cached_token}"
                 logger.debug("OAuth token injected for MCP server %s", self.name)
